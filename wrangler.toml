@@ -1,0 +1,10 @@
+name = "ram-roo-thang-bot"
+main = "worker.js"
+compatibility_date = "2026-08-21"
+
+[ai]
+binding = "AI"
+
+[[kv_namespaces]]
+binding = "CHAT_HISTORY_RAM"
+id = "ใส่ KV namespace id ของคุณตรงนี้"
