@@ -1,0 +1,113 @@
+// POST /api/parking/report, GET /api/parking/status
+// MVP-SPEC-for-Dev.md §5 (Aggregation Window), §6.1-6.2
+// CONTEXT.md "Parking Check-in (Crowdsourced Report)", "Geofence Validation", "Aggregation Window"
+
+import { haversineDistanceMeters } from './utils.js';
+import {
+  getParkingZoneByKey,
+  putParkingReport,
+  listParkingReportsForZone,
+  getLastReportedAt,
+  setLastReportedAt,
+} from './data.js';
+
+const RATE_LIMIT_MINUTES = 30;
+const GEOFENCE_RADIUS_METERS = 150;
+const AGGREGATION_WINDOW_MINUTES = 30;
+
+function jsonResponse(body, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+export async function handleParkingReport(request, env) {
+  let payload;
+  try {
+    payload = await request.json();
+  } catch {
+    return jsonResponse({ error: 'Invalid JSON body' }, 400);
+  }
+
+  const { user_id, zone_id, status, user_lat, user_lng } = payload;
+  if (!user_id || !zone_id || !status || typeof user_lat !== 'number' || typeof user_lng !== 'number') {
+    return jsonResponse({ error: 'Missing required fields' }, 400);
+  }
+
+  // 1. Rate limit (MVP-SPEC §6.1)
+  const lastReportedAt = await getLastReportedAt(env, user_id);
+  if (lastReportedAt) {
+    const minutesSince = (Date.now() - new Date(lastReportedAt).getTime()) / 60000;
+    if (minutesSince < RATE_LIMIT_MINUTES) {
+      return jsonResponse({ error: 'รายงานถี่เกินไป กรุณารออีกสักครู่' }, 429);
+    }
+  }
+
+  const zone = await getParkingZoneByKey(env, zone_id);
+  if (!zone) {
+    // MVP-SPEC §8: zone_id ไม่พบ -> ตอบสุภาพ อย่า hallucinate
+    return jsonResponse({ error: 'ไม่พบข้อมูลลานจอดนี้' }, 404);
+  }
+
+  // 2. Geofence (MVP-SPEC §6.1)
+  const distance = haversineDistanceMeters(user_lat, user_lng, zone.lat, zone.lng);
+  if (distance > GEOFENCE_RADIUS_METERS) {
+    return jsonResponse({ error: 'คุณอยู่ไกลจากลานจอดนี้เกินไป' }, 422);
+  }
+
+  // 3. บันทึก
+  const reportedAt = new Date().toISOString();
+  await putParkingReport(env, {
+    zone_id,
+    reported_status: status,
+    reporter_user_id: user_id,
+    reported_at: reportedAt,
+  });
+  await setLastReportedAt(env, user_id, reportedAt);
+
+  return jsonResponse({ status: 'SUCCESS' });
+}
+
+export async function handleParkingStatus(request, env) {
+  const url = new URL(request.url);
+  const zoneId = url.searchParams.get('zone_id');
+  if (!zoneId) {
+    return jsonResponse({ error: 'ต้องระบุ zone_id' }, 400);
+  }
+
+  const status = await resolveParkingStatus(env, zoneId);
+  if (!status) {
+    return jsonResponse({ error: 'ไม่พบข้อมูลลานจอดนี้' }, 404);
+  }
+
+  return jsonResponse(status);
+}
+
+// Aggregation window logic (MVP-SPEC §5) — ใช้ซ้ำใน building.js สำหรับ GET /api/building
+export async function resolveParkingStatus(env, zoneId) {
+  const zone = await getParkingZoneByKey(env, zoneId);
+  if (!zone) return null;
+
+  const reports = await listParkingReportsForZone(env, zoneId);
+  const cutoff = Date.now() - AGGREGATION_WINDOW_MINUTES * 60000;
+  const recentReports = reports.filter((r) => new Date(r.reported_at).getTime() >= cutoff);
+
+  if (recentReports.length > 0) {
+    recentReports.sort((a, b) => new Date(b.reported_at) - new Date(a.reported_at));
+    const latest = recentReports[0];
+    return {
+      zone_id: zoneId,
+      status: latest.reported_status,
+      source: 'live_report',
+      as_of: latest.reported_at,
+    };
+  }
+
+  return {
+    zone_id: zoneId,
+    status: zone.baseline_status,
+    source: 'baseline_estimate',
+    as_of: null,
+  };
+}

@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Seed data/baseline-dataset.json เข้า BASELINE_DATA KV namespace
+#
+# ⚠️ เช็ค syntax `wrangler kv key put` กับ wrangler version ที่ใช้จริงก่อนรัน (README "เริ่มงาน (Setup)")
+#    เขียนไว้สำหรับ wrangler v3 — เวอร์ชันอื่นอาจต้องแก้ flag
+#
+# ก่อนรัน: ต้องมี jq ติดตั้งไว้, ต้อง `npx wrangler kv namespace create BASELINE_DATA` แล้ว
+# และใส่ id จริงใน worker/wrangler.toml เรียบร้อยแล้ว
+#
+# รันจาก root ของ repo: ./scripts/seed-kv.sh
+
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DATA_FILE="$ROOT_DIR/data/baseline-dataset.json"
+WORKER_DIR="$ROOT_DIR/worker"
+
+if ! command -v jq >/dev/null 2>&1; then
+  echo "ต้องติดตั้ง jq ก่อน (brew install jq / apt install jq)" >&2
+  exit 1
+fi
+
+cd "$WORKER_DIR"
+
+echo "Seeding buildings..."
+jq -c '.buildings[]' "$DATA_FILE" | while read -r building; do
+  building_id=$(echo "$building" | jq -r '.building_id')
+  echo "  building:$building_id"
+  npx wrangler kv key put "building:$building_id" "$building" --binding=BASELINE_DATA
+done
+
+echo "Seeding parking zones..."
+jq -c '.parking_zones[]' "$DATA_FILE" | while read -r zone; do
+  zone_id=$(echo "$zone" | jq -r '.zone_id')
+  echo "  parking_zone:$zone_id"
+  npx wrangler kv key put "parking_zone:$zone_id" "$zone" --binding=BASELINE_DATA
+done
+
+echo "Done."

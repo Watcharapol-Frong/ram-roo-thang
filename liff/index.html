@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>รามรู้ทาง</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+</head>
+<body>
+  <!--
+    หน้าเดียว ทำ 3 อย่างตาม MVP-SPEC-for-Dev.md §7 (ดู app.js สำหรับ logic เต็ม):
+    1. Navigation view    (?dest_id=)      — geolocation + Google Maps Embed mode=directions
+    2. Parking report view (ไม่มี query param พิเศษ) — เลือกสถานะ + POST /api/parking/report
+    3. Profile view        (?mode=profile) — consent gate (localStorage) + POST/GET/DELETE /api/schedule (docs/adr/0003)
+
+    ก่อน deploy จริง ต้องแก้ LIFF_ID / WORKER_BASE_URL / GOOGLE_MAPS_API_KEY ใน app.js (README "เริ่มงาน (Setup)")
+  -->
+  <div id="app">
+    <p>กำลังโหลด...</p>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,34 @@
+name = "ram-roo-thang-bot"
+main = "src/index.js"
+compatibility_date = "2026-08-21"
+
+[vars]
+LIFF_URL = "REPLACE_ME_LIFF_URL"
+
+[ai]
+binding = "AI"
+
+[[kv_namespaces]]
+binding = "CHAT_HISTORY_RAM"
+id = "8bd20354236540b59ad64da34f43c6ee"
+
+# ยังไม่ได้สร้าง namespace จริงใน Cloudflare — รัน `npx wrangler kv namespace create BASELINE_DATA`
+# (จากโฟลเดอร์ worker/) แล้วแทนที่ id ด้านล่างก่อน deploy (MVP-SPEC-for-Dev.md §3.1)
+[[kv_namespaces]]
+binding = "BASELINE_DATA"
+id = "REPLACE_ME_BASELINE_DATA_ID"
+
+# npx wrangler kv namespace create PARKING_REPORTS (MVP-SPEC-for-Dev.md §3.2)
+[[kv_namespaces]]
+binding = "PARKING_REPORTS"
+id = "REPLACE_ME_PARKING_REPORTS_ID"
+
+# npx wrangler kv namespace create RATE_LIMIT (MVP-SPEC-for-Dev.md §3.3)
+[[kv_namespaces]]
+binding = "RATE_LIMIT"
+id = "REPLACE_ME_RATE_LIMIT_ID"
+
+# npx wrangler kv namespace create STUDENT_SCHEDULES (docs/adr/0003, MVP-SPEC-for-Dev.md §6.5-6.7)
+[[kv_namespaces]]
+binding = "STUDENT_SCHEDULES"
+id = "REPLACE_ME_STUDENT_SCHEDULES_ID"

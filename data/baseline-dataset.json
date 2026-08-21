@@ -1,0 +1,22 @@
+{
+  "_comment": "ข้อมูลอาคาร/ลานจอดตั้งต้น (MVP-SPEC-for-Dev.md §3.1) — ต้องเพิ่มให้ครบตาม Phase 1 (README ยังไม่ได้ทำ) มีแค่ตัวอย่าง VKB อยู่",
+  "buildings": [
+    {
+      "building_id": "VKB",
+      "name_th": "อาคารวิศวกรรมศาสตร์",
+      "aliases": ["VKB", "ตึกวิศวะ"],
+      "lat": 13.753821,
+      "lng": 100.617432,
+      "nearest_parking_zone_id": "ZONE_VKB"
+    }
+  ],
+  "parking_zones": [
+    {
+      "zone_id": "ZONE_VKB",
+      "zone_name": "ลานจอดข้างตึก VKB",
+      "lat": 13.753900,
+      "lng": 100.617500,
+      "baseline_status": "YELLOW"
+    }
+  ]
+}
