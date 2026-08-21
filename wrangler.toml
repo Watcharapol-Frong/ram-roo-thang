@@ -7,4 +7,4 @@ binding = "AI"
 
 [[kv_namespaces]]
 binding = "CHAT_HISTORY_RAM"
-id = "ใส่ KV namespace id ของคุณตรงนี้"
+id = "8bd20354236540b59ad64da34f43c6ee"
