@@ -1,0 +1,6 @@
+# คัดลอกไฟล์นี้เป็น .dev.vars (ห้าม commit .dev.vars จริง) สำหรับรัน `wrangler dev` ในเครื่อง
+# secret จริงบน production ให้ตั้งด้วย `wrangler secret put <NAME>`
+
+LINE_CHANNEL_SECRET=
+LINE_CHANNEL_ACCESS_TOKEN=
+LIFF_URL=

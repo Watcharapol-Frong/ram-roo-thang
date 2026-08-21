@@ -1,5 +1,5 @@
 name = "ram-roo-thang-bot"
-main = "worker.js"
+main = "src/index.js"
 compatibility_date = "2026-08-21"
 
 [ai]
@@ -8,3 +8,19 @@ binding = "AI"
 [[kv_namespaces]]
 binding = "CHAT_HISTORY_RAM"
 id = "8bd20354236540b59ad64da34f43c6ee"
+
+# ยังไม่ได้สร้าง namespace จริงใน Cloudflare — รัน `wrangler kv namespace create BASELINE_DATA`
+# แล้วแทนที่ id ด้านล่างก่อน deploy (MVP spec §3.1)
+[[kv_namespaces]]
+binding = "BASELINE_DATA"
+id = "REPLACE_ME_BASELINE_DATA_ID"
+
+# wrangler kv namespace create PARKING_REPORTS (MVP spec §3.2)
+[[kv_namespaces]]
+binding = "PARKING_REPORTS"
+id = "REPLACE_ME_PARKING_REPORTS_ID"
+
+# wrangler kv namespace create RATE_LIMIT (MVP spec §3.3)
+[[kv_namespaces]]
+binding = "RATE_LIMIT"
+id = "REPLACE_ME_RATE_LIMIT_ID"

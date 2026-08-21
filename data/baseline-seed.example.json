@@ -1,0 +1,22 @@
+{
+  "_comment": "ตัวอย่าง seed data สำหรับ BASELINE_DATA (MVP spec §3.1) — คัดลอกเป็น baseline-seed.json แล้วแก้พิกัด/รายชื่ออาคารจริงก่อนรัน scripts/seed-baseline.mjs",
+  "buildings": [
+    {
+      "building_id": "VKB",
+      "name_th": "อาคารวิศวกรรมศาสตร์",
+      "aliases": ["VKB", "ตึกวิศวะ"],
+      "lat": 13.753821,
+      "lng": 100.617432,
+      "nearest_parking_zone_id": "ZONE_VKB"
+    }
+  ],
+  "parking_zones": [
+    {
+      "zone_id": "ZONE_VKB",
+      "zone_name": "ลานจอดข้างตึก VKB",
+      "lat": 13.753900,
+      "lng": 100.617500,
+      "baseline_status": "YELLOW"
+    }
+  ]
+}
