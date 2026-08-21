@@ -4,26 +4,19 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>รามรู้ทาง</title>
+  <link rel="stylesheet" href="style.css" />
   <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 </head>
 <body>
   <!--
-    หน้าเดียว ทำ 2 อย่างตาม MVP spec §7:
-
-    1. Navigation view (เมื่อมี ?dest_id= ใน URL)
-       - navigator.geolocation.getCurrentPosition() หาตำแหน่ง user
-       - Embed Google Maps mode=directions: origin=user, destination=พิกัดตึกจาก dest_id, mode=walking
-       - ปฏิเสธ permission -> ข้อความขอ location ใหม่ + ปุ่มลองอีกครั้ง (ไม่มี manual pin fallback)
-
-    2. Parking report view
-       - ปุ่มเลือกสถานะ (ว่าง/ปานกลาง/เต็ม) สำหรับ zone ใกล้ที่สุดจาก BASELINE_DATA
-       - ยิง POST /api/parking/report
-       - แสดงผลลัพธ์ (สำเร็จ / ไกลเกิน 150m / รายงานถี่เกิน 30 นาที)
-
-    TODO: ยังไม่ implement — เป็นแค่โครงหน้าเปล่าที่ยังใช้งานจริงไม่ได้
+    หน้าเดียว ทำ 3 อย่างตาม MVP-SPEC-for-Dev.md §7 (ดู app.js — ยังเป็นแค่โครง ไม่ implement logic จริง):
+    1. Navigation view    (?dest_id=)      — geolocation + Google Maps Embed mode=directions
+    2. Parking report view (ไม่มี query param พิเศษ) — เลือกสถานะ + POST /api/parking/report
+    3. Profile view        (?mode=profile) — consent gate (localStorage) + POST/GET/DELETE /api/schedule (docs/adr/0003)
   -->
   <div id="app">
     <p>รามรู้ทาง — LIFF (ยังไม่ implement)</p>
   </div>
+  <script src="app.js"></script>
 </body>
 </html>

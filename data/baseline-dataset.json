@@ -1,5 +1,5 @@
 {
-  "_comment": "ตัวอย่าง seed data สำหรับ BASELINE_DATA (MVP spec §3.1) — คัดลอกเป็น baseline-seed.json แล้วแก้พิกัด/รายชื่ออาคารจริงก่อนรัน scripts/seed-baseline.mjs",
+  "_comment": "ข้อมูลอาคาร/ลานจอดตั้งต้น (MVP-SPEC-for-Dev.md §3.1) — ต้องเพิ่มให้ครบตาม Phase 1 (README ยังไม่ได้ทำ) มีแค่ตัวอย่าง VKB อยู่",
   "buildings": [
     {
       "building_id": "VKB",

@@ -1,9 +1,17 @@
-// TODO (MVP spec §4): เพิ่ม function calling (getBuildingInfo / getParkingStatus จาก
-// ../data/baseline.js และ ../parking/status.js) เข้ามาใน messages/tools ของ env.AI.run
-// เมื่อ BASELINE_DATA ถูก seed แล้ว ดู docs/adr/0001-function-calling-instead-of-mcp-for-mvp.md
+// Workers AI + MCP-inspired context retrieval
+// CONTEXT.md "MCP-inspired Context Layer" — AI agent เรียก function ของตัวเองตรงๆ ไม่ใช่ MCP Server เต็มสเปก
+// ดู docs/adr/0001-function-calling-instead-of-mcp-for-mvp.md
+//
+// retrieveContext match building ด้วย keyword ง่ายๆ กับ aliases ใน BASELINE_DATA — TODO: ยังไม่ได้
+// ทดสอบกับคำถามหลากหลายรูปแบบ (README "ยังไม่ได้ทำ"), และยังไม่ใช่ LLM tool-calling จริงตาม MVP-SPEC §4
+// (ยังไม่ได้รันจริงบน @cf/qwen/qwen3-30b-a3b-fp8 — README "ยังไม่ได้ทำ")
+//
+// callWorkersAI ไม่รับ/คืน context — context อยู่ใน scope ของผู้เรียก (line.js) อยู่แล้ว จึงไม่หายไปพร้อม
+// AI error/timeout โดยธรรมชาติ (แก้ bug เดิมที่ทิ้ง context ทิ้งไปตาม README "ส่วนเสริมนอกสเปกเดิม")
 
-export async function callWorkersAI(userMessage, history, env) {
-  const systemInstruction = `
+import { listBuildings } from './data.js';
+
+const SYSTEM_INSTRUCTION = `
     คุณคือ "รามรู้ทาง" AI ผู้ช่วยนำทางและให้ข้อมูลที่จอดรถของมหาวิทยาลัยรามคำแหง
 
     บุคลิก: สุภาพ เป็นกันเอง มีความเป็นมนุษย์ กระชับ ไม่ยืดเยื้อ ช่วยเหลือเต็มที่ (มีอีโมจิประกอบพอเหมาะ)
@@ -24,14 +32,32 @@ export async function callWorkersAI(userMessage, history, env) {
     หน้าที่หลัก: ให้ข้อมูลการเดินทาง ที่จอดรถ อาคาร หากถามนอกเรื่องไม่ตอบคำถาม และเน้นย้ำว่าเป็นข้อมูลสำหรับทดสอบระบบ
   `;
 
+// จับคู่ userMessage กับ building aliases ใน BASELINE_DATA — คืน { building } หรือ null
+export async function retrieveContext(userMessage, env) {
+  let buildings = [];
+  try {
+    buildings = await listBuildings(env);
+  } catch (e) {
+    console.error('retrieveContext: listBuildings error', e);
+    return null;
+  }
+
+  const normalized = userMessage.toUpperCase();
+  const matched = buildings.find(
+    (b) => Array.isArray(b.aliases) && b.aliases.some((alias) => normalized.includes(alias.toUpperCase()))
+  );
+
+  return matched ? { building: matched } : null;
+}
+
+export async function callWorkersAI(userMessage, history, env) {
   let messages = [
-    { role: "system", content: systemInstruction }
+    { role: "system", content: SYSTEM_INSTRUCTION }
   ];
 
   // ตรวจสอบและกรองประวัติแชท ป้องกันค่า Null หรือ Undefined ที่ทำให้เกิด _parseError
   if (Array.isArray(history)) {
     history.forEach(msg => {
-      // ตรวจสอบว่า msg มีอยู่จริง, text เป็น string และไม่เป็นค่าว่าง
       if (msg && typeof msg.text === 'string' && msg.text.trim() !== '') {
         messages.push({
           role: msg.role === 'model' ? 'assistant' : 'user',
@@ -41,7 +67,6 @@ export async function callWorkersAI(userMessage, history, env) {
     });
   }
 
-  // ใส่คำถามล่าสุด
   messages.push({ role: "user", content: userMessage });
 
   try {
@@ -49,7 +74,6 @@ export async function callWorkersAI(userMessage, history, env) {
       messages: messages
     });
 
-    // ป้องกันกรณี API คืนค่ากลับมาเป็นค่าว่าง
     if (!response || !response.response) {
        throw new Error("ได้รับข้อมูลเปล่า (Empty Response) จาก Workers AI");
     }
@@ -65,7 +89,6 @@ export async function callWorkersAI(userMessage, history, env) {
 
     return { aiResponseText: aiResponse, newHistory: history };
   } catch (error) {
-    // พิมพ์ข้อมูล Payload ทั้งหมดลง Log เพื่อให้รู้ว่ามีอะไรแปลกปลอมส่งไปหรือไม่
     console.error("Payload ส่งไปยัง AI:", JSON.stringify(messages, null, 2));
     console.error("Workers AI Error รายละเอียด:", error.message || error);
 

@@ -10,7 +10,7 @@ Full Vision spec (Proposal/SR&TD) ออกแบบให้มี MCP Server �
 
 ## การตัดสินใจ
 
-MVP ใช้ **function calling ที่ Workers AI เรียกเอง** ภายใน Worker เดียวกัน (ดู `src/ai/client.js`, `src/ai/functions.js`) โดย function ทั้งสองตัวอ่านข้อมูลตรงจาก Cloudflare KV (`BASELINE_DATA`, `PARKING_REPORTS`) ไม่มี server, protocol, หรือ deployment แยกต่างหาก
+MVP ใช้ **function calling ที่ Workers AI เรียกเอง** ภายใน Worker เดียวกัน (ดู `worker/src/ai.js`) โดย function ทั้งสองตัวอ่านข้อมูลตรงจาก Cloudflare KV (`BASELINE_DATA`, `PARKING_REPORTS` ผ่าน `worker/src/data.js`) ไม่มี server, protocol, หรือ deployment แยกต่างหาก
 
 ## ผลที่ตามมา
 

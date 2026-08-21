@@ -1,102 +1,82 @@
-# รามรู้ทาง (RAM-ROO-THANG) — Bot Worker
+# รามรู้ทาง (RAM-ROO-THANG) — MVP
 
-LINE OA + Cloudflare Worker ที่ตอบแชตด้วย Workers AI, นำทางเดินเท้าไปอาคาร, และรับ/แสดงสถานะลานจอดรถแบบ crowdsourced
+โครงสร้าง project สำหรับเริ่มงานตาม `MVP-SPEC-for-Dev.md`
 
-> ดู scope เต็มที่ `MVP Spec` (ส่งแยกให้ทีม dev), `CONTEXT.md` สำหรับนิยามศัพท์ และ `docs/adr/` สำหรับเหตุผลการตัดสินใจทางเทคนิค **ห้ามเพิ่มฟีเจอร์นอก MVP scope โดยไม่ยืนยันก่อน**
+## เอกสารต้องอ่านก่อนเริ่ม (เรียงตามลำดับ)
+1. `CONTEXT.md` — นิยามศัพท์ (MVP vs Full Vision, ห้ามสับสน)
+2. `MVP-SPEC-for-Dev.md` — สเปกเต็ม รวม Out of Scope
+3. `docs/adr/` — เหตุผลของการตัดสินใจสำคัญ 2 เรื่อง (function calling แทน MCP, crowdsourced parking)
 
-## โครงสร้างโปรเจกต์
+## โครงสร้าง Project
 
 ```
-src/
-  index.js            entry point (Worker fetch handler)
-  router.js           route ตาม path/method ไปยัง handler ที่เกี่ยวข้อง
-  line/
-    webhook.js         verify signature + parse LINE webhook events
-    signature.js        HMAC signature verification
-    events.js           handleEvent — logic หลักตอบแชต
-    reply.js             เรียก LINE Messaging API (reply, loading animation)
-    flexMessage.js       สร้าง Flex Message การ์ดอาคาร
-  ai/
-    client.js           เรียก Workers AI (@cf/qwen/qwen3-30b-a3b-fp8)
-    functions.js         function calling stubs (getBuildingInfo, getParkingStatus — TODO)
-  parking/
-    report.js            POST /api/parking/report (TODO — stub 501)
-    status.js             GET /api/parking/status (TODO — stub 501)
-    geofence.js            Haversine distance (implement แล้ว)
-  data/
-    baseline.js          KV accessor สำหรับ BASELINE_DATA
-
-liff/
-  index.html            โครง LIFF page เปล่า (navigation + parking report view — TODO)
-
-data/
-  baseline-seed.example.json   ตัวอย่างข้อมูลอาคาร/ลานจอดสำหรับ seed
-
-scripts/
-  seed-baseline.mjs     แปลง baseline-seed.json -> wrangler kv bulk put format
-
-docs/adr/                Architecture Decision Records
-CONTEXT.md                นิยามศัพท์
-wrangler.toml              Cloudflare Worker config (KV bindings, AI binding)
+ram-roo-thang/
+├── CONTEXT.md
+├── MVP-SPEC-for-Dev.md
+├── docs/adr/                  — เหตุผลการตัดสินใจ (0001-0003)
+├── worker/                    — Cloudflare Worker (backend ทั้งหมด)
+│   ├── wrangler.toml
+│   └── src/
+│       ├── index.js           — router หลัก (LINE webhook + API endpoints)
+│       ├── line.js            — LINE webhook: signature verify, chat history, reply
+│       ├── ai.js               — Workers AI + MCP-inspired context retrieval (มี fallback ที่ยังใช้ context ได้แม้ AI timeout)
+│       ├── data.js             — KV access: baseline data, parking, geofence, rate limit, exam schedule
+│       ├── parking.js          — POST /api/parking/report, GET /api/parking/status
+│       ├── building.js         — GET /api/building, GET /api/buildings
+│       ├── schedule.js         — POST/GET/DELETE /api/schedule (ไม่มี PII — ADR-0003)
+│       └── utils.js            — Haversine distance
+├── liff/                      — หน้า LIFF (nav / parking report / profile view)
+│   ├── index.html
+│   ├── app.js
+│   └── style.css
+├── data/
+│   └── baseline-dataset.json  — ข้อมูลอาคาร/ลานจอดตั้งต้น (ต้องเพิ่มให้ครบตาม Phase 1)
+└── scripts/
+    └── seed-kv.sh              — สคริปต์ seed baseline dataset เข้า KV
 ```
 
-## สถานะการ implement เทียบกับ MVP spec
+## ส่วนเสริมนอกสเปกเดิม
 
-| ส่วน | สถานะ |
-|---|---|
-| LINE webhook + Workers AI chat (spec เดิม) | ✅ ทำงานได้ (ย้ายจาก `worker.js` เดิมมาอยู่ใน `src/line/`, `src/ai/client.js` แบบ behavior เดิมทุกประการ) |
-| `src/parking/geofence.js` (Haversine) | ✅ implement แล้ว |
-| `src/data/baseline.js` (KV accessor) | ✅ implement แล้ว (แค่ get/parse ตรงๆ) |
-| Function calling (`getBuildingInfo`, `getParkingStatus`) — spec §4 | 🔲 stub เท่านั้น รอ seed data + wiring เข้า `ai/client.js` |
-| `POST /api/parking/report` — spec §6.1 | 🔲 stub (คืน 501) รอ implement validation + write |
-| `GET /api/parking/status` — spec §6.2 | 🔲 stub (คืน 501) รอ implement aggregation logic (spec §5) |
-| LIFF page (navigation + parking report view) — spec §7 | 🔲 โครงหน้าเปล่าเท่านั้น |
-| `BASELINE_DATA` / `PARKING_REPORTS` / `RATE_LIMIT` KV namespaces | 🔲 เพิ่ม binding ใน `wrangler.toml` แล้ว แต่ยังไม่ได้สร้าง namespace จริงบน Cloudflare (ดูด้านล่าง) |
+ระหว่างเขียนโครงเจอช่องว่างที่ MVP-SPEC ฉบับแรกไม่ได้ระบุไว้ (ไม่ใช่ scope creep แต่เป็น plumbing/reliability ที่ขาดไม่ได้):
 
-## Setup
+- **`GET /api/building?building_id=`** และ **`GET /api/buildings`** — LIFF อ่าน Cloudflare KV ตรงๆ จาก browser ไม่ได้ ต้องมี endpoint คืนพิกัด/ลิสต์อาคารให้ client ใช้ (อัปเดตใน spec section 6.3-6.4 แล้ว)
+- **แก้ bug ใน `ai.js`** — เดิมถ้า Workers AI timeout ระบบจะทิ้ง context (ตึกที่หาเจอแล้ว) ทำให้ nav ใช้งานไม่ได้แม้หาตึกเจอ ตอนนี้ fallback ยังคืน context เดิมได้ (สำคัญมากสำหรับงานถ่ายทอดสด — ดู ADR ที่เกี่ยวข้อง)
+- **Schedule intent ข้าม AI ไปเลย** — ลดจุดเสี่ยง timeout สำหรับฟีเจอร์ที่ไม่จำเป็นต้องใช้ NLU เลย
 
-### 1. ติดตั้ง dependency
+## เริ่มงาน (Setup)
 
 ```bash
+cd worker
 npm install
-```
+npx wrangler kv namespace create CHAT_HISTORY_RAM
+npx wrangler kv namespace create BASELINE_DATA
+npx wrangler kv namespace create PARKING_REPORTS
+npx wrangler kv namespace create RATE_LIMIT
+npx wrangler kv namespace create STUDENT_SCHEDULES
+# เอา id ที่ได้ไปแทนที่ REPLACE_ME ใน wrangler.toml
 
-### 2. สร้าง KV namespace ที่ยังไม่มี
+npx wrangler secret put LINE_CHANNEL_SECRET
+npx wrangler secret put LINE_CHANNEL_ACCESS_TOKEN
 
-`CHAT_HISTORY_RAM` มี id อยู่แล้วใน `wrangler.toml` ส่วนอีก 3 ตัวต้องสร้างเองแล้วแทนที่ `REPLACE_ME_*` ในไฟล์:
+cd ..
+./scripts/seed-kv.sh   # ⚠️ เช็ค syntax กับ wrangler version ก่อนรัน
 
-```bash
-wrangler kv namespace create BASELINE_DATA
-wrangler kv namespace create PARKING_REPORTS
-wrangler kv namespace create RATE_LIMIT
-```
-
-### 3. ตั้งค่า secrets สำหรับรันในเครื่อง
-
-```bash
-cp .dev.vars.example .dev.vars
-# แก้ค่า LINE_CHANNEL_SECRET, LINE_CHANNEL_ACCESS_TOKEN, LIFF_URL
-```
-
-Production ใช้ `wrangler secret put <NAME>` แทน
-
-### 4. รัน dev server
-
-```bash
+cd worker
 npm run dev
 ```
 
-### 5. Deploy
+LIFF: แก้ `LIFF_ID`, `WORKER_BASE_URL`, `GOOGLE_MAPS_API_KEY` ใน `liff/app.js` ก่อน deploy (สร้าง LIFF app ผ่าน LINE Developers Console แยกต่างหาก ไม่ได้รวมอยู่ในโค้ดนี้)
 
-```bash
-npm run deploy
-```
+## ยังไม่ได้ทำ / ต้องทำต่อ
 
-## Seed baseline data
+- [ ] เพิ่มพิกัดอาคาร/ลานจอดจริงให้ครบใน `data/baseline-dataset.json` (Phase 1 ตามแผน)
+- [ ] ทดสอบ `retrieveContext` ใน `ai.js` — ตอนนี้ match building ด้วย keyword ง่ายๆ ยังไม่ได้ทดสอบกับคำถามหลากหลายรูปแบบ
+- [ ] ทดสอบ Workers AI function calling / prompt จริงบน `@cf/qwen/qwen3-30b-a3b-fp8` — ยังไม่ได้รันจริง
+- [ ] ตรวจสอบ `wrangler kv key put` syntax ใน `scripts/seed-kv.sh` ให้ตรงกับ wrangler version ที่ใช้
+- [ ] วางแผน seed ข้อมูล parking check-in จริงก่อนวันเดโม (คนละเรื่องกับโค้ด — ต้องมีคนเดินไปเช็คอินจริง)
+- [ ] สร้าง LIFF app จริงผ่าน LINE Developers Console แล้วใส่ค่าใน `liff/app.js`
+- [ ] **โหลดทดสอบจริงกับคน 100-200 คนพร้อมกันก่อนวันงาน** (ยืมเพื่อน/คนรู้จักช่วยยิง request พร้อมกัน) — infra (Workers/KV/Maps Embed) รองรับตามทฤษฎี แต่ยังไม่เคยทดสอบโหลดจริงเลย
+- [ ] ทดสอบ flow ผ่านแชท AI แบบเห็นผลจริงว่า timeout fallback ทำงานถูกต้อง (ลองปิด/หน่วง AI response ทดสอบ)
+- [ ] เตรียม QR code ที่ชี้ไปหา LINE OA (ไม่ใช่ LIFF ตรงๆ เพราะ Q2 confirmed ว่าต้องผ่านแชทก่อน)
 
-```bash
-cp data/baseline-seed.example.json data/baseline-seed.json
-# แก้พิกัด/รายชื่ออาคารและลานจอดให้ตรงของจริง
-node scripts/seed-baseline.mjs
-# รันคำสั่ง wrangler ที่ script พิมพ์ออกมา
-```
+**ห้ามทำ**: อะไรก็ตามใน section 9 (Out of Scope) ของ `MVP-SPEC-for-Dev.md` โดยไม่คุยกันก่อน
