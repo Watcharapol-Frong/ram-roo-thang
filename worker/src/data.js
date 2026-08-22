@@ -36,6 +36,18 @@ export async function listBuildings(env) {
   return listByPrefix(env.BASELINE_DATA, 'building:');
 }
 
+// --- services (บริการ/ขั้นตอนราชการ — team กรอกเอง เหมือน building/parking_zone) ---
+// docs/adr/0004-service-faq-vs-community-poi.md
+
+export async function getServiceByKey(env, serviceId) {
+  const raw = await env.BASELINE_DATA.get(`service:${serviceId}`);
+  return raw ? JSON.parse(raw) : null;
+}
+
+export async function listServices(env) {
+  return listByPrefix(env.BASELINE_DATA, 'service:');
+}
+
 // --- PARKING_REPORTS (MVP-SPEC-for-Dev.md §3.2) ---
 
 export async function putParkingReport(env, report, ttlSeconds) {

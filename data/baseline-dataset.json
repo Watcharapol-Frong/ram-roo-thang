@@ -18,5 +18,9 @@
       "lng": 100.617500,
       "baseline_status": "YELLOW"
     }
-  ]
+  ],
+  "_services_comment": "บริการ/ขั้นตอนราชการ (เช่น ยื่นขอใบเช็คเกรด) — ทีมกรอกเองภายหลังด้วยข้อมูลที่ยืนยันแล้วจริงเท่านั้น ห้ามใส่ข้อมูลที่เดา/ไม่ยืนยัน (ดู docs/adr/0004) รูปแบบ: { service_id, name, aliases, building_id (ไม่บังคับ), steps }",
+  "services": [],
+  "_poi_comment": "จุดสนใจแบบ community-submitted (ร้านอาหาร ฯลฯ) — ยังไม่เปิดใช้งานใน MVP นี้ เป็นแค่โครง placeholder เก็บ shape ไว้ล่วงหน้า ยังไม่มี endpoint/logic ใดๆ อ่านค่านี้ (ดู MVP-SPEC-for-Dev.md §9 Out of Scope: Community POI + Moderation และ docs/adr/0004)",
+  "poi": []
 }

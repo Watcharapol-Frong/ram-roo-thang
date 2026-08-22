@@ -52,6 +52,14 @@ _Avoid_: ข้อมูลผู้ใช้ (คำกำกวมที่ท
 ฟีเจอร์ใน MVP ที่ให้ user บันทึกรหัสวิชา/อาคารสอบ/วันเวลาสอบ ผูกกับ LINE userId เท่านั้น **ไม่เก็บชื่อ-เบอร์โทร** ต่างจาก "User & Student Profile" ใน Full Vision ที่มี Push Notification อัตโนมัติและข้อมูลส่วนตัวเต็มรูปแบบ — MVP มีแค่บันทึก/ดู/ลบ ไม่มี proactive alert
 _Avoid_: User & Student Profile (คำนี้ใช้เฉพาะ Full Vision ที่มี PII+cron alert), ตารางสอบส่วนบุคคล (กำกวมกับ Full Vision)
 
+**Service FAQ (บริการ/ขั้นตอนราชการ)**:
+ข้อมูลคงที่ที่ทีมกรอกไว้ล่วงหน้า (เหมือน Baseline Dataset) บอกว่าธุระ/เอกสารต่างๆ (เช่น ยื่นขอใบเช็คเกรด) ต้องไปที่ไหน ทำยังไง — ต่างจาก POI ตรงที่**ไม่มี user ทั่วไป submit เอง** จึงไม่ต้องมี moderation workflow ยังไม่มีข้อมูลจริงถูกกรอกใน MVP นี้ (ดู docs/adr/0004)
+_Avoid_: POI, Community POI (คนละ lifecycle กัน อย่าใช้ปนกัน)
+
+**POI (Point of Interest) — Community-submitted**:
+จุดสนใจ (ร้านอาหาร ฯลฯ) ที่วางแผนให้ user ทั่วไป submit เองได้ในอนาคต ต้องผ่าน workflow ตรวจสอบ/อนุมัติก่อนถึงจะโผล่ในคำตอบของ AI ได้ — คือ "Community POI + Moderation" ที่ระบุไว้ใน MVP-SPEC §9 Out of Scope **ยังไม่เริ่มพัฒนาในรอบนี้** มีแค่โครง placeholder ว่างเก็บ shape ไว้ล่วงหน้าเท่านั้น (ดู docs/adr/0004)
+_Avoid_: Service FAQ, Baseline Dataset (คนละ lifecycle กัน — POI มาจาก user ทั่วไป ไม่ใช่ทีมกรอก), สถานะปัจจุบัน/ใช้งานได้แล้ว (ฟีเจอร์นี้ยังไม่มีอยู่จริง ต้องพูดเป็นแผนอนาคตเสมอ)
+
 **Consent Gate (Lightweight)**:
 หน้าจอยืนยันความเข้าใจก่อนใช้ Student Exam Schedule ใน MVP — เป็นแค่ UI acknowledgment (เก็บ flag ใน localStorage ฝั่ง client) **ไม่ใช่ PDPA consent flow ตามกฎหมายเต็มรูปแบบ** เพราะไม่มี PII ให้ขอความยินยอมตามกฎหมายอยู่แล้ว ต่างจาก "Consent Management Flow" ใน Full Vision ที่ผูกกับการเก็บ PII จริง
 _Avoid_: Consent Management Flow, PDPA Consent (คำเหล่านี้สื่อถึงกระบวนการทางกฎหมายเต็มรูปแบบซึ่งไม่มีใน MVP)
