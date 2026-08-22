@@ -1,14 +1,34 @@
 // Router หลัก — LINE webhook + API endpoints (MVP-SPEC-for-Dev.md §2, §6)
 
 import { handleWebhookRequest } from './line.js';
-import { handleParkingReport, handleParkingStatus } from './parking.js';
+import { handleParkingReport, handleParkingStatus, handleParkingZone } from './parking.js';
 import { handleGetBuilding, handleListBuildings } from './building.js';
 import { handlePostSchedule, handleGetSchedule, handleDeleteSchedule } from './schedule.js';
+
+// LIFF (liff/) เป็น static site คนละ origin กับ worker นี้เสมอ — ต้องมี CORS ให้ /api/* ถึงจะเรียก
+// fetch() จากฝั่ง browser ได้จริง (ไม่มีมาก่อนหน้านี้ ทำให้ทุก endpoint ใต้ /api/ เรียกจาก LIFF ไม่ได้เลย
+// ไม่ใช่แค่ปัญหาตอน dev — เป็น pre-existing bug ที่บล็อก LIFF ทั้งหน้าใน production ด้วย)
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+};
 
 export default {
   async fetch(request, env, ctx) {
     try {
-      return await route(request, env, ctx);
+      const url = new URL(request.url);
+      if (request.method === 'OPTIONS' && url.pathname.startsWith('/api/')) {
+        return new Response(null, { status: 204, headers: CORS_HEADERS });
+      }
+
+      const response = await route(request, env, ctx);
+      if (url.pathname.startsWith('/api/')) {
+        const headers = new Headers(response.headers);
+        for (const [key, value] of Object.entries(CORS_HEADERS)) headers.set(key, value);
+        return new Response(response.body, { status: response.status, headers });
+      }
+      return response;
     } catch (error) {
       console.error('Error in fetch:', error);
       return new Response('Internal Server Error', { status: 500 });
@@ -30,6 +50,9 @@ async function route(request, env, ctx) {
   }
   if (method === 'GET' && pathname === '/api/parking/status') {
     return handleParkingStatus(request, env);
+  }
+  if (method === 'GET' && pathname === '/api/parking/zone') {
+    return handleParkingZone(request, env);
   }
 
   if (method === 'GET' && pathname === '/api/building') {

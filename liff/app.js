@@ -1,30 +1,84 @@
 // แก้ค่าด้านล่างก่อน deploy จริง (README "เริ่มงาน (Setup)")
-const LIFF_ID = 'REPLACE_ME_LIFF_ID';
-const WORKER_BASE_URL = 'REPLACE_ME_WORKER_BASE_URL'; // เช่น https://ram-roo-thang-bot.<subdomain>.workers.dev
+const LIFF_ID = '2011201463-2rdSwrwB';
+const WORKER_BASE_URL = 'https://ram-roo-thang-bot.frongbook.workers.dev';
 const GOOGLE_MAPS_API_KEY = 'REPLACE_ME_GOOGLE_MAPS_API_KEY';
 
 const CONSENT_STORAGE_KEY = 'ram-roo-thang:schedule-consent';
 
-const PARKING_STATUS_LABEL = {
-  GREEN: 'ว่าง',
-  YELLOW: 'ปานกลาง',
-  RED: 'เต็ม',
+// Module 2: Context-Aware Map & Navigation Engine (Module_2_Technical_Specification.md §2) —
+// single source of truth ของพิกัดมาตรฐาน ทั้งหมดในไฟล์นี้อ้างอิงจากตรงนี้ที่เดียว
+const CAMPUS_CONSTANTS = {
+  DEFAULT_ORIGIN: {
+    lat: 13.758915516230301,
+    lng: 100.61822407295021,
+    googleMapsUrl: 'https://maps.app.goo.gl/2Vb7uyvJAbz62az89',
+  },
+  GEOFENCE: { minLat: 13.7510, maxLat: 13.7610, minLng: 100.6120, maxLng: 100.6250 },
+  INITIAL_VIEW: { center: { lat: 13.7565, lng: 100.6185 }, zoom: 17 },
 };
 
-liff.init({ liffId: LIFF_ID, withLoginOnExternalBrowser: true }).then(main).catch((err) => {
+const PARKING_STATUS_LABEL = { GREEN: 'ว่าง', YELLOW: 'ปานกลาง', RED: 'เต็ม' };
+const PARKING_STATUS_COLOR = { GREEN: '#2ecc71', YELLOW: '#f1c40f', RED: '#e74c3c' };
+
+// Global State Architecture (Module_2_Technical_Specification.md §5) — เก็บไว้ให้ฟีเจอร์ในอนาคต
+// (Find My Car, Community Map, RU Portal Sync) มีจุดต่อขยายชัดเจน โมดูลนี้ implement แค่ user/target/map
+// ตามที่ Acceptance Criteria ต้องการจริงเท่านั้น ไม่ได้ build ฟีเจอร์อนาคตพวกนั้นเต็มรูปแบบ
+const appState = {
+  user: {
+    location: null,
+    isInsideCampus: false,
+    isGpsAllowed: false,
+    lineUserId: null,
+  },
+  target: null, // { id, name, type: 'BUILDING'|'PARKING'|'MY_CAR'|'COMMUNITY', coords: {lat,lng} }
+  map: {
+    instance: null,
+    is3DMode: false,
+    activeTab: 'nav',
+  },
+};
+
+// LIFF init และ Google Maps script โหลดแบบขนานกันคนละทาง (Google เรียก callback ของตัวเองตอนพร้อม
+// ดู index.html) — ต้องรอทั้งคู่เสร็จก่อนค่อยเริ่ม main()
+let liffReady = false;
+let mapsReady = false;
+
+liff.init({ liffId: LIFF_ID, withLoginOnExternalBrowser: true }).then(() => {
+  liffReady = true;
+  tryStart();
+}).catch((err) => {
   console.error('LIFF init error', err);
   renderError('เปิด LIFF ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
 });
 
+// Google Maps JS API เรียกชื่อนี้เองหลังโหลดสคริปต์เสร็จ (script tag ใน index.html มี &callback=initApp)
+function initApp() {
+  mapsReady = true;
+  tryStart();
+}
+
+function tryStart() {
+  if (liffReady && mapsReady) main();
+}
+
 function main() {
   const params = new URLSearchParams(window.location.search);
+  const mode = params.get('mode');
 
-  if (params.has('dest_id')) {
-    renderNavigationView(params.get('dest_id'));
-  } else if (params.get('mode') === 'profile') {
+  if (mode === 'profile') {
     renderProfileView();
+    return;
+  }
+
+  // Flex Message Integration (Module_2_Technical_Specification.md §6)
+  // dest_id&mode=nav -> เลือกอาคารให้ทันที, zone_id&mode=parking -> เลือกลานจอดให้ทันที
+  // ไม่มี param เลย -> Single Canvas Overview (§1) ให้ผู้ใช้แตะเลือกเองจากแผนที่
+  if (params.has('dest_id')) {
+    renderMapView({ presetDestId: params.get('dest_id') });
+  } else if (mode === 'parking' && params.has('zone_id')) {
+    renderMapView({ presetZoneId: params.get('zone_id') });
   } else {
-    renderParkingReportView();
+    renderMapView({});
   }
 }
 
@@ -80,6 +134,7 @@ async function getUserId() {
   const profile = await liff.getProfile();
   // เก็บแค่ userId เท่านั้น — ไม่ใช้/ไม่ส่ง displayName, pictureUrl ต่อ (CONTEXT.md "LINE userId (Session Identifier)")
   cachedUserId = profile.userId;
+  appState.user.lineUserId = cachedUserId;
   return cachedUserId;
 }
 
@@ -104,63 +159,246 @@ function formatExamAt(isoString) {
   return date.toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' });
 }
 
-// --- Navigation view (MVP-SPEC §7) ---
-// ?dest_id= -> geolocation + GET /api/building + Google Maps Embed mode=directions
+// --- Map view: One-Box Context-Driven Navigation (Module_2_Technical_Specification.md §1-4) ---
 
-async function renderNavigationView(destId) {
+function isWithinCampusBounds({ lat, lng }) {
+  const g = CAMPUS_CONSTANTS.GEOFENCE;
+  return lat >= g.minLat && lat <= g.maxLat && lng >= g.minLng && lng <= g.maxLng;
+}
+
+async function renderMapView({ presetDestId, presetZoneId }) {
   const container = getApp();
-  container.innerHTML = '<p>กำลังโหลดข้อมูลอาคาร...</p>';
+  container.innerHTML = `
+    <div class="map-container">
+      <div id="map"></div>
+      <div id="notice-bar-slot"></div>
+      <button class="layer-toggle-btn" id="layer-toggle-btn">🏢 เปิดมุมมอง 3D</button>
+      <div id="action-sheet-slot"></div>
+    </div>
+  `;
+  renderModeBar(container, 'nav');
+  document.getElementById('layer-toggle-btn').addEventListener('click', toggle3D);
 
-  let buildingData;
+  appState.map.instance = new google.maps.Map(document.getElementById('map'), {
+    center: CAMPUS_CONSTANTS.INITIAL_VIEW.center,
+    zoom: CAMPUS_CONSTANTS.INITIAL_VIEW.zoom,
+    mapTypeId: 'roadmap',
+    disableDefaultUI: true,
+    zoomControl: true,
+    mapTypeControl: false,
+  });
+  RouteCalculator.init(appState.map.instance);
+  appState.map.instance.addListener('center_changed', updateLayerToggleAvailability);
+  updateLayerToggleAvailability();
+
+  let buildingsData;
   try {
-    buildingData = await fetchJSON(`/api/building?building_id=${encodeURIComponent(destId)}`);
+    buildingsData = await fetchJSON('/api/buildings');
   } catch (err) {
-    // MVP-SPEC §8: building_id ไม่พบ -> ตอบสุภาพ อย่า hallucinate ชื่อ/ตำแหน่ง
-    renderError('ไม่พบข้อมูลอาคารนี้ครับ กรุณาลองใหม่จากเมนูแชท');
+    renderError('โหลดข้อมูลอาคารไม่สำเร็จ กรุณาลองใหม่');
+    return;
+  }
+  const buildings = buildingsData.buildings || [];
+  placeBuildingMarkers(buildings);
+  await placeParkingMarkers(buildings);
+
+  if (presetDestId) {
+    const building = buildings.find((b) => b.building_id === presetDestId);
+    if (!building) {
+      renderError('ไม่พบข้อมูลอาคารนี้ครับ กรุณาลองใหม่จากเมนูแชท');
+      return;
+    }
+    await selectTarget({ id: building.building_id, name: building.name_th, type: 'BUILDING', coords: { lat: building.lat, lng: building.lng } });
+  } else if (presetZoneId) {
+    let zoneData;
+    try {
+      zoneData = await fetchJSON(`/api/parking/zone?zone_id=${encodeURIComponent(presetZoneId)}`);
+    } catch (err) {
+      renderError('ไม่พบข้อมูลลานจอดนี้ครับ กรุณาลองใหม่จากเมนูแชท');
+      return;
+    }
+    await selectTarget({ id: zoneData.zone.zone_id, name: zoneData.zone.zone_name, type: 'PARKING', coords: { lat: zoneData.zone.lat, lng: zoneData.zone.lng } });
+  }
+}
+
+function placeBuildingMarkers(buildings) {
+  buildings.forEach((b) => {
+    const marker = new google.maps.Marker({
+      position: { lat: b.lat, lng: b.lng },
+      map: appState.map.instance,
+      title: b.name_th,
+    });
+    marker.addListener('click', () => {
+      selectTarget({ id: b.building_id, name: b.name_th, type: 'BUILDING', coords: { lat: b.lat, lng: b.lng } });
+    });
+  });
+}
+
+// สีหมุดลานจอด = สถานะความหนาแน่นปัจจุบัน (เขียว/เหลือง/แดง) ตาม §1 — ดึงทีละ zone ที่ไม่ซ้ำกัน
+// (หลายอาคารอาจแชร์ zone เดียวกัน dedupe ด้วย nearest_parking_zone_id กันยิง fetch ซ้ำ)
+async function placeParkingMarkers(buildings) {
+  const uniqueZoneIds = [...new Set(buildings.map((b) => b.nearest_parking_zone_id).filter(Boolean))];
+  const zoneDetails = await Promise.all(
+    uniqueZoneIds.map((id) => fetchJSON(`/api/parking/zone?zone_id=${encodeURIComponent(id)}`).catch(() => null))
+  );
+
+  zoneDetails.filter(Boolean).forEach(({ zone, parking_status: parkingStatus }) => {
+    const status = (parkingStatus && parkingStatus.status) || zone.baseline_status;
+    const marker = new google.maps.Marker({
+      position: { lat: zone.lat, lng: zone.lng },
+      map: appState.map.instance,
+      title: `${zone.zone_name} (${PARKING_STATUS_LABEL[status] || status})`,
+      icon: {
+        path: google.maps.SymbolPath.CIRCLE,
+        scale: 8,
+        fillColor: PARKING_STATUS_COLOR[status] || '#999999',
+        fillOpacity: 1,
+        strokeColor: '#ffffff',
+        strokeWeight: 2,
+      },
+    });
+    marker.addListener('click', () => {
+      selectTarget({ id: zone.zone_id, name: zone.zone_name, type: 'PARKING', coords: { lat: zone.lat, lng: zone.lng } });
+    });
+  });
+}
+
+// Bottom Mode Selector Bar — แปะท้ายทุกหน้าในกลุ่มแผนที่/ที่จอดรถ "ร้านค้า/ซุ้ม" ยังไม่มี POI
+// submission/moderation backend (docs/adr/0004, MVP-SPEC §9 Out of Scope) จึงมีแค่ tab โชว์ empty
+// state เฉยๆ ไม่ได้ทำระบบเบื้องหลังเพิ่ม
+function renderModeBar(container, activeMode) {
+  const wrapper = document.createElement('div');
+  wrapper.innerHTML = `
+    <div class="mode-bar">
+      <button class="mode-bar-item${activeMode === 'nav' ? ' active' : ''}" data-mode="nav">🗺 นำทาง</button>
+      <button class="mode-bar-item${activeMode === 'parking' ? ' active' : ''}" data-mode="parking">🚗 ที่จอดรถ</button>
+      <button class="mode-bar-item${activeMode === 'shop' ? ' active' : ''}" data-mode="shop">🍜 ร้านค้า/ซุ้ม</button>
+    </div>
+  `;
+  const bar = wrapper.firstElementChild;
+  container.appendChild(bar);
+
+  bar.querySelectorAll('.mode-bar-item').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const mode = btn.dataset.mode;
+      if (mode === activeMode) return;
+      appState.map.activeTab = mode;
+      if (mode === 'parking') renderParkingReportView();
+      else if (mode === 'shop') renderShopPlaceholderView();
+      else if (mode === 'nav') renderMapView({});
+    });
+  });
+}
+
+function renderShopPlaceholderView() {
+  const container = getApp();
+  container.innerHTML = `
+    <div class="card">
+      <h2>ร้านค้า/ซุ้ม</h2>
+      <p class="muted">ยังไม่มีข้อมูลร้านค้าในระบบครับ (ฟีเจอร์นี้อยู่ระหว่างวางแผน)</p>
+    </div>
+  `;
+  renderModeBar(container, 'shop');
+}
+
+// เปิด 3D (Hybrid + Tilt) ได้เฉพาะตอนศูนย์กลางแผนที่อยู่ในรั้ว ม.รามฯ เท่านั้น (AC-05) — ใช้ภาพถ่าย
+// ดาวเทียม + มุมเอียงของ Google เอง ไม่ต้องดูแลข้อมูลรูปทรง/ความสูงตึกเองเลย
+function toggle3D() {
+  const btn = document.getElementById('layer-toggle-btn');
+  if (!btn || btn.disabled || !appState.map.instance) return;
+  appState.map.is3DMode = !appState.map.is3DMode;
+  applyViewMode();
+  btn.textContent = appState.map.is3DMode ? '🗺 กลับสู่ 2D' : '🏢 เปิดมุมมอง 3D';
+}
+
+function applyViewMode() {
+  const map = appState.map.instance;
+  if (appState.map.is3DMode) {
+    map.setMapTypeId('hybrid');
+    map.setTilt(45);
+  } else {
+    map.setMapTypeId('roadmap');
+    map.setTilt(0);
+  }
+}
+
+function updateLayerToggleAvailability() {
+  const btn = document.getElementById('layer-toggle-btn');
+  if (!btn || !appState.map.instance) return;
+  const center = appState.map.instance.getCenter();
+  const allowed = isWithinCampusBounds({ lat: center.lat(), lng: center.lng() });
+  btn.disabled = !allowed;
+  if (!allowed && appState.map.is3DMode) {
+    appState.map.is3DMode = false;
+    applyViewMode();
+    btn.textContent = '🏢 เปิดมุมมอง 3D';
+  }
+}
+
+// ผู้ใช้แตะเลือกอาคาร/ลานจอดจากแผนที่ (หรือถูกเลือกให้อัตโนมัติจาก dest_id/zone_id) — จุดเริ่มต้นของ
+// Context Routing Matrix (§3) ทั้งหมด
+async function selectTarget(target) {
+  appState.target = target;
+  SheetManager.hide();
+  appState.map.instance.panTo(target.coords);
+
+  if (appState.user.isGpsAllowed && appState.user.location) {
+    appState.user.isInsideCampus = isWithinCampusBounds(appState.user.location);
+    await runContextRouting(target, appState.user.location);
     return;
   }
 
-  const { building, parking_status: parkingStatus } = buildingData;
-
-  const requestLocation = async () => {
-    container.innerHTML = '<p>กำลังขอตำแหน่งของคุณ...</p>';
-    try {
-      const userLocation = await getUserLocation();
-      renderNavigationMap(container, building, parkingStatus, userLocation);
-    } catch (err) {
-      renderLocationRetry(container, 'กรุณาอนุญาตการเข้าถึงตำแหน่งเพื่อดูเส้นทาง', requestLocation);
-    }
-  };
-
-  await requestLocation();
+  try {
+    const userLocation = await getUserLocation();
+    appState.user.location = userLocation;
+    appState.user.isGpsAllowed = true;
+    SheetManager.hideGpsWarning();
+    appState.user.isInsideCampus = isWithinCampusBounds(userLocation);
+    await runContextRouting(target, userLocation);
+  } catch (err) {
+    appState.user.isGpsAllowed = false;
+    handleGpsDenied(target);
+  }
 }
 
-function renderNavigationMap(container, building, parkingStatus, userLocation) {
-  const mapSrc =
-    `https://www.google.com/maps/embed/v1/directions?key=${encodeURIComponent(GOOGLE_MAPS_API_KEY)}` +
-    `&origin=${userLocation.lat},${userLocation.lng}` +
-    `&destination=${building.lat},${building.lng}` +
-    `&mode=walking`;
+// Context Routing Matrix (Module_2_Technical_Specification.md §3) — ตัดสินโหมดนำทางจาก
+// isInsideCampus + target.type เท่านั้น ตามตารางในสเปกเป๊ะๆ
+async function runContextRouting(target, originLocation, opts) {
+  if (!appState.user.isInsideCampus) {
+    SheetManager.showOffCampusSheet({
+      title: target.name,
+      onOpenGoogleMaps: () => window.open(CAMPUS_CONSTANTS.DEFAULT_ORIGIN.googleMapsUrl, '_blank'),
+    });
+    return;
+  }
 
-  const statusLabel = parkingStatus
-    ? `${PARKING_STATUS_LABEL[parkingStatus.status] || parkingStatus.status} (${
-        parkingStatus.source === 'live_report' ? 'รายงานสด' : 'ค่าประมาณการ'
-      })`
-    : 'ไม่มีข้อมูล';
+  const travelMode = target.type === 'PARKING' ? 'DRIVING' : 'WALKING';
+  try {
+    const route = await RouteCalculator.calculateRoute(originLocation, target.coords, travelMode);
+    const originNote = opts && opts.isFallbackOrigin ? ' (ประมาณจากประตูหน้า ม.รามฯ)' : '';
+    SheetManager.showRouteSheet({
+      title: target.name,
+      distanceText: route.distanceText,
+      durationText: `${route.durationText}${originNote}`,
+      actionLabel: travelMode === 'WALKING' ? '🚶 เริ่มนำทางเดินเท้า' : '🚗 เริ่มนำทางขับรถ',
+      onAction: () => appState.map.instance.panTo(target.coords),
+    });
+  } catch (err) {
+    console.error('คำนวณเส้นทางไม่สำเร็จ', err);
+    RouteCalculator.clearRoute();
+    SheetManager.showRouteErrorSheet({
+      title: target.name,
+      onFocus: () => appState.map.instance.panTo(target.coords),
+    });
+  }
+}
 
-  container.innerHTML = `
-    <div class="card">
-      <h2>${building.name_th}</h2>
-      <p class="muted">สถานะที่จอดรถใกล้เคียง: ${statusLabel}</p>
-    </div>
-    <iframe
-      class="map-frame"
-      src="${mapSrc}"
-      allowfullscreen
-      loading="lazy"
-      referrerpolicy="no-referrer-when-downgrade"
-    ></iframe>
-  `;
+// GPS Denied Fallback (Module_2_Technical_Specification.md §3 แถว Fallback, AC-04) — โชว์แถบเตือน
+// พร้อมกับแผนที่ (ไม่ใช่แทนที่กัน) แล้วคำนวณเส้นทางจาก DEFAULT_ORIGIN ให้อัตโนมัติ ไม่ crash
+function handleGpsDenied(target) {
+  SheetManager.showGpsWarning(() => selectTarget(target));
+  appState.user.isInsideCampus = true;
+  runContextRouting(target, CAMPUS_CONSTANTS.DEFAULT_ORIGIN, { isFallbackOrigin: true });
 }
 
 // --- Parking report view (MVP-SPEC §7) ---
@@ -238,6 +476,7 @@ function renderParkingReportForm(container, zone, userLocation) {
   container.querySelectorAll('.btn-status').forEach((btn) => {
     btn.addEventListener('click', () => submitParkingReport(zone.zone_id, btn.dataset.status, userLocation));
   });
+  renderModeBar(container, 'parking');
 }
 
 async function submitParkingReport(zoneId, status, userLocation) {
@@ -425,3 +664,13 @@ async function refreshScheduleList(userId) {
     });
   });
 }
+
+// โหลด Google Maps JS API script แบบ dynamic (ไม่ผูกไว้ตรงๆ ใน index.html) เพื่อให้ GOOGLE_MAPS_API_KEY
+// มี source of truth เดียวอยู่ในไฟล์นี้ — เรียก initApp() (นิยามไว้ด้านบน) เป็น callback เมื่อโหลดเสร็จ
+(function loadGoogleMaps() {
+  const script = document.createElement('script');
+  script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(GOOGLE_MAPS_API_KEY)}&callback=initApp`;
+  script.async = true;
+  script.onerror = () => renderError('โหลด Google Maps ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+  document.head.appendChild(script);
+})();

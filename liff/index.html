@@ -9,16 +9,21 @@
 </head>
 <body>
   <!--
-    หน้าเดียว ทำ 3 อย่างตาม MVP-SPEC-for-Dev.md §7 (ดู app.js สำหรับ logic เต็ม):
-    1. Navigation view    (?dest_id=)      — geolocation + Google Maps Embed mode=directions
-    2. Parking report view (ไม่มี query param พิเศษ) — เลือกสถานะ + POST /api/parking/report
-    3. Profile view        (?mode=profile) — consent gate (localStorage) + POST/GET/DELETE /api/schedule (docs/adr/0003)
+    หน้าเดียว ทำ 3 อย่างตาม MVP-SPEC-for-Dev.md §7 + Module_2_Technical_Specification.md v2.0
+    (ดู app.js/components/*.js สำหรับ logic เต็ม):
+    1. Map view (One-Box Context-Driven Navigation) — ?dest_id= / ?mode=parking&zone_id= / ไม่มี param
+       เลย (Single Canvas Overview) — Google Maps JS API + Directions API
+    2. Profile view (?mode=profile) — consent gate (localStorage) + POST/GET/DELETE /api/schedule (docs/adr/0003)
 
     ก่อน deploy จริง ต้องแก้ LIFF_ID / WORKER_BASE_URL / GOOGLE_MAPS_API_KEY ใน app.js (README "เริ่มงาน (Setup)")
+    Google Maps script โหลดแบบ dynamic จาก app.js เอง (ดู loadGoogleMaps ท้ายไฟล์) เพื่อให้ API key
+    มี source of truth เดียวอยู่ใน app.js ไม่ต้องแก้ 2 ที่
   -->
   <div id="app">
     <p>กำลังโหลด...</p>
   </div>
+  <script src="components/RouteCalculator.js"></script>
+  <script src="components/SheetManager.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

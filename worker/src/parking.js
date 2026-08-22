@@ -92,6 +92,26 @@ export async function handleParkingStatus(request, env) {
   return jsonResponse(status);
 }
 
+// GET /api/parking/zone?zone_id= — คืนรายละเอียดลานจอด (ชื่อ/พิกัด) + สถานะปัจจุบัน ในคำเดียว
+// ให้ LIFF ?mode=parking&zone_id= เปิดหน้ารายงานของลานจอดนั้นตรงๆ ได้เลย โดยไม่ต้องวน
+// /api/buildings + /api/building หาลานจอดที่ใกล้ที่สุดเองเหมือน flow เดิม (default, ไม่มี zone_id)
+export async function handleParkingZone(request, env) {
+  const url = new URL(request.url);
+  const zoneId = url.searchParams.get('zone_id');
+  if (!zoneId) {
+    return jsonResponse({ error: 'ต้องระบุ zone_id' }, 400);
+  }
+
+  const zone = await getParkingZoneByKey(env, zoneId);
+  if (!zone) {
+    // MVP-SPEC §8: zone_id ไม่พบ -> ตอบสุภาพ อย่า hallucinate
+    return jsonResponse({ error: 'ไม่พบข้อมูลลานจอดนี้' }, 404);
+  }
+
+  const status = await resolveParkingStatus(env, zoneId);
+  return jsonResponse({ zone, parking_status: status });
+}
+
 // Aggregation window logic (MVP-SPEC §5) — ใช้ซ้ำใน building.js สำหรับ GET /api/building
 export async function resolveParkingStatus(env, zoneId) {
   const zone = await getParkingZoneByKey(env, zoneId);
