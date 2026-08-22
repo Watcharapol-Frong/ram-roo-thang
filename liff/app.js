@@ -3,6 +3,18 @@ const LIFF_ID = '2011201463-2rdSwrwB';
 const WORKER_BASE_URL = 'https://ram-roo-thang-bot.frongbook.workers.dev';
 const GOOGLE_MAPS_API_KEY = 'AIzaSyAkKFL6P004xrx5mPR4Q1NXlCsy6MePTIE';
 
+// Vector Map ID — บังคับต้องมี ถ้าอยากได้มุมมอง 3D จริง เพราะแผนที่แบบ raster เอียง (tilt) ได้เฉพาะ
+// พื้นที่ที่ Google มีภาพถ่ายมุม 45° ซึ่งย่านรามคำแหงไม่มี จึงกดปุ่ม 3D แล้วไม่มีอะไรเกิดขึ้น
+// DEMO_MAP_ID ใช้ทดสอบได้ทันที แต่ก่อน demo จริงควรสร้าง Map ID ของตัวเองใน Google Cloud Console
+// (Google Maps Platform > Map management > Create map ID, Map type = JavaScript, Rendering = Vector)
+// เพราะ Map ID ของตัวเองตั้งสไตล์/ซ่อน POI ที่ไม่เกี่ยวกับมหาลัยได้ ส่วน DEMO_MAP_ID ตั้งไม่ได้
+const GOOGLE_MAPS_MAP_ID = 'DEMO_MAP_ID';
+
+// Dev Mode (?dev=1) — เปิดทดสอบบนเบราว์เซอร์ปกติได้โดยไม่ต้องเปิดผ่านแอป LINE
+// ปกติ liff.init จะเด้งไปหน้า LINE Login ทำให้เทสยาก โหมดนี้จึง stub liff ทิ้งไปเลย
+// และจำลองพิกัด GPS ให้อยู่ในแคมปัส (ใส่ &lat=&lng= เพื่อจำลองตำแหน่งอื่น เช่น นอกแคมปัส)
+const DEV_MODE = new URLSearchParams(window.location.search).has('dev');
+
 const CONSENT_STORAGE_KEY = 'ram-roo-thang:schedule-consent';
 
 // Module 2: Context-Aware Map & Navigation Engine (Module_2_Technical_Specification.md §2) —
@@ -43,13 +55,18 @@ const appState = {
 let liffReady = false;
 let mapsReady = false;
 
-liff.init({ liffId: LIFF_ID, withLoginOnExternalBrowser: true }).then(() => {
+if (DEV_MODE) {
+  window.liff = { getProfile: async () => ({ userId: 'DEV_USER' }) };
   liffReady = true;
-  tryStart();
-}).catch((err) => {
-  console.error('LIFF init error', err);
-  renderError('เปิด LIFF ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
-});
+} else {
+  liff.init({ liffId: LIFF_ID, withLoginOnExternalBrowser: true }).then(() => {
+    liffReady = true;
+    tryStart();
+  }).catch((err) => {
+    console.error('LIFF init error', err);
+    renderError('เปิด LIFF ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+  });
+}
 
 // Google Maps JS API เรียกชื่อนี้เองหลังโหลดสคริปต์เสร็จ (script tag ใน index.html มี &callback=initApp)
 function initApp() {
@@ -105,6 +122,14 @@ async function fetchJSON(path, options) {
 }
 
 function getUserLocation() {
+  if (DEV_MODE) {
+    const params = new URLSearchParams(window.location.search);
+    const lat = Number.parseFloat(params.get('lat'));
+    const lng = Number.parseFloat(params.get('lng'));
+    if (Number.isFinite(lat) && Number.isFinite(lng)) return Promise.resolve({ lat, lng });
+    const hub = CAMPUS_CONSTANTS.DEFAULT_ORIGIN;
+    return Promise.resolve({ lat: hub.lat, lng: hub.lng });
+  }
   return new Promise((resolve, reject) => {
     if (!navigator.geolocation) {
       reject(new Error('เบราว์เซอร์นี้ไม่รองรับการระบุตำแหน่ง'));
@@ -179,16 +204,18 @@ async function renderMapView({ presetDestId, presetZoneId }) {
   renderModeBar(container, 'nav');
   document.getElementById('layer-toggle-btn').addEventListener('click', toggle3D);
 
+  buildingMarkers.length = 0;
   appState.map.instance = new google.maps.Map(document.getElementById('map'), {
     center: CAMPUS_CONSTANTS.INITIAL_VIEW.center,
     zoom: CAMPUS_CONSTANTS.INITIAL_VIEW.zoom,
-    mapTypeId: 'roadmap',
+    mapId: GOOGLE_MAPS_MAP_ID,
     disableDefaultUI: true,
     zoomControl: true,
-    mapTypeControl: false,
+    clickableIcons: false,
   });
   RouteCalculator.init(appState.map.instance);
   appState.map.instance.addListener('center_changed', updateLayerToggleAvailability);
+  appState.map.instance.addListener('zoom_changed', updateBuildingMarkerVisibility);
   updateLayerToggleAvailability();
 
   let buildingsData;
@@ -221,16 +248,60 @@ async function renderMapView({ presetDestId, presetZoneId }) {
   }
 }
 
+// หมุดอาคารเป็น "ป้ายชิป" เล็กๆ ที่มีรหัสอาคารอยู่ข้างใน แทนหมุดสีแดงมาตรฐานของ Google —
+// อาคาร 35 หลังในพื้นที่ ~1 ตร.กม. ถ้าใช้หมุดมาตรฐานจะบังกันจนมองไม่เห็นตัวแผนที่เลย
+const BUILDING_MARKER_MIN_ZOOM = 16;
+const buildingMarkers = [];
+
+function escapeXml(text) {
+  return String(text).replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' }[c]));
+}
+
+function buildingMarkerIcon(code, isSelected) {
+  const label = escapeXml(code);
+  const width = Math.max(30, label.length * 8 + 16);
+  const fill = isSelected ? '#06c755' : '#ffffff';
+  const stroke = isSelected ? '#06c755' : '#c9cfd6';
+  const textColor = isSelected ? '#ffffff' : '#26313d';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="24" viewBox="0 0 ${width} 24">`
+    + `<rect x="0.5" y="0.5" width="${width - 1}" height="23" rx="11.5" fill="${fill}" stroke="${stroke}"/>`
+    + `<text x="${width / 2}" y="16" text-anchor="middle" font-family="-apple-system,Segoe UI,sans-serif"`
+    + ` font-size="11" font-weight="600" fill="${textColor}">${label}</text></svg>`;
+  return {
+    url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
+    anchor: new google.maps.Point(width / 2, 12),
+  };
+}
+
 function placeBuildingMarkers(buildings) {
   buildings.forEach((b) => {
     const marker = new google.maps.Marker({
       position: { lat: b.lat, lng: b.lng },
       map: appState.map.instance,
       title: b.name_th,
+      icon: buildingMarkerIcon(b.building_id, false),
     });
+    marker.buildingId = b.building_id;
     marker.addListener('click', () => {
       selectTarget({ id: b.building_id, name: b.name_th, type: 'BUILDING', coords: { lat: b.lat, lng: b.lng } });
     });
+    buildingMarkers.push(marker);
+  });
+  updateBuildingMarkerVisibility();
+}
+
+// ซูมออกไกลๆ ป้ายชิปจะทับกันเป็นพืด ซ่อนไปเลยดีกว่า เหลือแต่หมุดลานจอดที่มีไม่กี่จุด
+function updateBuildingMarkerVisibility() {
+  const map = appState.map.instance;
+  if (!map) return;
+  const visible = map.getZoom() >= BUILDING_MARKER_MIN_ZOOM;
+  buildingMarkers.forEach((marker) => marker.setVisible(visible));
+}
+
+function highlightBuildingMarker(buildingId) {
+  buildingMarkers.forEach((marker) => {
+    marker.setIcon(buildingMarkerIcon(marker.buildingId, marker.buildingId === buildingId));
+    marker.setZIndex(marker.buildingId === buildingId ? 100 : 1);
   });
 }
 
@@ -301,8 +372,8 @@ function renderShopPlaceholderView() {
   renderModeBar(container, 'shop');
 }
 
-// เปิด 3D (Hybrid + Tilt) ได้เฉพาะตอนศูนย์กลางแผนที่อยู่ในรั้ว ม.รามฯ เท่านั้น (AC-05) — ใช้ภาพถ่าย
-// ดาวเทียม + มุมเอียงของ Google เอง ไม่ต้องดูแลข้อมูลรูปทรง/ความสูงตึกเองเลย
+// เปิด 3D ได้เฉพาะตอนศูนย์กลางแผนที่อยู่ในรั้ว ม.รามฯ เท่านั้น (AC-05) — ใช้อาคาร 3D ของ Google เอง
+// จาก vector map (ดู GOOGLE_MAPS_MAP_ID) ไม่ต้องดูแลข้อมูลรูปทรง/ความสูงตึกเองเลย
 function toggle3D() {
   const btn = document.getElementById('layer-toggle-btn');
   if (!btn || btn.disabled || !appState.map.instance) return;
@@ -311,14 +382,18 @@ function toggle3D() {
   btn.textContent = appState.map.is3DMode ? '🗺 กลับสู่ 2D' : '🏢 เปิดมุมมอง 3D';
 }
 
+// อาคาร 3D ของ Google โผล่เฉพาะตอนซูมใกล้พอ (~18 ขึ้นไป) ถ้าเอียงกล้องตอนซูมออกจะได้แค่พื้นเอียงเปล่าๆ
+const MIN_3D_ZOOM = 18;
+
 function applyViewMode() {
   const map = appState.map.instance;
   if (appState.map.is3DMode) {
-    map.setMapTypeId('hybrid');
-    map.setTilt(45);
+    if (map.getZoom() < MIN_3D_ZOOM) map.setZoom(MIN_3D_ZOOM);
+    map.setTilt(47.5);
+    map.setHeading(20);
   } else {
-    map.setMapTypeId('roadmap');
     map.setTilt(0);
+    map.setHeading(0);
   }
 }
 
@@ -340,6 +415,7 @@ function updateLayerToggleAvailability() {
 async function selectTarget(target) {
   appState.target = target;
   SheetManager.hide();
+  highlightBuildingMarker(target.type === 'BUILDING' ? target.id : null);
   appState.map.instance.panTo(target.coords);
 
   if (appState.user.isGpsAllowed && appState.user.location) {
