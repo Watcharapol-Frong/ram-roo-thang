@@ -333,10 +333,13 @@ function placeBuildingMarkers(buildings) {
 }
 
 // ซูมออกไกลๆ ป้ายชิปจะทับกันเป็นพืด ซ่อนไปเลยดีกว่า เหลือแต่หมุดลานจอดที่มีไม่กี่จุด
+// getZoom() คืน undefined ได้ถ้าแผนที่ยังตั้งตัวไม่เสร็จ (เช่นตอน key ถูกปฏิเสธ referrer) —
+// ต้อง default เป็น "โชว์" ไม่งั้น undefined >= 16 เป็น false แล้วหมุดหายหมดทั้งแผนที่แบบเงียบๆ
 function updateBuildingMarkerVisibility() {
   const map = appState.map.instance;
   if (!map) return;
-  const visible = map.getZoom() >= BUILDING_MARKER_MIN_ZOOM;
+  const zoom = map.getZoom();
+  const visible = zoom === undefined || zoom >= BUILDING_MARKER_MIN_ZOOM;
   buildingMarkers.forEach((marker) => marker.setVisible(visible));
 }
 
