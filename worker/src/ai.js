@@ -2,9 +2,10 @@
 // CONTEXT.md "MCP-inspired Context Layer" — AI agent เรียก function ของตัวเองตรงๆ ไม่ใช่ MCP Server เต็มสเปก
 // ดู docs/adr/0001-function-calling-instead-of-mcp-for-mvp.md
 //
-// retrieveContext match building ด้วย keyword ง่ายๆ กับ aliases ใน BASELINE_DATA — TODO: ยังไม่ได้
-// ทดสอบกับคำถามหลากหลายรูปแบบ (README "ยังไม่ได้ทำ"), และยังไม่ใช่ LLM tool-calling จริงตาม MVP-SPEC §4
-// (ยังไม่ได้รันจริงบน @cf/qwen/qwen3-30b-a3b-fp8 — README "ยังไม่ได้ทำ")
+// retrieveContext match building/service ด้วย alias ใน BASELINE_DATA — ทดสอบแล้วด้วย
+// test-module1-readiness.mjs (30 test cases, import findByAlias จริงจากไฟล์นี้ตรงๆ ไม่ใช่ mock)
+// รันจริงบน @cf/qwen/qwen3-30b-a3b-fp8 ใน production แล้ว (ดู worker/src/line.js สำหรับ fast-path
+// ที่ข้าม AI ไปเลยเมื่อ alias match ชัดเจน — AI ทำงานเฉพาะกรณีทั่วไป/ไม่ match เท่านั้น)
 //
 // callWorkersAI ไม่รับ/คืน context — context อยู่ใน scope ของผู้เรียก (line.js) อยู่แล้ว จึงไม่หายไปพร้อม
 // AI error/timeout โดยธรรมชาติ (แก้ bug เดิมที่ทิ้ง context ทิ้งไปตาม README "ส่วนเสริมนอกสเปกเดิม")
