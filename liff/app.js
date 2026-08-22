@@ -64,32 +64,49 @@ const appState = {
   },
 };
 
-// LIFF init และ Google Maps script โหลดแบบขนานกันคนละทาง (Google เรียก callback ของตัวเองตอนพร้อม
-// ดู index.html) — ต้องรอทั้งคู่เสร็จก่อนค่อยเริ่ม main()
-let liffReady = false;
-let mapsReady = false;
+// LIFF SDK กับ Google Maps เป็น dependency ภายนอกคนละตัว โหลดขนานกัน และ "พังแยกกันได้"
+// เดิมหน้าเว็บรอให้พร้อมทั้งคู่ก่อนถึงจะเริ่ม main() ตัวไหนพังก็ตายทั้งหน้า ทั้งที่บันทึกวิชาสอบกับ
+// รายงานลานจอดไม่ได้ใช้ Google Maps เลย และหน้าแผนที่ก็ไม่ต้องใช้ LIFF profile จนกว่าจะกดส่งรายงาน
+// ตอนนี้แต่ละ view รอเฉพาะ dependency ของตัวเอง (ดู getUserId / renderMapView)
+const deferred = () => {
+  let resolve, reject;
+  const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+  promise.catch(() => {}); // กัน unhandled rejection ตอนที่ยังไม่มี view ไหน await อยู่
+  return { promise, resolve, reject };
+};
+
+const liffBoot = deferred();
+const mapsBoot = deferred();
+
+// Google Maps ค้างแบบไม่ error ก็มี (โหลดสคริปต์ได้แต่ callback ไม่ยิง เช่น key ถูกจำกัด referrer)
+// ตั้งเพดานไว้ ไม่งั้นหน้าแผนที่จะหมุนค้างตลอดกาลโดยไม่บอกอะไรผู้ใช้เลย
+const MAPS_LOAD_TIMEOUT_MS = 10000;
+setTimeout(() => mapsBoot.reject(new Error('Google Maps โหลดไม่ทันเวลา')), MAPS_LOAD_TIMEOUT_MS);
 
 if (DEV_MODE) {
   window.liff = { getProfile: async () => ({ userId: 'DEV_USER' }) };
-  liffReady = true;
+  liffBoot.resolve();
 } else {
-  liff.init({ liffId: LIFF_ID, withLoginOnExternalBrowser: true }).then(() => {
-    liffReady = true;
-    tryStart();
-  }).catch((err) => {
-    console.error('LIFF init error', err);
-    renderError('เปิด LIFF ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
-  });
+  // ครอบ try/catch เพราะถ้า sdk.js (static.line-scdn.net) โหลดไม่ขึ้น ตัวแปร liff จะไม่มีอยู่จริง
+  // บรรทัดนี้จะ throw ReferenceError กลางไฟล์ ทำให้โค้ดที่เหลือ "ทั้งไฟล์" ไม่ถูกรันเลย
+  // (รวมถึง loadGoogleMaps ท้ายไฟล์) ผลคือหน้าค้างที่ "กำลังโหลด..." เงียบๆ ไม่มีข้อความบอก
+  try {
+    liff
+      .init({ liffId: LIFF_ID, withLoginOnExternalBrowser: true })
+      .then(() => liffBoot.resolve())
+      .catch((err) => {
+        console.error('LIFF init error', err);
+        liffBoot.reject(err);
+      });
+  } catch (err) {
+    console.error('โหลด LIFF SDK ไม่สำเร็จ', err);
+    liffBoot.reject(err);
+  }
 }
 
-// Google Maps JS API เรียกชื่อนี้เองหลังโหลดสคริปต์เสร็จ (script tag ใน index.html มี &callback=initApp)
+// Google Maps JS API เรียกชื่อนี้เองหลังโหลดสคริปต์เสร็จ (ดู loadGoogleMaps ท้ายไฟล์)
 function initApp() {
-  mapsReady = true;
-  tryStart();
-}
-
-function tryStart() {
-  if (liffReady && mapsReady) main();
+  mapsBoot.resolve();
 }
 
 function main() {
@@ -170,6 +187,7 @@ function renderLocationRetry(container, message, onRetry) {
 let cachedUserId = null;
 async function getUserId() {
   if (cachedUserId) return cachedUserId;
+  await liffBoot.promise; // throw ต่อถ้า LIFF ใช้ไม่ได้ — ผู้เรียกจัดการแสดงข้อความเอง
   const profile = await liff.getProfile();
   // เก็บแค่ userId เท่านั้น — ไม่ใช้/ไม่ส่ง displayName, pictureUrl ต่อ (CONTEXT.md "LINE userId (Session Identifier)")
   cachedUserId = profile.userId;
@@ -207,6 +225,16 @@ function isWithinCampusBounds({ lat, lng }) {
 
 async function renderMapView({ presetDestId, presetZoneId }) {
   const container = getApp();
+
+  // เฉพาะ view นี้เท่านั้นที่ต้องมี Google Maps — ถ้าโหลดไม่ขึ้นให้เหลือทางไป view อื่นที่ยังใช้ได้
+  try {
+    await mapsBoot.promise;
+  } catch (err) {
+    console.error('Google Maps ใช้งานไม่ได้', err);
+    renderMapUnavailable();
+    return;
+  }
+
   container.innerHTML = `
     <div class="map-container">
       <div id="map"></div>
@@ -378,6 +406,21 @@ function renderModeBar(container, activeMode) {
       else if (mode === 'nav') renderMapView({});
     });
   });
+}
+
+// Maps ล่ม (เน็ตสะดุด / key เกิน quota / referrer ไม่ผ่าน) — ยังต้องกดไปหน้าที่จอดรถได้
+// เพราะการรายงานลานจอดไม่ได้ใช้ Google Maps เลย จึงคง mode bar ไว้เสมอ
+function renderMapUnavailable() {
+  const container = getApp();
+  container.innerHTML = `
+    <div class="card">
+      <h2>แผนที่ใช้งานไม่ได้ชั่วคราว</h2>
+      <p class="muted">โหลด Google Maps ไม่สำเร็จ อาจเป็นเพราะสัญญาณอินเทอร์เน็ต — เมนูอื่นยังใช้งานได้ตามปกติครับ</p>
+      <button class="btn btn-primary" id="maps-retry-btn">ลองโหลดใหม่</button>
+    </div>
+  `;
+  document.getElementById('maps-retry-btn').addEventListener('click', () => window.location.reload());
+  renderModeBar(container, 'nav');
 }
 
 function renderShopPlaceholderView() {
@@ -760,6 +803,10 @@ async function refreshScheduleList(userId) {
   const script = document.createElement('script');
   script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(GOOGLE_MAPS_API_KEY)}&callback=initApp`;
   script.async = true;
-  script.onerror = () => renderError('โหลด Google Maps ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+  script.onerror = () => mapsBoot.reject(new Error('โหลดสคริปต์ Google Maps ไม่สำเร็จ'));
   document.head.appendChild(script);
 })();
+
+// เริ่มที่ท้ายไฟล์ เพราะ main() อ่านค่าคงที่/สถานะที่ประกาศไว้ด้านบนทั้งหมด — และเริ่มได้ทันที
+// ไม่ต้องรอ dependency ภายนอกตัวไหนแล้ว (แต่ละ view รอเองตามที่ตัวเองต้องใช้)
+main();
