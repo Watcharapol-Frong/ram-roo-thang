@@ -1,6 +1,6 @@
 // แก้ค่าด้านล่างก่อน deploy จริง (README "เริ่มงาน (Setup)")
 const LIFF_ID = '2011201463-2rdSwrwB';
-const WORKER_BASE_URL = 'https://ram-roo-thang-bot.frongbook.workers.dev';
+const PROD_WORKER_BASE_URL = 'https://ram-roo-thang-bot.frongbook.workers.dev';
 const GOOGLE_MAPS_API_KEY = 'AIzaSyAkKFL6P004xrx5mPR4Q1NXlCsy6MePTIE';
 
 // Vector Map ID — บังคับต้องมี ถ้าอยากได้มุมมอง 3D จริง เพราะแผนที่แบบ raster เอียง (tilt) ได้เฉพาะ
@@ -21,6 +21,13 @@ const DEV_HOSTNAMES = ['localhost', '127.0.0.1', '[::1]', ''];
 const DEV_MODE =
   new URLSearchParams(window.location.search).has('dev') &&
   DEV_HOSTNAMES.includes(window.location.hostname);
+
+// ชี้ backend ไปที่อื่นได้ด้วย ?api= แต่เฉพาะใน DEV_MODE (= localhost) เท่านั้น — ใช้ตอนรัน
+// backend ในเครื่องคู่กับ LIFF (ดู scripts/dev-api.mjs) จะได้ไม่ต้องแก้ค่าคงที่ในไฟล์นี้ไปมา
+// บน production ค่านี้ล็อกเป็น PROD_WORKER_BASE_URL เสมอ ผู้ใช้ทั่วไปเปลี่ยนปลายทาง API ไม่ได้
+const WORKER_BASE_URL = DEV_MODE
+  ? new URLSearchParams(window.location.search).get('api') || PROD_WORKER_BASE_URL
+  : PROD_WORKER_BASE_URL;
 
 const CONSENT_STORAGE_KEY = 'ram-roo-thang:schedule-consent';
 

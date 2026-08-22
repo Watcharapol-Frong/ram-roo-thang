@@ -36,7 +36,8 @@ ram-roo-thang/
 │   └── baseline-dataset.json  — ข้อมูลอาคาร/ลานจอดตั้งต้น (ต้องเพิ่มให้ครบตาม Phase 1)
 └── scripts/
     ├── seed-kv.sh             — สคริปต์ seed baseline dataset เข้า KV
-    └── serve-liff.mjs         — static server สำหรับพัฒนา LIFF บน localhost (zero dependency)
+    ├── serve-liff.mjs         — static server สำหรับพัฒนา LIFF บน localhost (zero dependency)
+    └── dev-api.mjs            — backend สำหรับ dev: worker จริง + KV ในหน่วยความจำ (zero dependency)
 ```
 
 ## ส่วนเสริมนอกสเปกเดิม
@@ -73,11 +74,18 @@ LIFF: แก้ `LIFF_ID`, `WORKER_BASE_URL`, `GOOGLE_MAPS_API_KEY` ใน `liff
 
 ### พัฒนา LIFF บนเครื่องตัวเอง
 
+ต้องรัน 2 โปรเซส (คนละเทอร์มินัล) — LIFF เป็นแค่ static file ต้องมี backend ให้เรียก:
+
 ```bash
-cd liff
-npm run dev          # static server (ไม่ต้อง npm install) -> http://localhost:8123/?dev=1
-# npm install && npm run dev:wrangler   # ถ้าอยากเสิร์ฟผ่าน workerd จริงตาม wrangler.jsonc
+node scripts/dev-api.mjs      # backend: worker จริง + KV ในหน่วยความจำ -> :8787
+cd liff && npm run dev        # static server (ไม่ต้อง npm install)     -> :8123
 ```
+
+แล้วเปิด **http://localhost:8123/?dev=1&api=http://localhost:8787**
+
+- `scripts/dev-api.mjs` รัน `worker/src/index.js` ตัวจริง (router/handler เดิมทั้งหมด) โดยสลับ KV เป็น Map ในหน่วยความจำที่ seed จาก `data/baseline-dataset.json` — ลองกดได้ครบทุก flow โดยไม่แตะ KV ของ production และไม่ต้องมีบัญชี Cloudflare (ข้อมูลหายเมื่อปิดโปรเซส, `/webhook` ใช้ที่นี่ไม่ได้เพราะต้องมี LINE + Workers AI)
+- `?api=` ใช้ได้เฉพาะใน dev mode (localhost) เท่านั้น — บน production ปลายทาง API ล็อกไว้เสมอ
+- ถ้าอยากเสิร์ฟ LIFF ผ่าน workerd จริงตาม `wrangler.jsonc`: `cd liff && npm install && npm run dev:wrangler`
 
 `?dev=1` จะ stub LIFF SDK ทิ้งและจำลองพิกัด GPS ให้อยู่ในแคมปัส (เติม `&lat=&lng=` เพื่อจำลองตำแหน่งอื่น เช่น นอกแคมปัส) — **ทำงานเฉพาะ localhost เท่านั้น** บน production พารามิเตอร์นี้ไม่มีผลใดๆ โดยตั้งใจ (ไม่งั้นใครก็ปลอมพิกัดผ่าน geofence ของการรายงานลานจอดได้จากเบราว์เซอร์ธรรมดา)
 
