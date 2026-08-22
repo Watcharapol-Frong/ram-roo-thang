@@ -14,6 +14,10 @@ import {
 const RATE_LIMIT_MINUTES = 30;
 const GEOFENCE_RADIUS_METERS = 150;
 const AGGREGATION_WINDOW_MINUTES = 30;
+// รายงานที่พ้น aggregation window ไปแล้วไม่มีประโยชน์อีกต่อไป (ไม่ถูกใช้ตัดสินสถานะ) — ตั้ง TTL
+// ให้ KV ลบทิ้งเองแทนที่จะสะสมถาวรและทำให้ listParkingReportsForZone ยิ่งช้าลงเรื่อยๆ ตามจำนวน
+// report สะสม คูณ 2 ไว้เป็น buffer กัน clock skew / KV eventual consistency
+const PARKING_REPORT_TTL_SECONDS = AGGREGATION_WINDOW_MINUTES * 60 * 2;
 
 function jsonResponse(body, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -58,12 +62,16 @@ export async function handleParkingReport(request, env) {
 
   // 3. บันทึก
   const reportedAt = new Date().toISOString();
-  await putParkingReport(env, {
-    zone_id,
-    reported_status: status,
-    reporter_user_id: user_id,
-    reported_at: reportedAt,
-  });
+  await putParkingReport(
+    env,
+    {
+      zone_id,
+      reported_status: status,
+      reporter_user_id: user_id,
+      reported_at: reportedAt,
+    },
+    PARKING_REPORT_TTL_SECONDS
+  );
   await setLastReportedAt(env, user_id, reportedAt);
 
   return jsonResponse({ status: 'SUCCESS' });
