@@ -36,4 +36,15 @@ jq -c '.parking_zones[]' "$DATA_FILE" | while read -r zone; do
   npx wrangler kv key put "parking_zone:$zone_id" "$zone" --binding=BASELINE_DATA
 done
 
+# services ว่างอยู่จนกว่าทีมจะกรอกข้อมูลจริง (docs/adr/0004) — loop นี้จะไม่ทำอะไรเลยจนกว่านั้น
+echo "Seeding services..."
+jq -c '.services[]' "$DATA_FILE" | while read -r service; do
+  service_id=$(echo "$service" | jq -r '.service_id')
+  echo "  service:$service_id"
+  npx wrangler kv key put "service:$service_id" "$service" --binding=BASELINE_DATA
+done
+
+# poi ยังไม่มี KV namespace/endpoint รองรับ (community submission + moderation — ยังไม่เริ่มพัฒนา)
+# จึงตั้งใจไม่ seed ตรงนี้ ดู docs/adr/0004
+
 echo "Done."

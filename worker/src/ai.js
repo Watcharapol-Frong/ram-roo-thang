@@ -9,7 +9,7 @@
 // callWorkersAI ไม่รับ/คืน context — context อยู่ใน scope ของผู้เรียก (line.js) อยู่แล้ว จึงไม่หายไปพร้อม
 // AI error/timeout โดยธรรมชาติ (แก้ bug เดิมที่ทิ้ง context ทิ้งไปตาม README "ส่วนเสริมนอกสเปกเดิม")
 
-import { listBuildings } from './data.js';
+import { listBuildings, listServices } from './data.js';
 
 const SYSTEM_INSTRUCTION = `
     คุณคือ "รามรู้ทาง" AI ผู้ช่วยนำทางและให้ข้อมูลที่จอดรถของมหาวิทยาลัยรามคำแหง
@@ -32,22 +32,39 @@ const SYSTEM_INSTRUCTION = `
     หน้าที่หลัก: ให้ข้อมูลการเดินทาง ที่จอดรถ อาคาร หากถามนอกเรื่องไม่ตอบคำถาม และเน้นย้ำว่าเป็นข้อมูลสำหรับทดสอบระบบ
   `;
 
-// จับคู่ userMessage กับ building aliases ใน BASELINE_DATA — คืน { building } หรือ null
+function findByAlias(items, normalizedMessage) {
+  return items.find(
+    (item) => Array.isArray(item.aliases) && item.aliases.some((alias) => normalizedMessage.includes(alias.toUpperCase()))
+  );
+}
+
+// จับคู่ userMessage กับ aliases ใน BASELINE_DATA — building ก่อน แล้วค่อย service (docs/adr/0004)
+// คืน { building } หรือ { service } หรือ null — services ว่างเปล่าจนกว่าทีมจะกรอกข้อมูลจริง ดังนั้น
+// สาขานี้จะยังไม่ match อะไรเลยจนกว่า data/baseline-dataset.json จะมี service เข้าไป
 export async function retrieveContext(userMessage, env) {
+  const normalized = userMessage.toUpperCase();
+
   let buildings = [];
   try {
     buildings = await listBuildings(env);
   } catch (e) {
     console.error('retrieveContext: listBuildings error', e);
-    return null;
+    buildings = [];
   }
+  const matchedBuilding = findByAlias(buildings, normalized);
+  if (matchedBuilding) return { building: matchedBuilding };
 
-  const normalized = userMessage.toUpperCase();
-  const matched = buildings.find(
-    (b) => Array.isArray(b.aliases) && b.aliases.some((alias) => normalized.includes(alias.toUpperCase()))
-  );
+  let services = [];
+  try {
+    services = await listServices(env);
+  } catch (e) {
+    console.error('retrieveContext: listServices error', e);
+    services = [];
+  }
+  const matchedService = findByAlias(services, normalized);
+  if (matchedService) return { service: matchedService };
 
-  return matched ? { building: matched } : null;
+  return null;
 }
 
 export async function callWorkersAI(userMessage, history, env) {

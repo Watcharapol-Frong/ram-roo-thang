@@ -8,8 +8,9 @@ async function listByPrefix(kv, prefix) {
 
   while (!listComplete) {
     const page = await kv.list({ prefix, cursor });
-    for (const key of page.keys) {
-      const raw = await kv.get(key.name);
+    // ดึงค่าของทุก key ในหน้านี้พร้อมกัน (ไม่ await ทีละตัว) กันช้าเป็นเส้นตรงตามจำนวน key
+    const values = await Promise.all(page.keys.map((key) => kv.get(key.name)));
+    for (const raw of values) {
       if (raw) results.push(JSON.parse(raw));
     }
     listComplete = page.list_complete;
@@ -35,11 +36,23 @@ export async function listBuildings(env) {
   return listByPrefix(env.BASELINE_DATA, 'building:');
 }
 
+// --- services (บริการ/ขั้นตอนราชการ — team กรอกเอง เหมือน building/parking_zone) ---
+// docs/adr/0004-service-faq-vs-community-poi.md
+
+export async function getServiceByKey(env, serviceId) {
+  const raw = await env.BASELINE_DATA.get(`service:${serviceId}`);
+  return raw ? JSON.parse(raw) : null;
+}
+
+export async function listServices(env) {
+  return listByPrefix(env.BASELINE_DATA, 'service:');
+}
+
 // --- PARKING_REPORTS (MVP-SPEC-for-Dev.md §3.2) ---
 
-export async function putParkingReport(env, report) {
+export async function putParkingReport(env, report, ttlSeconds) {
   const key = `report:${report.zone_id}:${report.reported_at}`;
-  await env.PARKING_REPORTS.put(key, JSON.stringify(report));
+  await env.PARKING_REPORTS.put(key, JSON.stringify(report), { expirationTtl: ttlSeconds });
 }
 
 export async function listParkingReportsForZone(env, zoneId) {

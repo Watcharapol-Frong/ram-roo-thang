@@ -89,6 +89,41 @@ function generateFlexMessage(buildingName, buildingDesc, liffUrl) {
   };
 }
 
+// บริการ/ขั้นตอนราชการ (docs/adr/0004) — steps เป็นข้อความที่ทีมกรอกไว้ล่วงหน้าใน BASELINE_DATA
+// เท่านั้น (ไม่ใช่สิ่งที่ AI แต่งเอง) ปุ่มนำทางจะโผล่เฉพาะตอนมี building_id ผูกไว้
+function generateServiceFlexMessage(service, liffUrl) {
+  const destUrl = service.building_id ? withDestId(liffUrl, service.building_id) : null;
+  return {
+    type: "flex",
+    altText: service.name,
+    contents: {
+      type: "bubble",
+      size: "kilo",
+      body: {
+        type: "box", layout: "vertical", paddingAll: "16px",
+        contents: [
+          { type: "text", text: service.name, weight: "bold", size: "lg", color: "#111111" },
+          { type: "text", text: service.steps || "", size: "xs", color: "#666666", margin: "xs", wrap: true }
+        ]
+      },
+      ...(destUrl
+        ? {
+            footer: {
+              type: "box", layout: "vertical", paddingTop: "0px", paddingStart: "16px", paddingEnd: "16px", paddingBottom: "16px",
+              contents: [
+                {
+                  type: "button", style: "primary", color: "#06C755", height: "sm",
+                  action: { type: "uri", label: "เปิดระบบนำทางไปอาคาร", uri: destUrl }
+                }
+              ]
+            },
+            styles: { footer: { separator: false } }
+          }
+        : {})
+    }
+  };
+}
+
 function generateScheduleFlexMessage(liffUrl) {
   const actionUri = liffUrl ? `${liffUrl}${liffUrl.includes('?') ? '&' : '?'}mode=profile` : "https://line.me";
   return {
@@ -224,6 +259,9 @@ async function handleEvent(event, env) {
       "แตะปุ่มด้านล่างเพื่อดูเส้นทางและที่จอดรถ",
       withDestId(env.LIFF_URL, context.building.building_id)
     ));
+  } else if (context && context.service) {
+    // เจอบริการ/ขั้นตอนราชการที่ทีมกรอกไว้ล่วงหน้า (docs/adr/0004) — services ว่างอยู่จนกว่าจะมีข้อมูลจริง
+    messagesToReply.push(generateServiceFlexMessage(context.service, env.LIFF_URL));
   } else if (userMessage.match(/แผนที่|ตึก|อาคาร|ที่จอดรถ|จอดรถ|นำทาง/i)) {
     // ยังไม่มี BASELINE_DATA ที่ match ได้ (หรือยังไม่ seed) — คง mock เดิมไว้กัน demo พัง
     const buildingName = userMessage.toUpperCase().includes('VKB') ? 'อาคาร VKB' : 'อาคารเป้าหมาย';
