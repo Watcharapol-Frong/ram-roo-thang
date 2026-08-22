@@ -13,7 +13,14 @@ const GOOGLE_MAPS_MAP_ID = 'DEMO_MAP_ID';
 // Dev Mode (?dev=1) — เปิดทดสอบบนเบราว์เซอร์ปกติได้โดยไม่ต้องเปิดผ่านแอป LINE
 // ปกติ liff.init จะเด้งไปหน้า LINE Login ทำให้เทสยาก โหมดนี้จึง stub liff ทิ้งไปเลย
 // และจำลองพิกัด GPS ให้อยู่ในแคมปัส (ใส่ &lat=&lng= เพื่อจำลองตำแหน่งอื่น เช่น นอกแคมปัส)
-const DEV_MODE = new URLSearchParams(window.location.search).has('dev');
+//
+// ⚠️ จำกัดไว้เฉพาะ localhost เท่านั้น — บน production ?dev=1 ต้องไม่มีผลใดๆ ไม่งั้นใครก็ตาม
+// ที่เปิด LIFF URL แล้วเติม ?dev=1&lat=&lng= จะข้าม LINE login และ "ปลอมพิกัด" ให้ผ่าน
+// geofence ของ POST /api/parking/report ได้จากเบราว์เซอร์ธรรมดา
+const DEV_HOSTNAMES = ['localhost', '127.0.0.1', '[::1]', ''];
+const DEV_MODE =
+  new URLSearchParams(window.location.search).has('dev') &&
+  DEV_HOSTNAMES.includes(window.location.hostname);
 
 const CONSENT_STORAGE_KEY = 'ram-roo-thang:schedule-consent';
 
@@ -227,7 +234,7 @@ async function renderMapView({ presetDestId, presetZoneId }) {
   }
   const buildings = buildingsData.buildings || [];
   placeBuildingMarkers(buildings);
-  await placeParkingMarkers(buildings);
+  await placeParkingMarkers();
 
   if (presetDestId) {
     const building = buildings.find((b) => b.building_id === presetDestId);
@@ -305,15 +312,20 @@ function highlightBuildingMarker(buildingId) {
   });
 }
 
-// สีหมุดลานจอด = สถานะความหนาแน่นปัจจุบัน (เขียว/เหลือง/แดง) ตาม §1 — ดึงทีละ zone ที่ไม่ซ้ำกัน
-// (หลายอาคารอาจแชร์ zone เดียวกัน dedupe ด้วย nearest_parking_zone_id กันยิง fetch ซ้ำ)
-async function placeParkingMarkers(buildings) {
-  const uniqueZoneIds = [...new Set(buildings.map((b) => b.nearest_parking_zone_id).filter(Boolean))];
-  const zoneDetails = await Promise.all(
-    uniqueZoneIds.map((id) => fetchJSON(`/api/parking/zone?zone_id=${encodeURIComponent(id)}`).catch(() => null))
-  );
+// สีหมุดลานจอด = สถานะความหนาแน่นปัจจุบัน (เขียว/เหลือง/แดง) ตาม §1
+// ดึงทุกโซนจาก /api/parking/zones ครั้งเดียว (เดิมยิง /api/parking/zone ทีละโซนตาม
+// nearest_parking_zone_id ของอาคาร = 8 request ต่อการเปิดแผนที่ 1 ครั้ง) — ผลพลอยได้คือ
+// โซนที่ยังไม่มีอาคารไหนอ้างถึงก็ขึ้นหมุดด้วย ซึ่งถูกต้องกว่าเดิมสำหรับหน้าแผนที่รวม
+async function placeParkingMarkers() {
+  let zonesData;
+  try {
+    zonesData = await fetchJSON('/api/parking/zones');
+  } catch (err) {
+    console.error('โหลดข้อมูลลานจอดไม่สำเร็จ', err);
+    return;
+  }
 
-  zoneDetails.filter(Boolean).forEach(({ zone, parking_status: parkingStatus }) => {
+  (zonesData.zones || []).forEach(({ zone, parking_status: parkingStatus }) => {
     const status = (parkingStatus && parkingStatus.status) || zone.baseline_status;
     const marker = new google.maps.Marker({
       position: { lat: zone.lat, lng: zone.lng },
@@ -478,7 +490,7 @@ function handleGpsDenied(target) {
 }
 
 // --- Parking report view (MVP-SPEC §7) ---
-// geolocation -> หาลานจอดใกล้ที่สุดจาก /api/buildings + /api/building -> POST /api/parking/report
+// geolocation -> หาลานจอดใกล้ที่สุดจาก /api/parking/zones -> POST /api/parking/report
 
 async function renderParkingReportView() {
   const container = getApp();
@@ -499,23 +511,17 @@ async function renderParkingReportView() {
 async function loadNearestZoneAndRender(container, userLocation) {
   container.innerHTML = '<p>กำลังค้นหาลานจอดที่ใกล้ที่สุด...</p>';
 
-  let buildingsData;
+  // /api/parking/zones คืนทุกโซนพร้อมพิกัดในคำขอเดียว — เดิมต้องวน /api/buildings แล้วยิง
+  // /api/building ต่ออีกโซนละครั้ง เพียงเพื่อเอา parking_zone.lat/lng มาหาโซนที่ใกล้ที่สุด
+  let zonesData;
   try {
-    buildingsData = await fetchJSON('/api/buildings');
+    zonesData = await fetchJSON('/api/parking/zones');
   } catch (err) {
     renderError('โหลดข้อมูลลานจอดไม่สำเร็จ กรุณาลองใหม่');
     return;
   }
 
-  const buildings = buildingsData.buildings || [];
-  // ดึงพิกัดลานจอดผ่าน /api/building ทีละอาคาร (dedupe ด้วย zone_id กันยิงซ้ำ)
-  const buildingIdByZone = new Map(buildings.map((b) => [b.nearest_parking_zone_id, b.building_id]));
-  const details = await Promise.all(
-    [...buildingIdByZone.values()].map((id) =>
-      fetchJSON(`/api/building?building_id=${encodeURIComponent(id)}`).catch(() => null)
-    )
-  );
-  const zones = details.filter(Boolean).map((d) => d.parking_zone).filter(Boolean);
+  const zones = (zonesData.zones || []).map((entry) => entry.zone).filter(Boolean);
 
   if (zones.length === 0) {
     renderError('ยังไม่มีข้อมูลลานจอดในระบบครับ');

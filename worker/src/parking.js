@@ -5,6 +5,7 @@
 import { haversineDistanceMeters } from './utils.js';
 import {
   getParkingZoneByKey,
+  listParkingZones,
   putParkingReport,
   listParkingReportsForZone,
   getLastReportedAt,
@@ -108,15 +109,33 @@ export async function handleParkingZone(request, env) {
     return jsonResponse({ error: 'ไม่พบข้อมูลลานจอดนี้' }, 404);
   }
 
-  const status = await resolveParkingStatus(env, zoneId);
+  const status = await resolveStatusForZone(env, zone);
   return jsonResponse({ zone, parking_status: status });
 }
 
+// GET /api/parking/zones — คืนทุกลานจอด + สถานะปัจจุบัน ในคำขอเดียว
+// เดิม LIFF ต้องยิง /api/parking/zone ทีละโซน (8 request ต่อการเปิดแผนที่ 1 ครั้ง) และหน้า
+// รายงานที่จอดต้องวน /api/buildings + /api/building ทุกอาคารเพื่อเก็บพิกัดลานจอดมาหาโซนที่ใกล้สุด
+// endpoint นี้ยุบทั้งสอง flow เหลือ request เดียว (และอ่าน zone จาก KV โซนละครั้ง ไม่ใช่สองครั้ง)
+export async function handleParkingZones(request, env) {
+  const zones = await listParkingZones(env);
+  const statuses = await Promise.all(zones.map((zone) => resolveStatusForZone(env, zone)));
+  return jsonResponse({
+    zones: zones.map((zone, i) => ({ zone, parking_status: statuses[i] })),
+  });
+}
+
 // Aggregation window logic (MVP-SPEC §5) — ใช้ซ้ำใน building.js สำหรับ GET /api/building
+// รับ zoneId เมื่อผู้เรียกมีแค่ id (คืน null ถ้าไม่พบโซน) — ถ้ามี zone object อยู่แล้วให้เรียก
+// resolveStatusForZone ตรงๆ จะได้ไม่อ่าน BASELINE_DATA ซ้ำโดยเปล่าประโยชน์
 export async function resolveParkingStatus(env, zoneId) {
   const zone = await getParkingZoneByKey(env, zoneId);
   if (!zone) return null;
+  return resolveStatusForZone(env, zone);
+}
 
+export async function resolveStatusForZone(env, zone) {
+  const zoneId = zone.zone_id;
   const reports = await listParkingReportsForZone(env, zoneId);
   const cutoff = Date.now() - AGGREGATION_WINDOW_MINUTES * 60000;
   const recentReports = reports.filter((r) => new Date(r.reported_at).getTime() >= cutoff);

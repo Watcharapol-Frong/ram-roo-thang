@@ -25,14 +25,18 @@ ram-roo-thang/
 │       ├── building.js         — GET /api/building, GET /api/buildings
 │       ├── schedule.js         — POST/GET/DELETE /api/schedule (ไม่มี PII — ADR-0003)
 │       └── utils.js            — Haversine distance
-├── liff/                      — หน้า LIFF (nav / parking report / profile view)
+├── liff/                      — หน้า LIFF (map / parking report / profile view)
+│   ├── package.json           — npm run dev (localhost:8123) / dev:wrangler / deploy
+│   ├── wrangler.jsonc         — deploy เป็น static assets (คนละ Worker กับ backend)
 │   ├── index.html
 │   ├── app.js
-│   └── style.css
+│   ├── style.css
+│   └── components/            — RouteCalculator (Directions API), SheetManager (bottom sheet)
 ├── data/
 │   └── baseline-dataset.json  — ข้อมูลอาคาร/ลานจอดตั้งต้น (ต้องเพิ่มให้ครบตาม Phase 1)
 └── scripts/
-    └── seed-kv.sh              — สคริปต์ seed baseline dataset เข้า KV
+    ├── seed-kv.sh             — สคริปต์ seed baseline dataset เข้า KV
+    └── serve-liff.mjs         — static server สำหรับพัฒนา LIFF บน localhost (zero dependency)
 ```
 
 ## ส่วนเสริมนอกสเปกเดิม
@@ -66,6 +70,16 @@ npm run dev
 ```
 
 LIFF: แก้ `LIFF_ID`, `WORKER_BASE_URL`, `GOOGLE_MAPS_API_KEY` ใน `liff/app.js` ก่อน deploy (สร้าง LIFF app ผ่าน LINE Developers Console แยกต่างหาก ไม่ได้รวมอยู่ในโค้ดนี้)
+
+### พัฒนา LIFF บนเครื่องตัวเอง
+
+```bash
+cd liff
+npm run dev          # static server (ไม่ต้อง npm install) -> http://localhost:8123/?dev=1
+# npm install && npm run dev:wrangler   # ถ้าอยากเสิร์ฟผ่าน workerd จริงตาม wrangler.jsonc
+```
+
+`?dev=1` จะ stub LIFF SDK ทิ้งและจำลองพิกัด GPS ให้อยู่ในแคมปัส (เติม `&lat=&lng=` เพื่อจำลองตำแหน่งอื่น เช่น นอกแคมปัส) — **ทำงานเฉพาะ localhost เท่านั้น** บน production พารามิเตอร์นี้ไม่มีผลใดๆ โดยตั้งใจ (ไม่งั้นใครก็ปลอมพิกัดผ่าน geofence ของการรายงานลานจอดได้จากเบราว์เซอร์ธรรมดา)
 
 ## ยังไม่ได้ทำ / ต้องทำต่อ
 

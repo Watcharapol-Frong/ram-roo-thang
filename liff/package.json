@@ -1,0 +1,14 @@
+{
+  "name": "ram-roo-thang-liff",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node ../scripts/serve-liff.mjs .",
+    "dev:wrangler": "wrangler dev --port 8123",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.123.0"
+  }
+}

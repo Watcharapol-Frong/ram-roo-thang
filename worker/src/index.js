@@ -1,7 +1,7 @@
 // Router หลัก — LINE webhook + API endpoints (MVP-SPEC-for-Dev.md §2, §6)
 
 import { handleWebhookRequest } from './line.js';
-import { handleParkingReport, handleParkingStatus, handleParkingZone } from './parking.js';
+import { handleParkingReport, handleParkingStatus, handleParkingZone, handleParkingZones } from './parking.js';
 import { handleGetBuilding, handleListBuildings } from './building.js';
 import { handlePostSchedule, handleGetSchedule, handleDeleteSchedule } from './schedule.js';
 
@@ -53,6 +53,9 @@ async function route(request, env, ctx) {
   }
   if (method === 'GET' && pathname === '/api/parking/zone') {
     return handleParkingZone(request, env);
+  }
+  if (method === 'GET' && pathname === '/api/parking/zones') {
+    return handleParkingZones(request, env);
   }
 
   if (method === 'GET' && pathname === '/api/building') {

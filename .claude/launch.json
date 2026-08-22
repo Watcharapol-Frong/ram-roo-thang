@@ -4,7 +4,7 @@
     {
       "name": "liff-dev",
       "runtimeExecutable": "node",
-      "runtimeArgs": ["/private/tmp/claude-501/-Users-watcharapolcharoensuk-Desktop-ram-roo-thang-bot-main/8f86d140-fae5-4cd6-b54f-8aac476c45e6/scratchpad/static-server.mjs", "/Users/watcharapolcharoensuk/Desktop/ram-roo-thang-bot-main/liff", "8123"],
+      "runtimeArgs": ["scripts/serve-liff.mjs", "liff", "8123"],
       "port": 8123
     }
   ]

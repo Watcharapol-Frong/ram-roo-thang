@@ -2,7 +2,7 @@
 // MVP-SPEC-for-Dev.md §6.3-6.4 — เพิ่มหลังจากฉบับแรก เพราะ LIFF (browser) อ่าน Cloudflare KV ตรงๆ ไม่ได้
 
 import { getBuildingByKey, getParkingZoneByKey, listBuildings } from './data.js';
-import { resolveParkingStatus } from './parking.js';
+import { resolveStatusForZone } from './parking.js';
 
 function jsonResponse(body, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -24,10 +24,11 @@ export async function handleGetBuilding(request, env) {
     return jsonResponse({ error: 'ไม่พบข้อมูลอาคารนี้' }, 404);
   }
 
+  // อ่าน zone ครั้งเดียวแล้วส่ง object ต่อให้ resolveStatusForZone (เดิมเรียก resolveParkingStatus
+  // ด้วย zoneId ทำให้ BASELINE_DATA ถูกอ่านซ้ำสองรอบต่อ 1 request)
   const zoneId = building.nearest_parking_zone_id;
-  const [parkingZone, parkingStatus] = zoneId
-    ? await Promise.all([getParkingZoneByKey(env, zoneId), resolveParkingStatus(env, zoneId)])
-    : [null, null];
+  const parkingZone = zoneId ? await getParkingZoneByKey(env, zoneId) : null;
+  const parkingStatus = parkingZone ? await resolveStatusForZone(env, parkingZone) : null;
 
   return jsonResponse({
     building,

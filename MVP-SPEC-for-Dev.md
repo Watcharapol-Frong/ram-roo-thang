@@ -134,6 +134,19 @@ Key: `ratelimit:{user_id}` → value = ISO timestamp ล่าสุดที่
 ```
 (`source` เป็น `"live_report"` หรือ `"baseline_estimate"`)
 
+### 6.2.1 `GET /api/parking/zones`
+> ⚠️ **เพิ่มหลังจากฉบับแรก** — คืนทุกลานจอดพร้อมสถานะในคำขอเดียว ไม่เปลี่ยน logic ของ §5 เลย เป็นการยุบ request ล้วนๆ: เดิม LIFF ต้องยิง §6.2/§6.3 ทีละโซน/ทีละอาคารเพื่อประกอบข้อมูลชุดเดียวกันนี้เอง (เปิดแผนที่ 1 ครั้ง = 8+ request) ซึ่งเป็นภาระที่ชัดเจนตอนมีผู้ใช้พร้อมกันจำนวนมาก
+```json
+{
+  "zones": [
+    {
+      "zone": { "zone_id": "ZONE_VKB", "zone_name": "...", "lat": 13.75, "lng": 100.61, "baseline_status": "YELLOW" },
+      "parking_status": { "zone_id": "ZONE_VKB", "status": "RED", "source": "live_report", "as_of": "..." }
+    }
+  ]
+}
+```
+
 ### 6.3 `GET /api/building?building_id=VKB`
 > ⚠️ **เพิ่มหลังจากฉบับแรก** — ไม่ได้อยู่ใน scope ที่คุยกันตอนแรก แต่จำเป็นทางโครงสร้าง: LIFF (browser) อ่าน Cloudflare KV ตรงๆ ไม่ได้ ต้องมี endpoint ให้อ่านพิกัดอาคาร/ลานจอด ไปสร้าง Google Maps Embed URL (nav) และหาพิกัด geofence (parking report) เอง เป็น public read-only ไม่มี PII ไม่กระทบ decision อื่นที่ freeze ไว้
 ```json
