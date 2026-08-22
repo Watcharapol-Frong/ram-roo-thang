@@ -1,7 +1,7 @@
 // แก้ค่าด้านล่างก่อน deploy จริง (README "เริ่มงาน (Setup)")
 const LIFF_ID = '2011201463-2rdSwrwB';
 const WORKER_BASE_URL = 'https://ram-roo-thang-bot.frongbook.workers.dev';
-const GOOGLE_MAPS_API_KEY = 'REPLACE_ME_GOOGLE_MAPS_API_KEY';
+const GOOGLE_MAPS_API_KEY = 'AIzaSyAkKFL6P004xrx5mPR4Q1NXlCsy6MePTIE';
 
 const CONSENT_STORAGE_KEY = 'ram-roo-thang:schedule-consent';
 
