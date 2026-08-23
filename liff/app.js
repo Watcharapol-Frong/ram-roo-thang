@@ -416,8 +416,8 @@ async function renderMapView({ presetDestId, presetZoneId } = {}) {
       </div>
       <ul class="search-results" id="search-results" hidden></ul>
       <div class="map-controls">
-        <button class="view-toggle-btn" id="layer-toggle-btn" aria-label="สลับมุมมอง 2 มิติ/3 มิติ">3D</button>
         <div class="layer-row" id="layer-chips"></div>
+        <button class="view-toggle-btn" id="layer-toggle-btn" aria-label="สลับมุมมอง 2 มิติ/3 มิติ">3D</button>
       </div>
       <div id="notice-bar-slot"></div>
       <div id="action-sheet-slot"></div>
@@ -589,8 +589,8 @@ function renderLayerChips() {
   slot.innerHTML = MAP_LAYERS.map((layer) => {
     const on = appState.map.activeLayers.has(layer.id);
     return `<button class="layer-card${on ? ' active' : ''}" data-layer="${layer.id}"`
-      + ` style="--card-color:${layer.color}" aria-pressed="${on}">`
-      + `${icon(layer.id)}<span>${layer.label}</span></button>`;
+      + ` style="--card-color:${layer.color}" title="${layer.label}" aria-label="${layer.label}"`
+      + ` aria-pressed="${on}">${icon(layer.id)}</button>`;
   }).join('');
 
   slot.querySelectorAll('.layer-card').forEach((btn) => {
