@@ -103,6 +103,35 @@
     syncSheetHeight();
   }
 
+  // การ์ดระหว่างนำทาง — ตัดปุ่ม "เริ่มเดินทาง" ออก เหลือระยะที่เหลือกับปุ่มจบการนำทาง
+  // ไม่ใส่ปุ่มกากบาทเพราะการหยุดนำทางควรตั้งใจกด ไม่ใช่เผลอปัดโดนแล้วเส้นทางหาย
+  function showNavigationSheet({ title, remainingText, etaText, onStop }) {
+    const slot = sheetSlot();
+    if (!slot) return;
+    slot.innerHTML = `
+      <div class="nav-info-card">
+        <div class="sheet-handle"></div>
+        <h2>${title}</h2>
+        <div class="nav-stats">
+          <span><small>เหลืออีก</small>${remainingText}</span>
+          <span><small>ถึงใน</small>${etaText}</span>
+        </div>
+        <button class="btn btn-ghost" id="sheet-stop-btn">จบการนำทาง</button>
+      </div>
+    `;
+    document.getElementById('sheet-stop-btn').addEventListener('click', onStop);
+    syncSheetHeight();
+  }
+
+  // อัปเดตแค่ตัวเลขระหว่างเดิน ไม่ต้องเขียน innerHTML ใหม่ทั้งการ์ด ไม่งั้นปุ่มจะถูกสร้างใหม่
+  // ทุกครั้งที่ GPS ขยับ แล้ว event listener หลุด
+  function updateNavigationStats(remainingText, etaText) {
+    const stats = sheetSlot() && sheetSlot().querySelectorAll('.nav-stats span');
+    if (!stats || stats.length < 2) return;
+    stats[0].innerHTML = `<small>เหลืออีก</small>${remainingText}`;
+    stats[1].innerHTML = `<small>ถึงใน</small>${etaText}`;
+  }
+
   function showGpsWarning(onRetry) {
     const slot = noticeSlot();
     if (!slot) return;
@@ -124,6 +153,8 @@
     hide,
     setOnClose,
     showRouteSheet,
+    showNavigationSheet,
+    updateNavigationStats,
     showOffCampusSheet,
     showRouteErrorSheet,
     showGpsWarning,

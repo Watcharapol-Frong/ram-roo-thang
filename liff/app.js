@@ -57,7 +57,8 @@ const appState = {
     lineUserId: null,
   },
   target: null, // { id, name, type: 'BUILDING'|'PARKING'|'MY_CAR'|'COMMUNITY', coords: {lat,lng} }
-  parkingZones: [], // โหลดจาก /api/parking/zones — ใช้ทั้งทาสีเลเยอร์และหาลานจอดใกล้จุดหมาย
+  parkingZones: [],
+  navigation: { path: [] }, // โหลดจาก /api/parking/zones — ใช้ทั้งทาสีเลเยอร์และหาลานจอดใกล้จุดหมาย
   map: {
     instance: null,
     is3DMode: false,
@@ -415,6 +416,7 @@ async function renderMapView({ presetDestId, presetZoneId } = {}) {
         <button class="map-search-clear" id="search-clear" aria-label="ล้างคำค้น" hidden>&times;</button>
       </div>
       <ul class="search-results" id="search-results" hidden></ul>
+      <div id="nav-instruction-slot"></div>
       <div class="map-controls">
         <div class="layer-row" id="layer-chips"></div>
         <button class="view-toggle-btn" id="layer-toggle-btn" aria-label="สลับมุมมอง 2 มิติ/3 มิติ">3D</button>
@@ -777,46 +779,87 @@ function renderProfileHeaderHTML(profile) {
 }
 
 // renderProfileView — entry point สำหรับ ?mode=profile
-// โหลด LINE profile ก่อน (สำหรับ header) แล้วค่อยตรวจ consent gate
-async function renderProfileView() {
+// ตรวจสอบ consent ก่อน: ถ้ายังไม่เคยยินยอม แสดงหน้า consent gate ให้ติ๊กยินยอมก่อน
+// ถ้าเคยยินยอมแล้ว แสดงหน้า Profile เต็มรูปแบบทันที
+function renderProfileView() {
   const container = getApp();
+  const hasConsent = localStorage.getItem(CONSENT_STORAGE_KEY) === 'true';
+
+  if (hasConsent) {
+    renderFullProfile(container);
+  } else {
+    renderConsentGate(container);
+  }
+}
+
+// renderConsentGate — หน้าขอยืนยันความยินยอม (แสดงครั้งแรกก่อนเข้าหน้า Profile)
+function renderConsentGate(container) {
+  container.innerHTML = `
+    <div class="card consent-card">
+      <h2>ข้อตกลงและเงื่อนไขการใช้งาน <span class="badge-beta">Beta Test</span></h2>
+      <p>ระบบรามรู้ทาง มีฟีเจอร์สำหรับบันทึกและจัดการข้อมูลการสอบ เพื่ออำนวยความสะดวกในการใช้งาน (ช่วงทดสอบระบบ Beta Test)</p>
+      <p class="muted">
+        • ระบบจะจัดเก็บข้อมูล <strong>รหัสวิชา</strong> เพื่อนำไปประมวลผลข้อมูลการสอบ<br>
+        • ข้อมูลจะผูกกับบัญชี LINE ของคุณเท่านั้น ไม่มีการเก็บข้อมูลส่วนบุคคล เช่น ชื่อ-นามสกุล หรือเบอร์โทรศัพท์
+      </p>
+      <label class="consent-checkbox-label">
+        <input type="checkbox" id="consent-check" />
+        <span>ข้าพเจ้ารับทราบและยินยอมให้บันทึกข้อมูลดังกล่าว</span>
+      </label>
+      <button class="btn btn-primary" id="consent-accept-btn" disabled>ยืนยันและเข้าสู่ระบบ</button>
+    </div>
+  `;
+
+  const checkEl = document.getElementById('consent-check');
+  const btnEl = document.getElementById('consent-accept-btn');
+
+  checkEl.addEventListener('change', () => {
+    btnEl.disabled = !checkEl.checked;
+  });
+
+  btnEl.addEventListener('click', () => {
+    if (!checkEl.checked) return;
+    localStorage.setItem(CONSENT_STORAGE_KEY, 'true');
+    renderFullProfile(container);
+  });
+}
+
+// renderFullProfile — แสดงหน้าโปรไฟล์ (Header รูปโปรไฟล์/ชื่อ + ฟอร์มบันทึกและรายการวิชา)
+async function renderFullProfile(container) {
   container.innerHTML = '<p style="text-align:center;padding:40px 0;color:var(--muted)">กำลังโหลด...</p>';
 
   // ดึง LINE profile สำหรับ header — fail silently ถ้า LIFF ใช้ไม่ได้
   let profile = null;
   try {
     profile = await getUserProfile();
-  } catch (_) { /* แสดง header แบบไม่มีข้อมูล (ยังแสดงส่วนอื่นได้ตามปกติ) */ }
+  } catch (_) { /* แสดง header แบบไม่มีข้อมูล fallback */ }
 
-  // วาง profile header + slot สำหรับ schedule section
   container.innerHTML = `
     ${renderProfileHeaderHTML(profile)}
     <div id="profile-schedule-slot"></div>
   `;
 
   const slot = document.getElementById('profile-schedule-slot');
-  const hasConsent = localStorage.getItem(CONSENT_STORAGE_KEY) === 'true';
-  if (hasConsent) {
-    renderScheduleView(slot);
-  } else {
-    renderConsentGate(slot);
-  }
+  renderScheduleView(slot);
 }
 
-// renderConsentGate — UI acknowledgment เฉยๆ ไม่ใช่ PDPA flow เพราะไม่มี PII (CONTEXT.md)
-function renderConsentGate(container) {
-  container.innerHTML = `
-    <div class="card schedule-section">
-      <h2>บันทึกวิชาสอบ</h2>
-      <p>ฟีเจอร์นี้เก็บแค่ <strong>รหัสวิชา อาคาร และเวลาสอบ</strong> ผูกกับบัญชี LINE ของคุณเท่านั้น
-         ไม่เก็บชื่อหรือเบอร์โทร</p>
-      <button class="btn btn-primary" id="consent-accept-btn">เข้าใจแล้ว ใช้งานต่อ</button>
-    </div>
-  `;
-  document.getElementById('consent-accept-btn').addEventListener('click', () => {
-    localStorage.setItem(CONSENT_STORAGE_KEY, 'true');
-    renderScheduleView(container);
-  });
+// --- Helper: Floating Toast Notification ---
+let toastTimeout = null;
+function showToast(message) {
+  let toast = document.getElementById('profile-toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'profile-toast';
+    toast.className = 'profile-toast';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = message;
+  toast.classList.add('show');
+
+  if (toastTimeout) clearTimeout(toastTimeout);
+  toastTimeout = setTimeout(() => {
+    toast.classList.remove('show');
+  }, 2500);
 }
 
 async function renderScheduleView(container) {
@@ -835,101 +878,170 @@ async function renderScheduleView(container) {
 }
 
 function renderScheduleForm(container, userId) {
-  // min datetime = ตอนนี้ (ไม่ใช้แล้ว — เก็บไว้เผื่อวันหลังเปิดใหม่)
-  // ฟอร์มตอนนี้รับแค่รหัสวิชา ส่วนอาคาร/เวลาสอบมีข้อมูลอยู่ในระบบแล้ว
-
   container.innerHTML = `
     <div class="card schedule-section">
-      <h2>บันทึกวิชาสอบ</h2>
-      <form id="schedule-form">
-        <label>รหัสวิชา
-          <input type="text" name="course_code" placeholder="เช่น LAW1001" required />
-        </label>
-        <button type="submit" class="btn btn-primary">บันทึก</button>
-        <p id="schedule-form-result" class="schedule-form-result" aria-live="polite"></p>
+      <h2>บันทึกวิชาสอบ <span class="badge-beta">Beta Test</span></h2>
+      <p class="muted" style="margin-bottom: 12px;">พิมพ์หรือวางรหัสวิชา (เพิ่มหลายวิชาคั่นด้วยจุลภาคหรือเว้นวรรคได้)</p>
+      
+      <form id="course-add-form">
+        <div class="course-input-wrapper">
+          <input
+            type="text"
+            id="course-input"
+            class="course-input"
+            placeholder="เช่น LAW1001 หรือ ENG1001, RAM1000"
+            autocomplete="off"
+            autocorrect="off"
+            autocapitalize="characters"
+            required
+          />
+          <button type="submit" id="course-add-btn" class="course-add-btn">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+            <span>เพิ่ม</span>
+          </button>
+        </div>
       </form>
+
+      <div class="quick-suggest-section">
+        <span class="quick-suggest-title">วิชาพื้นฐานยอดนิยม:</span>
+        <div class="quick-suggest-chips">
+          <button type="button" class="chip-suggest" data-code="RAM1000">+ RAM1000</button>
+          <button type="button" class="chip-suggest" data-code="ENG1001">+ ENG1001</button>
+          <button type="button" class="chip-suggest" data-code="THA1003">+ THA1003</button>
+          <button type="button" class="chip-suggest" data-code="HIS1003">+ HIS1003</button>
+          <button type="button" class="chip-suggest" data-code="POL1100">+ POL1100</button>
+          <button type="button" class="chip-suggest" data-code="LAW1001">+ LAW1001</button>
+        </div>
+      </div>
     </div>
+
     <div class="card">
-      <h2>วิชาที่บันทึกไว้</h2>
-      <ul id="schedule-list" class="schedule-list">
-        <li class="schedule-empty">กำลังโหลด...</li>
-      </ul>
+      <div class="schedule-header-row">
+        <h2>วิชาที่ลงทะเบียนไว้</h2>
+        <span id="course-count-badge" class="course-count-badge">0</span>
+      </div>
+      <div id="course-chips-container" class="course-chips-container">
+        <div class="schedule-empty">กำลังโหลด...</div>
+      </div>
     </div>
   `;
 
-  document.getElementById('schedule-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const formData = new FormData(e.target);
-    const resultEl = document.getElementById('schedule-form-result');
-    const submitBtn = e.target.querySelector('[type="submit"]');
+  const inputEl = document.getElementById('course-input');
+  const addForm = document.getElementById('course-add-form');
+  const addBtn = document.getElementById('course-add-btn');
 
-    resultEl.textContent = 'กำลังบันทึก...';
-    resultEl.className = 'schedule-form-result';
-    submitBtn.disabled = true;
+  // ฟังก์ชันเพิ่มวิชา (รองรับทั้งพิมพ์เดี่ยว หลายวิชา หรือ Paste)
+  async function addCourses(rawText) {
+    if (!rawText) return;
+    const codes = rawText
+      .toUpperCase()
+      .split(/[\s,;\n]+/)
+      .map((c) => c.replace(/[^A-Z0-9]/g, ''))
+      .filter((c) => c.length >= 3);
 
-    try {
-      await fetchJSON('/api/schedule', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: userId,
-          course_code: formData.get('course_code'),
-        }),
-      });
-      resultEl.textContent = '✓ บันทึกสำเร็จ';
-      resultEl.className = 'schedule-form-result success';
-      e.target.reset();
-      await refreshScheduleList(userId);
-    } catch (err) {
-      resultEl.textContent = '✕ บันทึกไม่สำเร็จ กรุณาลองใหม่';
-      resultEl.className = 'schedule-form-result error';
-    } finally {
-      submitBtn.disabled = false;
+    if (codes.length === 0) {
+      showToast('⚠️ กรุณาระบุรหัสวิชาให้ถูกต้อง');
+      return;
     }
+
+    addBtn.disabled = true;
+    let addedCount = 0;
+
+    for (const code of codes) {
+      try {
+        await fetchJSON('/api/schedule', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: userId,
+            course_code: code,
+          }),
+        });
+        addedCount++;
+      } catch (err) {
+        console.error('Error adding course', code, err);
+      }
+    }
+
+    addBtn.disabled = false;
+    inputEl.value = '';
+    inputEl.focus(); // โฟกัสรอพิมพ์วิชาถัดไปต่อเนื่องทันที
+
+    if (addedCount > 0) {
+      showToast(codes.length === 1 ? `✓ เพิ่ม ${codes[0]} เรียบร้อย` : `✓ เพิ่มแล้ว ${addedCount} วิชา`);
+      await refreshScheduleList(userId);
+    } else {
+      showToast('✕ ไม่สามารถบันทึกได้ กรุณาลองใหม่');
+    }
+  }
+
+  // Submit form
+  addForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    addCourses(inputEl.value);
+  });
+
+  // Quick suggestions click
+  container.querySelectorAll('.chip-suggest').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      addCourses(chip.dataset.code);
+    });
   });
 }
 
 async function refreshScheduleList(userId) {
-  const listEl = document.getElementById('schedule-list');
-  if (!listEl) return;
+  const container = document.getElementById('course-chips-container');
+  const badgeEl = document.getElementById('course-count-badge');
+  if (!container) return;
 
   let data;
   try {
     data = await fetchJSON(`/api/schedule?user_id=${encodeURIComponent(userId)}`);
   } catch (err) {
-    listEl.innerHTML = '<li class="schedule-empty">โหลดรายการไม่สำเร็จ</li>';
+    container.innerHTML = '<div class="schedule-empty">โหลดรายการไม่สำเร็จ</div>';
     return;
   }
 
   const schedules = data.schedules || [];
+  if (badgeEl) badgeEl.textContent = schedules.length;
 
   if (schedules.length === 0) {
-    listEl.innerHTML = '<li class="schedule-empty">ยังไม่มีวิชาที่บันทึกไว้</li>';
+    container.innerHTML = '<div class="schedule-empty">ยังไม่มีวิชาที่ลงทะเบียนไว้</div>';
     return;
   }
 
-  listEl.innerHTML = schedules.map((s) => `
-    <li class="schedule-item">
-      <div class="schedule-item-info">
-        <div class="schedule-item-code">${escapeXml(s.course_code)}</div>
+  container.innerHTML = schedules
+    .map(
+      (s) => `
+      <div class="course-chip" id="chip-${escapeXml(s.schedule_id)}">
+        <span class="course-chip-code">${escapeXml(s.course_code)}</span>
+        <button type="button" class="course-chip-del" data-id="${escapeXml(s.schedule_id)}" data-code="${escapeXml(s.course_code)}" aria-label="ลบ">&times;</button>
       </div>
-      <button class="btn-delete" data-schedule-id="${escapeXml(s.schedule_id)}">ลบ</button>
-    </li>
-  `).join('');
+    `
+    )
+    .join('');
 
-  listEl.querySelectorAll('.btn-delete').forEach((btn) => {
+  container.querySelectorAll('.course-chip-del').forEach((btn) => {
     btn.addEventListener('click', async () => {
-      // ยืนยันก่อนลบ — ป้องกันกดผิด
-      if (!confirm('ต้องการลบวิชานี้ออกจากรายการ?')) return;
-      btn.disabled = true;
+      const scheduleId = btn.dataset.id;
+      const courseCode = btn.dataset.code;
+      const chip = document.getElementById(`chip-${scheduleId}`);
+
+      if (chip) chip.classList.add('is-deleting');
+
       try {
         await fetchJSON(
-          `/api/schedule?user_id=${encodeURIComponent(userId)}&schedule_id=${encodeURIComponent(btn.dataset.scheduleId)}`,
+          `/api/schedule?user_id=${encodeURIComponent(userId)}&schedule_id=${encodeURIComponent(scheduleId)}`,
           { method: 'DELETE' }
         );
+        showToast(`✕ ลบ ${courseCode} แล้ว`);
         await refreshScheduleList(userId);
       } catch (err) {
-        btn.disabled = false;
+        if (chip) chip.classList.remove('is-deleting');
+        showToast('ลบไม่สำเร็จ กรุณาลองใหม่');
       }
     });
   });
@@ -987,6 +1099,7 @@ function setViewMode(is3D) {
 // ทั้งหมดจึงต้องทิ้งแล้ววาดใหม่ — ถ้ามีจุดหมายค้างอยู่ก็เลือกซ้ำให้ เพื่อให้เส้นทาง/หมุด/การ์ดกลับมา
 // เหมือนก่อนกดสลับ ผู้ใช้จะเห็นแค่แผนที่กระพริบแวบเดียว
 function rebuildMap() {
+  NavigationController.stop();
   const previous = appState.map.instance;
   const center = previous.getCenter();
   const target = appState.target;
@@ -1161,6 +1274,7 @@ function googleDirectionsUrl({ lat, lng }) {
 
 // ยกเลิกจุดหมาย — กลับไปสถานะที่ยังไม่ได้เลือกอะไร (ปุ่มกากบาทบนการ์ด)
 function clearTarget() {
+  NavigationController.stop();
   appState.target = null;
   SheetManager.hide();
   RouteCalculator.clearRoute();
@@ -1206,6 +1320,85 @@ function formatDistance(meters) {
   return `${Math.round(meters)} m`;
 }
 
+// --- โหมดนำทาง ---
+
+// ตามตำแหน่งจริงด้วย watchPosition — แต่บน localhost (DEV_MODE) จำลองการเดินไปตามเส้นทางแทน
+// ไม่งั้นเทสไม่ได้เลยเพราะนั่งอยู่หน้าคอม ไม่ได้เดินอยู่ในแคมปัสจริง
+const NAV_SIMULATION_INTERVAL_MS = 700;
+const NAV_SIMULATION_STEP_METERS = 18;
+
+function watchUserPosition(onUpdate) {
+  if (DEV_MODE) return simulateWalk(onUpdate);
+  const watchId = navigator.geolocation.watchPosition(
+    (pos) => onUpdate({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+    (err) => console.error('watchPosition error', err),
+    { enableHighAccuracy: true, maximumAge: 2000, timeout: 15000 }
+  );
+  return () => navigator.geolocation.clearWatch(watchId);
+}
+
+// เดินไล่ไปตามเส้น path ของเส้นทางจริงทีละ ~18 ม. ให้เหมือนคนเดินความเร็วปกติ
+function simulateWalk(onUpdate) {
+  const path = appState.navigation.path;
+  if (!path || path.length < 2) return () => {};
+  let index = 0;
+  let progress = 0;
+  const timer = setInterval(() => {
+    if (index >= path.length - 1) return;
+    const from = path[index];
+    const to = path[index + 1];
+    const segment = haversineDistanceMeters(from.lat, from.lng, to.lat, to.lng);
+    progress += NAV_SIMULATION_STEP_METERS;
+    while (progress >= segment && index < path.length - 1) {
+      progress -= segment;
+      index += 1;
+      if (index >= path.length - 1) break;
+    }
+    const a = path[Math.min(index, path.length - 1)];
+    const b = path[Math.min(index + 1, path.length - 1)];
+    const segLen = haversineDistanceMeters(a.lat, a.lng, b.lat, b.lng) || 1;
+    const t = Math.min(1, progress / segLen);
+    onUpdate({ lat: a.lat + (b.lat - a.lat) * t, lng: a.lng + (b.lng - a.lng) * t });
+  }, NAV_SIMULATION_INTERVAL_MS);
+  return () => clearInterval(timer);
+}
+
+function startNavigation(target, route) {
+  if (!route.steps || !route.steps.length) return;
+  appState.navigation.path = route.path || [];
+
+  NavigationController.start({
+    steps: route.steps,
+    path: route.path,
+    destinationName: shortPlaceName(target.name),
+    watch: watchUserPosition,
+    onPosition: (location) => {
+      appState.user.location = location;
+      updateUserPin(location);
+      appState.map.instance.panTo(location);
+      const status = NavigationController.status();
+      if (status && !status.arrived) {
+        SheetManager.updateNavigationStats(formatDistance(status.remainingMeters), `${status.remainingMinutes} นาที`);
+      }
+    },
+    onArrive: () => {
+      SheetManager.updateNavigationStats('ถึงแล้ว', '-');
+    },
+    onStop: () => {
+      appState.navigation.path = [];
+      // กลับไปการ์ดปกติให้กดเริ่มเดินทางใหม่ได้ ถ้ายังเลือกจุดหมายเดิมค้างอยู่
+      if (appState.target) selectTarget(appState.target);
+    },
+  });
+
+  SheetManager.showNavigationSheet({
+    title: shortPlaceName(target.name),
+    remainingText: formatDistance(route.distanceMeters),
+    etaText: `${route.durationMinutes} นาที`,
+    onStop: () => NavigationController.stop(),
+  });
+}
+
 // Context Routing Matrix (Module_2_Technical_Specification.md §3)
 async function runContextRouting(target, originLocation, opts) {
   if (!appState.user.isInsideCampus) {
@@ -1230,7 +1423,7 @@ async function runContextRouting(target, originLocation, opts) {
       distanceText: formatDistance(route.distanceMeters),
       durationText: `${route.durationMinutes} นาที${originNote}`,
       actionLabel: 'เริ่มเดินทาง',
-      onAction: () => appState.map.instance.panTo(target.coords),
+      onAction: () => startNavigation(target, route),
     });
   } catch (err) {
     console.error('คำนวณเส้นทางไม่สำเร็จ', err);

@@ -33,6 +33,9 @@
           origin,
           destination,
           travelMode: google.maps.TravelMode[travelMode],
+          // ขอคำสั่งเลี้ยวเป็นภาษาไทยจาก Google เลย ("เลี้ยวขวา", "ปลายทางจะอยู่ทางขวา")
+          // จะได้ไม่ต้องแปล maneuver เองแล้วเสี่ยงแปลผิด
+          language: 'th',
         },
         (result, status) => {
           if (status !== 'OK' || !result.routes[0]) {
@@ -47,10 +50,24 @@
             distanceText: leg.distance.text,
             durationMinutes: Math.ceil(leg.duration.value / 60),
             durationText: leg.duration.text,
+            // ข้อมูลสำหรับโหมดนำทาง — ขั้นตอนย่อยพร้อมจุดจบของแต่ละขั้น ใช้เช็คว่าเดินถึงขั้นไหนแล้ว
+            steps: leg.steps.map((step) => ({
+              instruction: stripHtml(step.instructions),
+              distanceMeters: step.distance.value,
+              endLocation: { lat: step.end_location.lat(), lng: step.end_location.lng() },
+              maneuver: step.maneuver || '',
+            })),
+            path: result.routes[0].overview_path.map((p) => ({ lat: p.lat(), lng: p.lng() })),
           });
         }
       );
     });
+  }
+
+  // instructions มาเป็น HTML (มี <b>, <div> คั่นคำสั่งย่อย) แทนแท็กด้วยช่องว่างแทนการลบทิ้ง
+  // ไม่งั้นคำสั่งสองท่อนจะติดกันเป็น "เลี้ยวขวาปลายทางจะอยู่ทางขวา"
+  function stripHtml(html) {
+    return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
   }
 
   // เส้นประจากจุดเริ่ม/จุดจบจริง ไปหาปลายเส้นทางที่ Google เกาะถนนไว้ — วาดเฉพาะตอนห่างเกิน 3 ม.
