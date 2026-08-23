@@ -231,9 +231,9 @@ function icon(name) {
 }
 
 const MAP_LAYERS = [
-  { id: 'building', label: 'อาคาร', categories: ['building'] },
-  { id: 'parking', label: 'ที่จอดรถ', categories: ['parking'] },
-  { id: 'other', label: 'อื่นๆ', categories: ['shop', 'orther', 'other'] },
+  { id: 'building', label: 'อาคาร', color: '#6c5ce7', categories: ['building'] },
+  { id: 'parking', label: 'ที่จอดรถ', color: '#f0932b', categories: ['parking'] },
+  { id: 'other', label: 'อื่นๆ', color: '#22a06b', categories: ['shop', 'orther', 'other'] },
 ];
 
 const LAYER_STYLE = {
@@ -351,10 +351,8 @@ async function renderMapView({ presetDestId, presetZoneId } = {}) {
       </div>
       <ul class="search-results" id="search-results" hidden></ul>
       <div class="map-controls">
-        <div class="control-group" id="layer-chips"></div>
-        <div class="control-group">
-          <button class="map-control-btn is-text" id="layer-toggle-btn" aria-label="สลับมุมมอง 2 มิติ/3 มิติ">3D</button>
-        </div>
+        <button class="view-toggle-btn" id="layer-toggle-btn" aria-label="สลับมุมมอง 2 มิติ/3 มิติ">3D</button>
+        <div class="layer-row" id="layer-chips"></div>
       </div>
       <div id="notice-bar-slot"></div>
       <div id="action-sheet-slot"></div>
@@ -535,14 +533,14 @@ function renderSearch(features) {
 function renderLayerChips() {
   const slot = document.getElementById('layer-chips');
   if (!slot) return;
-  // ไอคอนล้วนเพื่อให้ปุ่มเล็กที่สุด — ชื่อเต็มยังอ่านได้จาก screen reader และ tooltip บนเดสก์ท็อป
   slot.innerHTML = MAP_LAYERS.map((layer) => {
     const on = appState.map.activeLayers.has(layer.id);
-    return `<button class="map-control-btn${on ? ' active' : ''}" data-layer="${layer.id}"`
-      + ` title="${layer.label}" aria-label="${layer.label}" aria-pressed="${on}">${icon(layer.id)}</button>`;
+    return `<button class="layer-card${on ? ' active' : ''}" data-layer="${layer.id}"`
+      + ` style="--card-color:${layer.color}" aria-pressed="${on}">`
+      + `${icon(layer.id)}<span>${layer.label}</span></button>`;
   }).join('');
 
-  slot.querySelectorAll('.map-control-btn').forEach((btn) => {
+  slot.querySelectorAll('.layer-card').forEach((btn) => {
     btn.addEventListener('click', () => {
       const id = btn.dataset.layer;
       const active = appState.map.activeLayers;

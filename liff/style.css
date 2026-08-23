@@ -107,52 +107,81 @@ body {
   transition: bottom 0.2s ease;
 }
 
-/* กลุ่มปุ่มเป็นก้อนมนสีเข้ม แยกกันเป็นก้อนๆ ตามดีไซน์ที่ทีมส่งมา
-   ปุ่มทั้งหมดพื้นเข้มเหมือนกันหมด สถานะเปิด/ปิดของเลเยอร์จึงบอกด้วยความสว่างของไอคอนแทนสีพื้น */
-.control-group {
+/* แถบควบคุมล่าง: การ์ดเลเยอร์เรียงเป็นแถวเดียวเต็มความกว้าง ปุ่ม 2D/3D ลอยชิดขวาเหนือแถว
+   ทั้งก้อนยกตัวขึ้นตามความสูงการ์ดจุดหมาย (--sheet-height ตั้งจาก SheetManager) จะได้ไม่โดนทับ */
+.map-controls {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: calc(var(--sheet-height, 0px) + 16px + env(safe-area-inset-bottom));
   display: flex;
   flex-direction: column;
-  border-radius: 20px;
-  overflow: hidden;
-  background: #1c1c1e;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
+  align-items: stretch;
+  gap: 10px;
+  transition: bottom 0.2s ease;
 }
 
-.map-control-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.view-toggle-btn {
+  align-self: flex-end;
   width: 52px;
   height: 52px;
   border: none;
-  border-radius: 0;
-  background: transparent;
-  color: rgba(255, 255, 255, 0.42);
+  border-radius: 18px;
+  background: #1c1c1e;
+  color: #ffffff;
   font-family: inherit;
   font-size: 0.85rem;
   font-weight: 700;
-  line-height: 1;
   cursor: pointer;
-  transition: color 0.15s ease, background 0.15s ease;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
 }
 
-/* เส้นคั่นบางๆ ระหว่างปุ่มในก้อนเดียวกัน */
-.control-group .map-control-btn + .map-control-btn {
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
-}
-
-.map-control-btn.active,
-.map-control-btn.is-text {
-  color: #ffffff;
-}
-
-.map-control-btn:active {
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.map-control-btn:disabled {
-  opacity: 0.35;
+.view-toggle-btn:disabled {
+  opacity: 0.4;
   cursor: default;
+}
+
+.layer-row {
+  display: flex;
+  gap: 8px;
+}
+
+/* เลเยอร์ที่เปิดอยู่ = สีเต็ม, ปิดอยู่ = จางลง (ไม่ใช่หายไป) จะได้รู้ว่ายังกดเปิดกลับได้
+   สีการ์ดสื่อถึงสิ่งที่วาดบนแผนที่ ไม่ได้สุ่มมา */
+.layer-card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+  height: 62px;
+  padding: 8px 6px;
+  border: none;
+  border-radius: 18px;
+  background: var(--card-color);
+  color: #ffffff;
+  font-family: inherit;
+  cursor: pointer;
+  opacity: 0.32;
+  filter: saturate(0.5);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  transition: opacity 0.15s ease, filter 0.15s ease;
+}
+
+.layer-card.active {
+  opacity: 1;
+  filter: none;
+}
+
+.layer-card span {
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 /* แถบค้นหาด้านบน */
