@@ -23,6 +23,7 @@
     if (!slot) return;
     slot.innerHTML = `
       <div class="nav-info-card">
+        <div class="sheet-handle"></div>
         <h2>${title}</h2>
         <div class="nav-stats"><span>📏 ${distanceText}</span><span>⏱ ${durationText}</span></div>
         <button class="btn btn-primary" id="sheet-action-btn">${actionLabel}</button>
@@ -43,6 +44,7 @@
       : '<p class="muted">📍 คุณอยู่นอกพื้นที่ ม.รามฯ แนะนำเดินทางด้วยรถยนต์หรือขนส่งสาธารณะมายังจุดนัดพบหลัก</p>';
     slot.innerHTML = `
       <div class="nav-info-card">
+        <div class="sheet-handle"></div>
         <h2>${title}</h2>
         ${destination}
         <button class="btn btn-primary" id="sheet-action-btn">🚗 นำทางด้วย Google Maps</button>
@@ -57,6 +59,7 @@
     if (!slot) return;
     slot.innerHTML = `
       <div class="nav-info-card">
+        <div class="sheet-handle"></div>
         <h2>${title}</h2>
         <p class="muted">ไม่พบเส้นทางสำหรับตำแหน่งนี้ครับ</p>
         <button class="btn btn-primary" id="sheet-action-btn">🧭 ไปที่ตำแหน่งอาคาร</button>

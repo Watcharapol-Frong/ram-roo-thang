@@ -219,9 +219,9 @@ const MASTER_GEOJSON_URL = 'data/ru_master.geojson';
 // หมายเหตุ: category ในไฟล์ต้นทางสะกดว่า "orther" (พิมพ์ผิดตั้งแต่ต้นทาง) — ไม่แก้ไฟล์ต้นทาง
 // เพื่อให้ sync กับของทีมได้ตรงๆ แต่รับค่าทั้งสองแบบไว้เผื่อวันหลังมีคนแก้
 const MAP_LAYERS = [
-  { id: 'building', label: '🏛 อาคาร', categories: ['building'] },
-  { id: 'parking', label: '🚗 ที่จอดรถ', categories: ['parking'] },
-  { id: 'other', label: '📍 อื่นๆ', categories: ['shop', 'orther', 'other'] },
+  { id: 'building', icon: '🏛', label: 'อาคาร', categories: ['building'] },
+  { id: 'parking', icon: '🚗', label: 'ที่จอดรถ', categories: ['parking'] },
+  { id: 'other', icon: '📍', label: 'อื่นๆ', categories: ['shop', 'orther', 'other'] },
 ];
 
 const LAYER_STYLE = {
@@ -328,9 +328,11 @@ async function renderMapView({ presetDestId, presetZoneId } = {}) {
   container.innerHTML = `
     <div class="map-container">
       <div id="map"></div>
-      <div class="map-top-bar">
-        <div class="layer-chips" id="layer-chips"></div>
-        <button class="layer-toggle-btn" id="layer-toggle-btn">🏢 3D</button>
+      <div class="map-controls">
+        <div class="control-group" id="layer-chips"></div>
+        <div class="control-group">
+          <button class="map-control-btn" id="layer-toggle-btn" aria-label="สลับมุมมอง 3 มิติ">🏢</button>
+        </div>
       </div>
       <div id="notice-bar-slot"></div>
       <div id="action-sheet-slot"></div>
@@ -433,12 +435,14 @@ async function loadParkingZones() {
 function renderLayerChips() {
   const slot = document.getElementById('layer-chips');
   if (!slot) return;
+  // ไอคอนล้วนเพื่อให้ปุ่มเล็กที่สุด — ชื่อเต็มยังอ่านได้จาก screen reader และ tooltip บนเดสก์ท็อป
   slot.innerHTML = MAP_LAYERS.map((layer) => {
     const on = appState.map.activeLayers.has(layer.id);
-    return `<button class="layer-chip${on ? ' active' : ''}" data-layer="${layer.id}">${layer.label}</button>`;
+    return `<button class="map-control-btn${on ? ' active' : ''}" data-layer="${layer.id}"`
+      + ` title="${layer.label}" aria-label="${layer.label}" aria-pressed="${on}">${layer.icon}</button>`;
   }).join('');
 
-  slot.querySelectorAll('.layer-chip').forEach((btn) => {
+  slot.querySelectorAll('.map-control-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       const id = btn.dataset.layer;
       const active = appState.map.activeLayers;
@@ -616,7 +620,7 @@ function toggle3D() {
   if (!btn || btn.disabled || !appState.map.instance) return;
   appState.map.is3DMode = !appState.map.is3DMode;
   applyViewMode();
-  btn.textContent = appState.map.is3DMode ? '🗺 2D' : '🏢 3D';
+  btn.textContent = appState.map.is3DMode ? '🗺' : '🏢';
   btn.classList.toggle('active', appState.map.is3DMode);
 }
 
@@ -646,7 +650,7 @@ function updateLayerToggleAvailability() {
   if (!allowed && appState.map.is3DMode) {
     appState.map.is3DMode = false;
     applyViewMode();
-    btn.textContent = '🏢 3D';
+    btn.textContent = '🏢';
     btn.classList.remove('active');
   }
 }
