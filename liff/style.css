@@ -337,3 +337,23 @@ body {
   font-size: 1rem;
   font-weight: 600;
 }
+
+/* ปุ่มยกเลิกจุดหมายบนการ์ด */
+.sheet-close {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 50%;
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.sheet-close:active {
+  background: #e8e8e8;
+}

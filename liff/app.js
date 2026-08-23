@@ -266,7 +266,7 @@ const BUILDING_MARKER_MIN_ZOOM = altitudeToZoom(CAMERA_PRESETS['2d'].altitudeMet
 
 let masterFeatures = null;
 let targetPin = null;
-let targetHighlight = null;
+let userPin = null;
 const layerOverlays = { building: [], parking: [], other: [] };
 const buildingMarkers = [];
 
@@ -322,6 +322,32 @@ async function loadMasterFeatures() {
   return masterFeatures;
 }
 
+// พื้นที่นอกรั้วมหาลัยรกตามาก (ตรอกซอกซอย ร้านค้า ป้ายเต็มไปหมด) แต่จะไปตั้ง Map style ให้ซ่อน
+// ก็ไม่ได้ เพราะสไตล์ที่ผูกกับ Map ID ทำให้ตึก 3D ของ Google หายไปทั้งหมด (เจอมาแล้ว)
+// เลยใช้วิธีวาดแผ่นสีขาวโปร่งคลุมทั้งโลกแล้วเจาะรูตรงแคมปัสแทน — ข้างนอกจางลงแต่ยังพอเห็นเป็นบริบท
+// ส่วนข้างในคมชัดเต็มที่ และไม่ไปยุ่งกับสไตล์แผนที่เลยจึงไม่กระทบ 3D
+function drawOutsideMask() {
+  const g = CAMPUS_CONSTANTS.GEOFENCE;
+  // วงนอกไล่ทวนเข็ม วงในไล่ตามเข็ม -> Google เจาะวงในเป็นรู
+  const world = [
+    { lat: -85, lng: -180 }, { lat: -85, lng: 0 }, { lat: -85, lng: 180 },
+    { lat: 85, lng: 180 }, { lat: 85, lng: 0 }, { lat: 85, lng: -180 },
+  ];
+  const campus = [
+    { lat: g.minLat, lng: g.minLng }, { lat: g.minLat, lng: g.maxLng },
+    { lat: g.maxLat, lng: g.maxLng }, { lat: g.maxLat, lng: g.minLng },
+  ];
+  new google.maps.Polygon({
+    map: appState.map.instance,
+    paths: [world, campus],
+    strokeWeight: 0,
+    fillColor: '#f7f7f7',
+    fillOpacity: 0.72,
+    clickable: false,
+    zIndex: -1,
+  });
+}
+
 function isWithinCampusBounds({ lat, lng }) {
   const g = CAMPUS_CONSTANTS.GEOFENCE;
   return lat >= g.minLat && lat <= g.maxLat && lng >= g.minLng && lng <= g.maxLng;
@@ -364,7 +390,7 @@ async function renderMapView({ presetDestId, presetZoneId } = {}) {
 
   buildingMarkers.length = 0;
   targetPin = null;
-  targetHighlight = null;
+  userPin = null;
   Object.keys(layerOverlays).forEach((k) => { layerOverlays[k] = []; });
 
   appState.map.instance = new google.maps.Map(document.getElementById('map'), {
@@ -378,6 +404,8 @@ async function renderMapView({ presetDestId, presetZoneId } = {}) {
     clickableIcons: false,
   });
   RouteCalculator.init(appState.map.instance);
+  SheetManager.setOnClose(clearTarget);
+  drawOutsideMask();
   appState.map.instance.addListener('center_changed', updateLayerToggleAvailability);
   appState.map.instance.addListener('zoom_changed', updateBuildingMarkerVisibility);
   updateLayerToggleAvailability();
@@ -754,60 +782,53 @@ function updateLayerToggleAvailability() {
   }
 }
 
-// --- หมุดจุดหมาย + ไฮไลต์ตึก ---
+// --- หมุดจุดหมาย + หมุดตำแหน่งผู้ใช้ ---
 
-// หมุดหยดน้ำสีเข้ม วาดเป็น SVG เองเพราะหมุดมาตรฐานของ Google เป็นสีแดงสด ตัดกับโทนแผนที่
-// และชนกับสีของพื้นที่ลานจอด (แดง = เต็ม) จนสับสนว่าอันไหนคือจุดหมาย
-function targetPinIcon() {
+// วาดหมุดเป็น SVG เองทั้งคู่ เพราะหมุดมาตรฐานของ Google เป็นสีแดงสด ชนกับสีพื้นที่ลานจอด
+// (แดง = เต็ม) จนสับสนว่าอันไหนคือจุดหมาย
+function pinIcon(fill, glyph) {
   const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="42" viewBox="0 0 32 42">'
-    + '<path d="M16 0C7.2 0 0 7.2 0 16c0 11.2 16 26 16 26s16-14.8 16-26c0-8.8-7.2-16-16-16z" fill="#1c1c1e"/>'
-    + '<circle cx="16" cy="16" r="6" fill="#ffffff"/></svg>';
+    + `<path d="M16 0C7.2 0 0 7.2 0 16c0 11.2 16 26 16 26s16-14.8 16-26c0-8.8-7.2-16-16-16z" fill="${fill}"/>`
+    + `<g transform="translate(16 16)" fill="#ffffff">${glyph}</g></svg>`;
   return {
     url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
     anchor: new google.maps.Point(16, 42),
   };
 }
 
-// ไฮไลต์คลุมตัวตึกด้วย polygon จริงจาก ru_master.geojson — ปกติเราไม่วาดรูปทรงอาคารแล้ว
-// แต่เฉพาะตึกที่เป็นจุดหมายวาดทับให้เห็นว่า "ตึกนี้แหละ" โดยเฉพาะตอนเปิด 3D ที่ตึกของ Google
-// บังป้ายชิปจนหาไม่เจอ
-//
-// ข้อจำกัด: Google วาดตึก 3D ของตัวเองทับ polygon ของเรา ไฮไลต์จึงเห็นเป็นฐานรอบตัวตึก
-// ไม่ได้ย้อมทั้งก้อนแบบในภาพตัวอย่าง — จะย้อมทั้งก้อนต้องมีข้อมูลความสูงตึกมาสร้าง extrusion เอง
-// ซึ่งชุดข้อมูลปัจจุบันไม่มี
-function updateTargetOverlays(target) {
+const TARGET_GLYPH = '<circle r="6"/>';
+// คนยืน: หัว + ลำตัว/ขา วาดหยาบๆ พอให้รู้ว่าเป็นคนที่ขนาด 32px
+const USER_GLYPH = '<circle cy="-4.5" r="3"/><path d="M0 -1.5c-2.6 0-4 1.6-4 3.6V4h2.2l.5 4h2.6l.5-4H4V2.1c0-2-1.4-3.6-4-3.6z"/>';
+
+function updateTargetPin(target) {
   const map = appState.map.instance;
   if (!map) return;
-
   if (targetPin) targetPin.setMap(null);
   targetPin = new google.maps.Marker({
     position: target.coords,
     map,
     title: target.name,
-    icon: targetPinIcon(),
+    icon: pinIcon('#1c1c1e', TARGET_GLYPH),
     zIndex: 999,
   });
+}
 
-  if (targetHighlight) {
-    targetHighlight.setMap(null);
-    targetHighlight = null;
-  }
+function clearTargetPin() {
+  if (targetPin) targetPin.setMap(null);
+  targetPin = null;
+}
 
-  if (target.type !== 'BUILDING' || !masterFeatures) return;
-  const feature = masterFeatures.find(
-    (f) => f.category === 'building' && f.polygon && buildingCodeFromName(f.name) === target.id
-  );
-  if (!feature) return;
-
-  targetHighlight = new google.maps.Polygon({
+// หมุดคนที่ตำแหน่งผู้ใช้ — วาดเองแทนจุดฟ้าของ Google เพราะจุดฟ้าจะขึ้นเฉพาะตอนได้สิทธิ์ GPS จริง
+// ส่วนเคส fallback (ไม่ให้สิทธิ์ แล้วคำนวณจากประตูหน้า) ต้องเห็นด้วยว่าเส้นทางเริ่มจากตรงไหน
+function updateUserPin(location) {
+  const map = appState.map.instance;
+  if (!map || !location) return;
+  if (userPin) userPin.setMap(null);
+  userPin = new google.maps.Marker({
+    position: location,
     map,
-    paths: feature.polygon,
-    strokeColor: '#f2b705',
-    strokeOpacity: 1,
-    strokeWeight: 3,
-    fillColor: '#f2b705',
-    fillOpacity: 0.55,
-    clickable: false,
+    title: 'ตำแหน่งของคุณ',
+    icon: pinIcon('#1560ff', USER_GLYPH),
     zIndex: 998,
   });
 }
@@ -818,11 +839,12 @@ async function selectTarget(target) {
   appState.target = target;
   SheetManager.hide();
   highlightBuildingMarker(target.type === 'BUILDING' ? target.id : null);
-  updateTargetOverlays(target);
+  updateTargetPin(target);
   appState.map.instance.panTo(target.coords);
 
   if (appState.user.isGpsAllowed && appState.user.location) {
     appState.user.isInsideCampus = isWithinCampusBounds(appState.user.location);
+    updateUserPin(appState.user.location);
     await runContextRouting(target, appState.user.location);
     return;
   }
@@ -833,6 +855,7 @@ async function selectTarget(target) {
     appState.user.isGpsAllowed = true;
     SheetManager.hideGpsWarning();
     appState.user.isInsideCampus = isWithinCampusBounds(userLocation);
+    updateUserPin(userLocation);
     await runContextRouting(target, userLocation);
   } catch (err) {
     appState.user.isGpsAllowed = false;
@@ -857,6 +880,16 @@ function nearestParkingZone(coords) {
 
 function googleDirectionsUrl({ lat, lng }) {
   return `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`;
+}
+
+// ยกเลิกจุดหมาย — กลับไปสถานะที่ยังไม่ได้เลือกอะไร (ปุ่มกากบาทบนการ์ด)
+function clearTarget() {
+  appState.target = null;
+  SheetManager.hide();
+  RouteCalculator.clearRoute();
+  clearTargetPin();
+  highlightBuildingMarker(null);
+  nudgeMapRepaint(appState.map.instance);
 }
 
 // Context Routing Matrix (Module_2_Technical_Specification.md §3)
@@ -900,6 +933,7 @@ async function runContextRouting(target, originLocation, opts) {
 function handleGpsDenied(target) {
   SheetManager.showGpsWarning(() => selectTarget(target));
   appState.user.isInsideCampus = true;
+  updateUserPin(CAMPUS_CONSTANTS.DEFAULT_ORIGIN);
   runContextRouting(target, CAMPUS_CONSTANTS.DEFAULT_ORIGIN, { isFallbackOrigin: true });
 }
 
@@ -1063,7 +1097,7 @@ async function refreshScheduleList(userId) {
 // มี source of truth เดียวอยู่ในไฟล์นี้ — เรียก initApp() (นิยามไว้ด้านบน) เป็น callback เมื่อโหลดเสร็จ
 (function loadGoogleMaps() {
   const script = document.createElement('script');
-  script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(GOOGLE_MAPS_API_KEY)}&callback=initApp`;
+  script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(GOOGLE_MAPS_API_KEY)}&callback=initApp&libraries=geometry`;
   script.async = true;
   script.onerror = () => mapsBoot.reject(new Error('โหลดสคริปต์ Google Maps ไม่สำเร็จ'));
   document.head.appendChild(script);

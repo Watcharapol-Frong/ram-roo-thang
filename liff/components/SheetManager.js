@@ -29,18 +29,32 @@
   }
 
   // ใช้ตอน on-campus (WALKING/DRIVING ภายในแคมปัส) — มีระยะทาง/เวลาจาก RouteCalculator แล้ว
+  // onClose มาจากผู้เรียก (app.js) เพราะการยกเลิกต้องล้าง state/เส้นทาง/หมุด ซึ่งอยู่นอก SheetManager
+  let onCloseHandler = null;
+
+  function bindClose() {
+    const btn = document.getElementById('sheet-close-btn');
+    if (btn && onCloseHandler) btn.addEventListener('click', onCloseHandler);
+  }
+
+  function setOnClose(handler) {
+    onCloseHandler = handler;
+  }
+
   function showRouteSheet({ title, distanceText, durationText, actionLabel, onAction }) {
     const slot = sheetSlot();
     if (!slot) return;
     slot.innerHTML = `
       <div class="nav-info-card">
         <div class="sheet-handle"></div>
+        <button class="sheet-close" id="sheet-close-btn" aria-label="ยกเลิกจุดหมาย">&times;</button>
         <h2>${title}</h2>
         <div class="nav-stats"><span>📏 ${distanceText}</span><span>⏱ ${durationText}</span></div>
         <button class="btn btn-primary" id="sheet-action-btn">${actionLabel}</button>
       </div>
     `;
     document.getElementById('sheet-action-btn').addEventListener('click', onAction);
+    bindClose();
     syncSheetHeight();
   }
 
@@ -57,12 +71,14 @@
     slot.innerHTML = `
       <div class="nav-info-card">
         <div class="sheet-handle"></div>
+        <button class="sheet-close" id="sheet-close-btn" aria-label="ยกเลิกจุดหมาย">&times;</button>
         <h2>${title}</h2>
         ${destination}
         <button class="btn btn-primary" id="sheet-action-btn">🚗 นำทางด้วย Google Maps</button>
       </div>
     `;
     document.getElementById('sheet-action-btn').addEventListener('click', onOpenGoogleMaps);
+    bindClose();
     syncSheetHeight();
   }
 
@@ -73,12 +89,14 @@
     slot.innerHTML = `
       <div class="nav-info-card">
         <div class="sheet-handle"></div>
+        <button class="sheet-close" id="sheet-close-btn" aria-label="ยกเลิกจุดหมาย">&times;</button>
         <h2>${title}</h2>
         <p class="muted">ไม่พบเส้นทางสำหรับตำแหน่งนี้ครับ</p>
         <button class="btn btn-primary" id="sheet-action-btn">🧭 ไปที่ตำแหน่งอาคาร</button>
       </div>
     `;
     document.getElementById('sheet-action-btn').addEventListener('click', onFocus);
+    bindClose();
     syncSheetHeight();
   }
 
@@ -101,6 +119,7 @@
 
   window.SheetManager = {
     hide,
+    setOnClose,
     showRouteSheet,
     showOffCampusSheet,
     showRouteErrorSheet,
