@@ -870,3 +870,23 @@ body.is-navigating .search-results {
 .btn-ghost:active {
   background: var(--bg);
 }
+
+/* ปุ่มปิด/เปิดเสียงบนแถบคำสั่ง */
+.nav-mute-btn {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  margin-left: auto;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+  cursor: pointer;
+}
+
+.nav-mute-btn:active {
+  background: rgba(255, 255, 255, 0.3);
+}

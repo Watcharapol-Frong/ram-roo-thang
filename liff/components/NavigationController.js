@@ -11,6 +11,32 @@
   const ARRIVED_RADIUS_M = 25;
   const WALKING_SPEED_M_PER_MIN = 75;
 
+  // ห่างจากเส้นทางเกินเท่านี้ = น่าจะเดินหลง — ตั้งกว้างกว่าความคลาดเคลื่อน GPS (5-15 ม.) พอสมควร
+  // และต้องหลุดติดกันหลายครั้งถึงจะนับ กัน GPS แกว่งทีเดียวแล้วสั่งคำนวณเส้นทางใหม่ทั้งที่เดินถูกอยู่
+  const OFF_ROUTE_RADIUS_M = 35;
+  const OFF_ROUTE_CONFIRM_COUNT = 3;
+  // เว้นช่วงก่อนยอมคำนวณใหม่อีกรอบ กันกรณีเส้นทางใหม่ก็ยังห่างอยู่แล้ววนขอซ้ำไม่หยุด
+  const REROUTE_COOLDOWN_MS = 10000;
+
+  // อ่านออกเสียงคำสั่งเลี้ยว — ใช้ Web Speech API ที่มีในเบราว์เซอร์อยู่แล้ว ไม่ต้องพึ่ง service ภายนอก
+  // ไม่ใช่ทุกเครื่องจะมีเสียงไทย ถ้าไม่มีก็ปล่อยให้เครื่องเลือกเสียงเองแทนการเงียบไปเฉยๆ
+  function speak(text, muted) {
+    if (muted || !text || !('speechSynthesis' in window)) return;
+    try {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = 'th-TH';
+      utterance.rate = 1.05;
+      window.speechSynthesis.speak(utterance);
+    } catch (err) {
+      console.error('พูดคำสั่งไม่สำเร็จ', err);
+    }
+  }
+
+  function stopSpeaking() {
+    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+  }
+
   // ลูกศรบอกทิศเลี้ยว — Google ส่ง maneuver มาหลายแบบมาก ยุบเหลือ 4 ทิศพอ ที่เหลือถือเป็นตรงไป
   const MANEUVER_ICON = {
     left: '<path d="M12 4l-7 7 7 7v-4.5h7v-5h-7V4z"/>',
@@ -26,6 +52,11 @@
     if (maneuver.includes('right')) return 'right';
     return 'straight';
   }
+
+  const MUTE_ICON = {
+    on: '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M4 9v6h4l5 5V4L8 9H4zm12.5 3a4.5 4.5 0 00-2.5-4v8a4.5 4.5 0 002.5-4z"/></svg>',
+    off: '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M4 9v6h4l5 5V4L8 9H4zm15.7-1.3l-1.4-1.4L16 8.6l-2.3-2.3v2.8l.9.9 5.1 5.1 1.4-1.4-2.3-2.3 1-1z"/></svg>',
+  };
 
   let session = null;
 
@@ -88,6 +119,35 @@
     // เดินหน้าอย่างเดียว กัน GPS แกว่งจนตัวเลข "เหลืออีก" เด้งกลับไปกลับมา
     session.progressMeters = Math.max(session.progressMeters, cumulative[nearestIndex]);
     session.stepIndex = stepIndexAt(session.progressMeters);
+    checkOffRoute(location, nearestDistance);
+  }
+
+  function checkOffRoute(location, distanceToRoute) {
+    if (distanceToRoute > OFF_ROUTE_RADIUS_M) session.offRouteCount += 1;
+    else session.offRouteCount = 0;
+
+    if (session.offRouteCount < OFF_ROUTE_CONFIRM_COUNT) return;
+    if (Date.now() - session.lastRerouteAt < REROUTE_COOLDOWN_MS) return;
+
+    session.offRouteCount = 0;
+    session.lastRerouteAt = Date.now();
+    speak('กำลังคำนวณเส้นทางใหม่', session.muted);
+    session.onOffRoute(location);
+  }
+
+  // เส้นทางใหม่หลังเดินหลง — เก็บ session เดิมไว้ (watch ยังทำงานอยู่) เปลี่ยนแค่เส้นทางกับความคืบหน้า
+  function updateRoute(route) {
+    if (!session) return;
+    session.steps = route.steps || [];
+    session.path = route.path && route.path.length > 1 ? route.path : [];
+    session.cumulative = buildCumulative(session.path);
+    session.stepEnds = buildStepEnds(session.steps);
+    session.totalMeters = route.distanceMeters || 0;
+    session.progressMeters = 0;
+    session.stepIndex = 0;
+    session.spokenStepIndex = -1;
+    session.arrived = false;
+    render(null);
   }
 
   function stepIndexAt(progress) {
@@ -109,13 +169,22 @@
       path,
       // ระยะสะสมของแต่ละจุดบนเส้นทาง ใช้วัดว่าเดินมาแล้วกี่เมตร แทนการเดาจากระยะถึงปลายขั้นตอน
       cumulative: buildCumulative(path),
+      // ระยะทางที่ Google บอก (leg.distance) ต่างจากความยาว overview_path เล็กน้อยเพราะ path ถูกลดจุด
+      // ยึดตัวเลขของ Google เป็นหลักแล้วเทียบสัดส่วนเอา ไม่งั้นการ์ดโชว์ 530 m แล้วพอเริ่มเดิน
+      // ตัวเลขกระโดดขึ้นเป็น 537 m ทั้งที่เพิ่งออกเดิน
+      totalMeters: config.totalMeters || 0,
       // ระยะสะสม ณ จุดจบของแต่ละขั้นตอน ใช้ตัดสินว่าตอนนี้อยู่ขั้นไหน
       stepEnds: buildStepEnds(config.steps || []),
       progressMeters: 0,
       stepIndex: 0,
+      spokenStepIndex: -1,
+      muted: false,
+      offRouteCount: 0,
+      lastRerouteAt: 0,
       destinationName: config.destinationName || '',
       onPosition: config.onPosition || (() => {}),
       onArrive: config.onArrive || (() => {}),
+      onOffRoute: config.onOffRoute || (() => {}),
       onStop: config.onStop || (() => {}),
       cancelWatch: null,
       arrived: false,
@@ -130,6 +199,7 @@
     const { cancelWatch, onStop } = session;
     session = null;
     if (cancelWatch) cancelWatch();
+    stopSpeaking();
     document.body.classList.remove('is-navigating');
     const slot = instructionSlot();
     if (slot) slot.innerHTML = '';
@@ -145,16 +215,28 @@
     const last = session.steps[session.steps.length - 1];
     if (last && !session.arrived && distanceBetween(location, last.endLocation) < ARRIVED_RADIUS_M) {
       session.arrived = true;
+      speak(`ถึง${session.destinationName}แล้ว`, session.muted);
       render(location);
       session.onArrive();
       return;
+    }
+
+    // พูดเฉพาะตอนเปลี่ยนขั้นตอน ไม่ใช่ทุกครั้งที่ GPS ขยับ ไม่งั้นจะพูดซ้ำทุกวินาที
+    if (session.stepIndex !== session.spokenStepIndex) {
+      session.spokenStepIndex = session.stepIndex;
+      const step = session.steps[session.stepIndex];
+      if (step) speak(step.instruction, session.muted);
     }
     render(location);
   }
 
   function remainingMeters() {
     if (!session) return 0;
-    return Math.max(0, routeLength() - session.progressMeters);
+    const pathLength = routeLength();
+    if (!pathLength) return 0;
+    const ratio = 1 - session.progressMeters / pathLength;
+    const total = session.totalMeters || pathLength;
+    return Math.max(0, total * ratio);
   }
 
   function render(location) {
@@ -186,8 +268,20 @@
           <strong>${step.instruction}</strong>
           <small>อีก ${formatMeters(toTurn)}</small>
         </div>
+        <button class="nav-mute-btn" id="nav-mute-btn" aria-label="${session.muted ? 'เปิดเสียง' : 'ปิดเสียง'}">
+          ${session.muted ? MUTE_ICON.off : MUTE_ICON.on}
+        </button>
       </div>
     `;
+    const muteBtn = document.getElementById('nav-mute-btn');
+    if (muteBtn) muteBtn.addEventListener('click', toggleMute);
+  }
+
+  function toggleMute() {
+    if (!session) return;
+    session.muted = !session.muted;
+    if (session.muted) stopSpeaking();
+    render(null);
   }
 
   function status() {
@@ -202,5 +296,5 @@
     };
   }
 
-  window.NavigationController = { start, stop, isActive, status };
+  window.NavigationController = { start, stop, isActive, status, updateRoute };
 })();

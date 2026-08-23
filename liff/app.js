@@ -1370,6 +1370,7 @@ function startNavigation(target, route) {
   NavigationController.start({
     steps: route.steps,
     path: route.path,
+    totalMeters: route.distanceMeters,
     destinationName: shortPlaceName(target.name),
     watch: watchUserPosition,
     onPosition: (location) => {
@@ -1383,6 +1384,19 @@ function startNavigation(target, route) {
     },
     onArrive: () => {
       SheetManager.updateNavigationStats('ถึงแล้ว', '-');
+    },
+    // เดินหลงออกนอกเส้นทาง — คำนวณใหม่จากตำแหน่งปัจจุบันไปจุดหมายเดิม แล้วยัดเส้นใหม่เข้า session
+    // ที่กำลังทำงานอยู่ ไม่ต้องเริ่มโหมดนำทางใหม่ (watch จะได้ไม่ขาดช่วง)
+    onOffRoute: async (location) => {
+      try {
+        const travelMode = target.type === 'PARKING' ? 'DRIVING' : 'WALKING';
+        const fresh = await RouteCalculator.calculateRoute(location, target.coords, travelMode);
+        appState.navigation.path = fresh.path || [];
+        NavigationController.updateRoute(fresh);
+        SheetManager.updateNavigationStats(formatDistance(fresh.distanceMeters), `${fresh.durationMinutes} นาที`);
+      } catch (err) {
+        console.error('คำนวณเส้นทางใหม่ไม่สำเร็จ', err);
+      }
     },
     onStop: () => {
       appState.navigation.path = [];
