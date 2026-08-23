@@ -64,6 +64,7 @@ const appState = {
     is3DMode: false,
     // เปิดครบทุกเลเยอร์ไว้ก่อน ผู้ใช้ค่อยกดปิดที่ไม่สนใจทิ้งเอง
     activeLayers: new Set(['building', 'parking', 'other']),
+    rebuilding: false,
   },
 };
 
@@ -880,22 +881,24 @@ async function renderScheduleView(container) {
 function renderScheduleForm(container, userId) {
   container.innerHTML = `
     <div class="card schedule-section">
-      <h2>บันทึกวิชาสอบ <span class="badge-beta">Beta Test</span></h2>
-      <p class="muted" style="margin-bottom: 12px;">พิมพ์หรือวางรหัสวิชา (เพิ่มหลายวิชาคั่นด้วยจุลภาคหรือเว้นวรรคได้)</p>
+      <div class="schedule-header-row">
+        <h2>วิชาที่บันทึกไว้ <span class="badge-beta">Beta</span></h2>
+        <span id="course-count-badge" class="course-count-badge">0</span>
+      </div>
       
-      <form id="course-add-form">
+      <form id="course-add-form" class="course-add-form">
         <div class="course-input-wrapper">
           <input
             type="text"
             id="course-input"
             class="course-input"
-            placeholder="เช่น LAW1001 หรือ ENG1001, RAM1000"
+            placeholder="เพิ่มรหัสวิชา เช่น LAW1001"
             autocomplete="off"
             autocorrect="off"
             autocapitalize="characters"
             required
           />
-          <button type="submit" id="course-add-btn" class="course-add-btn">
+          <button type="submit" id="course-add-btn" class="course-add-btn" aria-label="เพิ่มวิชา">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
               <line x1="12" y1="5" x2="12" y2="19"></line>
               <line x1="5" y1="12" x2="19" y2="12"></line>
@@ -905,24 +908,6 @@ function renderScheduleForm(container, userId) {
         </div>
       </form>
 
-      <div class="quick-suggest-section">
-        <span class="quick-suggest-title">วิชาพื้นฐานยอดนิยม:</span>
-        <div class="quick-suggest-chips">
-          <button type="button" class="chip-suggest" data-code="RAM1000">+ RAM1000</button>
-          <button type="button" class="chip-suggest" data-code="ENG1001">+ ENG1001</button>
-          <button type="button" class="chip-suggest" data-code="THA1003">+ THA1003</button>
-          <button type="button" class="chip-suggest" data-code="HIS1003">+ HIS1003</button>
-          <button type="button" class="chip-suggest" data-code="POL1100">+ POL1100</button>
-          <button type="button" class="chip-suggest" data-code="LAW1001">+ LAW1001</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="schedule-header-row">
-        <h2>วิชาที่ลงทะเบียนไว้</h2>
-        <span id="course-count-badge" class="course-count-badge">0</span>
-      </div>
       <div id="course-chips-container" class="course-chips-container">
         <div class="schedule-empty">กำลังโหลด...</div>
       </div>
@@ -971,7 +956,7 @@ function renderScheduleForm(container, userId) {
     inputEl.focus(); // โฟกัสรอพิมพ์วิชาถัดไปต่อเนื่องทันที
 
     if (addedCount > 0) {
-      showToast(codes.length === 1 ? `✓ เพิ่ม ${codes[0]} เรียบร้อย` : `✓ เพิ่มแล้ว ${addedCount} วิชา`);
+      showToast(codes.length === 1 ? `✓ เพิ่ม ${codes[0]} แล้ว` : `✓ เพิ่มแล้ว ${addedCount} วิชา`);
       await refreshScheduleList(userId);
     } else {
       showToast('✕ ไม่สามารถบันทึกได้ กรุณาลองใหม่');
@@ -982,13 +967,6 @@ function renderScheduleForm(container, userId) {
   addForm.addEventListener('submit', (e) => {
     e.preventDefault();
     addCourses(inputEl.value);
-  });
-
-  // Quick suggestions click
-  container.querySelectorAll('.chip-suggest').forEach((chip) => {
-    chip.addEventListener('click', () => {
-      addCourses(chip.dataset.code);
-    });
   });
 }
 
@@ -1088,33 +1066,47 @@ function toggle3D() {
 }
 
 function setViewMode(is3D) {
-  if (appState.map.is3DMode === is3D) return;
+  if (appState.map.is3DMode === is3D || appState.map.rebuilding) return;
   appState.map.is3DMode = is3D;
   const btn = document.getElementById('layer-toggle-btn');
-  if (btn) btn.textContent = is3D ? '2D' : '3D';
+  if (btn) {
+    btn.textContent = is3D ? '2D' : '3D';
+    // ล็อกปุ่มจนกว่าแผนที่ใหม่จะโหลดเสร็จ กดรัวๆ ระหว่างสร้างแผนที่จะได้ไม่ซ้อนกันจนค้าง
+    btn.disabled = true;
+  }
   rebuildMap();
 }
 
 // สลับโหมดต้องสร้าง map instance ใหม่ (mapId เปลี่ยนทีหลังไม่ได้) overlay ทุกตัวผูกกับแผนที่เดิม
-// ทั้งหมดจึงต้องทิ้งแล้ววาดใหม่ — ถ้ามีจุดหมายค้างอยู่ก็เลือกซ้ำให้ เพื่อให้เส้นทาง/หมุด/การ์ดกลับมา
-// เหมือนก่อนกดสลับ ผู้ใช้จะเห็นแค่แผนที่กระพริบแวบเดียว
+// ทั้งหมดจึงต้องทิ้งแล้ววาดใหม่
+//
+// สำคัญ: ห้ามเรียก selectTarget ซ้ำตรงนี้ เพราะมันไปยิง Directions API ใหม่ทุกครั้งที่สลับโหมด
+// ทำให้สะดุดชัดเจน (รอเน็ต) และการ์ดกระพริบหาย-โผล่ — เส้นทางไม่ได้เปลี่ยน แค่วาดของเดิมซ้ำก็พอ
+// โหมดนำทางก็ไม่หยุด NavigationController ไม่ได้ผูกกับ map instance (คุยผ่าน callback อย่างเดียว)
 function rebuildMap() {
-  NavigationController.stop();
   const previous = appState.map.instance;
   const center = previous.getCenter();
-  const target = appState.target;
+  appState.map.rebuilding = true;
 
   buildingMarkers.length = 0;
   Object.keys(layerOverlays).forEach((k) => { layerOverlays[k] = []; });
   targetPin = null;
   userPin = null;
-  SheetManager.hide();
 
-  createMapInstance({ lat: center.lat(), lng: center.lng() });
+  const map = createMapInstance({ lat: center.lat(), lng: center.lng() });
   renderLayers();
   if (appState.user.location) updateUserPin(appState.user.location);
-  if (target) selectTarget(target);
+  if (appState.target) {
+    updateTargetPin(appState.target);
+    highlightBuildingMarker(appState.target.type === 'BUILDING' ? appState.target.id : null);
+    RouteCalculator.redraw();
+  }
   applyViewMode();
+
+  google.maps.event.addListenerOnce(map, 'tilesloaded', () => {
+    appState.map.rebuilding = false;
+    updateLayerToggleAvailability();
+  });
 }
 
 // Google ปัด zoom ทศนิยมทิ้งระหว่างที่ยังโหลด tile อยู่ ต้องรอ tilesloaded ถึงจะยึดค่าได้จริง
@@ -1141,7 +1133,7 @@ function nudgeMapRepaint(map) {
 
 function updateLayerToggleAvailability() {
   const btn = document.getElementById('layer-toggle-btn');
-  if (!btn || !appState.map.instance) return;
+  if (!btn || !appState.map.instance || appState.map.rebuilding) return;
   const center = appState.map.instance.getCenter();
   const allowed = isWithinCampusBounds({ lat: center.lat(), lng: center.lng() });
   btn.disabled = !allowed;

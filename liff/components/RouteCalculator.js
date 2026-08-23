@@ -10,6 +10,9 @@
   // Directions API เกาะเส้นทางไปที่ "ถนนที่ใกล้ที่สุด" ปลายเส้นจึงไม่ตรงกับหมุดจุดหมาย/ตำแหน่ง
   // ผู้ใช้เป๊ะๆ เหลือช่องว่างค้างไว้ดูเหมือนเส้นขาด — ลากเส้นประเชื่อมช่วงที่ขาดให้เอง
   let connectorLines = [];
+  // เก็บผลลัพธ์ล่าสุดไว้วาดซ้ำตอนสลับ 2D/3D — การสลับต้องสร้าง map ใหม่ ถ้าไปเรียก Directions API
+  // ใหม่ทุกครั้งจะหน่วงเห็นได้ชัด (รอเน็ต) และเปลืองโควตาโดยไม่จำเป็น เพราะเส้นทางไม่ได้เปลี่ยน
+  let lastRender = null;
 
   function init(map) {
     directionsService = new google.maps.DirectionsService();
@@ -45,6 +48,7 @@
           directionsRenderer.setDirections(result);
           const leg = result.routes[0].legs[0];
           drawConnectors(origin, destination, leg);
+          lastRender = { result, origin, destination, leg };
           resolve({
             distanceMeters: leg.distance.value,
             distanceText: leg.distance.text,
@@ -101,10 +105,19 @@
     connectorLines = [];
   }
 
+  // วาดเส้นทางเดิมซ้ำบนแผนที่ปัจจุบัน (เรียกหลัง init กับ map ตัวใหม่) ไม่ยิง API ใหม่
+  function redraw() {
+    if (!lastRender || !directionsRenderer) return false;
+    directionsRenderer.setDirections(lastRender.result);
+    drawConnectors(lastRender.origin, lastRender.destination, lastRender.leg);
+    return true;
+  }
+
   function clearRoute() {
     if (directionsRenderer) directionsRenderer.setDirections({ routes: [] });
     clearConnectors();
+    lastRender = null;
   }
 
-  window.RouteCalculator = { init, calculateRoute, clearRoute };
+  window.RouteCalculator = { init, calculateRoute, clearRoute, redraw };
 })();
