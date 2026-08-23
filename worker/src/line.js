@@ -153,6 +153,19 @@ export async function handleWebhookRequest(request, env, ctx) {
   const signature = request.headers.get('x-line-signature');
   const bodyText = await request.text();
 
+  // เช็ค secret ก่อน verify — ถ้า secret หายไปจาก Cloudflare (เคยเกิดจริงตอน worker ถูกเขียนทับ)
+  // verifySignature จะเอาสตริง "undefined" ไปทำ HMAC แล้วไม่ตรงกับของ LINE ทุกครั้ง กลายเป็น 401
+  // ที่หน้าตาเหมือน "signature ปลอม" ทั้งที่เป็นปัญหา config — บอทเงียบสนิทโดยไม่มีอะไรให้ไล่ตาม
+  // แยกเคสนี้ออกมาเป็น 500 พร้อม log ชัดๆ จะได้เห็นสาเหตุจริงทันทีใน `wrangler tail`
+  if (!env.LINE_CHANNEL_SECRET || !env.LINE_CHANNEL_ACCESS_TOKEN) {
+    const missing = [
+      !env.LINE_CHANNEL_SECRET && 'LINE_CHANNEL_SECRET',
+      !env.LINE_CHANNEL_ACCESS_TOKEN && 'LINE_CHANNEL_ACCESS_TOKEN',
+    ].filter(Boolean).join(', ');
+    console.error(`Webhook misconfigured: secret หายไปจาก worker (${missing}) — แก้ด้วย \`cd worker && npm run deploy\``);
+    return new Response('Webhook misconfigured', { status: 500 });
+  }
+
   if (!signature || !(await verifySignature(bodyText, signature, env.LINE_CHANNEL_SECRET))) {
     return new Response('Unauthorized', { status: 401 });
   }

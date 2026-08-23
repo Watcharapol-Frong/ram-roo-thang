@@ -60,14 +60,32 @@ npx wrangler kv namespace create RATE_LIMIT
 npx wrangler kv namespace create STUDENT_SCHEDULES
 # เอา id ที่ได้ไปแทนที่ REPLACE_ME ใน wrangler.toml
 
-npx wrangler secret put LINE_CHANNEL_SECRET
-npx wrangler secret put LINE_CHANNEL_ACCESS_TOKEN
+cp .secrets.env.example .secrets.env
+# ใส่ค่า LINE_CHANNEL_SECRET / LINE_CHANNEL_ACCESS_TOKEN ลงใน .secrets.env (ครั้งเดียว)
+# ไฟล์นี้ถูก gitignore ไว้ — `npm run deploy` จะยิงขึ้น production ให้เองทุกครั้ง
 
 cd ..
 ./scripts/seed-kv.sh   # ⚠️ เช็ค syntax กับ wrangler version ก่อนรัน
 
 cd worker
 npm run dev
+```
+
+### Secrets บน production
+
+`worker/.secrets.env` (gitignore ไว้) เป็นแหล่งความจริงของ secrets ทั้งหมด — `npm run deploy` ส่งไฟล์นี้ไปกับทุก
+deployment ผ่าน `wrangler deploy --secrets-file` ซึ่งทำงานแบบ additive (ไม่ลบตัวที่ไม่ได้ระบุ)
+
+เหตุผล: เคยเจอ secrets บน Cloudflare หายทั้งชุดมาแล้ว (22 ส.ค. 2026 — version 14:54 ไม่มี secret แล้ว
+ทั้งที่ version 13:55 ยังมีครบ ตรงกับช่วงที่ Workers Builds จาก GitHub เขียนทับ worker ตัวนี้) พอ secret หาย
+`verifySignature` จะเอาสตริง `"undefined"` ไปทำ HMAC ทำให้ทุก webhook จาก LINE ถูกตอบ 401 — บอทเงียบสนิท
+โดยไม่มี error ให้เห็น การผูก secrets ไว้กับ deploy ทำให้อาการนี้กู้คืนเองในการ deploy ครั้งถัดไป
+
+```bash
+cd worker
+npm run deploy          # deploy + ยิง secrets ขึ้นไปด้วย (ใช้ตัวนี้เป็นปกติ)
+npm run secrets:push    # ยิงเฉพาะ secrets ไม่ deploy โค้ด
+npm run secrets:check   # ดูว่าบน production มี secret อะไรอยู่บ้าง — ต้องเห็นครบ 2 ตัว
 ```
 
 LIFF: แก้ `LIFF_ID`, `WORKER_BASE_URL`, `GOOGLE_MAPS_API_KEY` ใน `liff/app.js` ก่อน deploy (สร้าง LIFF app ผ่าน LINE Developers Console แยกต่างหาก ไม่ได้รวมอยู่ในโค้ดนี้)

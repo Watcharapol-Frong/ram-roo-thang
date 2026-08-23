@@ -5,7 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "deploy": "wrangler deploy --secrets-file .secrets.env",
+    "deploy:no-secrets": "wrangler deploy",
+    "secrets:push": "wrangler secret bulk .secrets.env",
+    "secrets:check": "wrangler secret list",
     "tail": "wrangler tail"
   },
   "devDependencies": {
