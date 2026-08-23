@@ -1486,47 +1486,72 @@ async function renderScheduleView(container) {
     return;
   }
 
+  try {
+    await loadExamLookup();
+  } catch (err) {
+    console.error('โหลดตารางสอบไม่สำเร็จ', err);
+    container.innerHTML = '<div class="card"><p class="muted">โหลดตารางสอบไม่สำเร็จ กรุณาลองใหม่อีกครั้ง</p></div>';
+    return;
+  }
+
   renderScheduleForm(container, userId);
   await refreshScheduleList(userId);
 }
 
-// ข้อมูลตารางสอบและห้องสอบ ภาค 1/2569 ม.รามคำแหง
-const COURSE_EXAM_DATA = {
-  'RAM1101': { building_id: 'VPB', room: 'VPB 301', date_th: '15 ต.ค. 69', time_th: '09:30 - 12:00', building_name: 'อาคารเวียงผา' },
-  'MGT1001': { building_id: 'TCB', room: 'TCB 401', date_th: '14 ต.ค. 69', time_th: '13:30 - 16:00', building_name: 'อาคารสุโขทัย' },
-  'LAW1001': { building_id: 'VKB', room: 'VKB 401', date_th: '19 ต.ค. 69', time_th: '09:30 - 12:00', building_name: 'อาคารเวียงคำ' },
-  'ECO1003': { building_id: 'ECB', room: 'ECB 201', date_th: '21 ต.ค. 69', time_th: '09:30 - 12:00', building_name: 'อาคารเศรษฐศาสตร์' },
-  'COS1101': { building_id: 'SCL', room: 'SCL 302', date_th: '25 ต.ค. 69', time_th: '13:30 - 16:00', building_name: 'อาคารปฏิบัติการวิทย์' },
-  'THA1001': { building_id: 'SBB', room: 'SBB 201', date_th: '25 ต.ค. 69', time_th: '09:30 - 12:00', building_name: 'อาคารศิลาบาตร' },
-  'ACC1101': { building_id: 'VKB', room: 'VKB 501', date_th: '26 ต.ค. 69', time_th: '09:30 - 12:00', building_name: 'อาคารเวียงคำ' },
-  'POL1100': { building_id: 'VPB', room: 'VPB 401', date_th: '27 ต.ค. 69', time_th: '13:30 - 16:00', building_name: 'อาคารเวียงผา' },
-  'RAM1000': { building_id: 'SBB', room: 'SBB 301', date_th: '27 ต.ค. 69', time_th: '09:30 - 12:00', building_name: 'อาคารศิลาบาตร' },
-  'ENG1001': { building_id: 'KLB', room: 'KLB 201', date_th: '28 ต.ค. 69', time_th: '13:30 - 16:00', building_name: 'อาคารกงไกรลาศ' },
-  'HIS1003': { building_id: 'KLB', room: 'KLB 305', date_th: '18 ต.ค. 69', time_th: '13:30 - 16:00', building_name: 'อาคารกงไกรลาศ' },
-  'MTH1003': { building_id: 'SCL', room: 'SCL 204', date_th: '21 ต.ค. 69', time_th: '09:30 - 12:00', building_name: 'อาคารปฏิบัติการวิทย์' },
-};
+// ตารางสอบจริง ภาค 1/2569 — 2,865 วิชา แปลงจาก PDF ประกาศของมหาวิทยาลัย
+// (ดู scripts/build-exam-schedule.py) โหลดครั้งเดียวแล้ว cache ไว้ ~10 KB หลัง gzip
+//
+// ของเดิมเป็นตารางฮาร์ดโค้ด 12 วิชา + fallback ที่ "แต่งข้อมูลขึ้นมาเอง" จากการ hash รหัสวิชา
+// พิมพ์รหัสอะไรลงไปก็ได้อาคาร ห้อง วัน เวลาออกมาเสมอทั้งที่ไม่มีข้อมูลจริงรองรับ — อันตรายมาก
+// สำหรับแอปนำทางไปสอบ เพราะผู้ใช้จะไปผิดที่ผิดเวลาโดยไม่รู้ตัว ตอนนี้ไม่มีข้อมูลก็บอกว่าไม่มี
+const EXAM_LOOKUP_URL = 'data/exam-lookup.json';
+let examLookupCache = null;
 
+async function loadExamLookup() {
+  if (examLookupCache) return examLookupCache;
+  const res = await fetch(EXAM_LOOKUP_URL);
+  if (!res.ok) throw new Error(`โหลดตารางสอบไม่สำเร็จ (${res.status})`);
+  examLookupCache = await res.json();
+  return examLookupCache;
+}
+
+// เวลาของแต่ละคาบ — ประกาศของมหาวิทยาลัยระบุแค่ตัวอักษร A/B ไม่ได้บอกเวลาไว้ในไฟล์
+// ค่าที่ใช้อยู่นี้มาจากตารางเดิมในโค้ด ซึ่งสอดคล้องกันครบทั้ง 12 วิชาที่เคยกรอกมือไว้
+// ถ้าประกาศจริงใช้เวลาอื่น แก้ที่เดียวตรงนี้พอ
+const EXAM_PERIOD_TIME = { A: '09:30 - 12:00', B: '13:30 - 16:00' };
+
+const THAI_MONTH_ABBR = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
+                         'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+
+function formatThaiExamDate(iso) {
+  const [year, month, day] = iso.split('-').map(Number);
+  return `${day} ${THAI_MONTH_ABBR[month - 1]} ${String(year + 543).slice(-2)}`;
+}
+
+// คืนข้อมูลสอบของวิชาหนึ่ง — ต้องเรียก loadExamLookup() ให้เสร็จก่อน
+// อาคาร/ห้องสอบยังไม่มีในระบบ (ประกาศตารางสอบไม่ได้ระบุไว้ รอไฟล์ผังห้องสอบแยก)
+// จึงคืน building_id เป็น null เสมอ ฝั่ง UI ต้องซ่อนปุ่มนำทางเมื่อยังไม่มีอาคาร
 function getCourseExamInfo(courseCode) {
   const code = (courseCode || '').toUpperCase().trim();
-  if (COURSE_EXAM_DATA[code]) return COURSE_EXAM_DATA[code];
+  const table = examLookupCache && examLookupCache.courses;
+  if (!table || !(code in table)) {
+    return { known: false, date_th: 'ไม่พบวิชานี้ในตารางสอบ', time_th: '', building_id: null, location_th: '' };
+  }
 
-  // Fallback คำนวณแบบสุ่มคงที่จากรหัสวิชา เพื่อให้แสดงผลตารางได้เสมอ
-  const buildings = [
-    { id: 'KLB', name: 'อาคารกงไกรลาศ', room: 'KLB 301' },
-    { id: 'VPB', name: 'อาคารเวียงผา', room: 'VPB 204' },
-    { id: 'VKB', name: 'อาคารเวียงคำ', room: 'VKB 501' },
-    { id: 'SBB', name: 'อาคารศิลาบาตร', room: 'SBB 402' },
-  ];
-  let hash = 0;
-  for (let i = 0; i < code.length; i++) hash = (hash + code.charCodeAt(i)) % buildings.length;
-  const b = buildings[hash];
-  const day = 15 + (hash * 3);
+  const value = table[code];
+  if (!value) {
+    // มีวิชาอยู่จริงแต่ไม่ได้สอบส่วนกลาง — คณะกำหนดวันเวลาเอง
+    return { known: true, date_th: 'คณะจัดสอบเอง', time_th: '', building_id: null, location_th: 'ติดต่อคณะเพื่อดูวันเวลาสอบ' };
+  }
+
+  const isoDate = value.slice(0, 10);
+  const periods = value.slice(10).split('');
   return {
-    building_id: b.id,
-    room: b.room,
-    date_th: `${day} ต.ค. 69`,
-    time_th: hash % 2 === 0 ? '09:30 - 12:00' : '13:30 - 16:00',
-    building_name: b.name,
+    known: true,
+    date_th: formatThaiExamDate(isoDate),
+    time_th: periods.map((p) => EXAM_PERIOD_TIME[p] || `คาบ ${p}`).join(' และ '),
+    building_id: null,
+    location_th: 'รอประกาศห้องสอบ',
   };
 }
 
@@ -1584,10 +1609,19 @@ function renderScheduleForm(container, userId) {
       return;
     }
 
+    // กันรหัสที่ไม่มีอยู่จริงตั้งแต่ต้นทาง — เดิมบันทึกอะไรก็ได้แล้วค่อยไปแต่งวันสอบให้ทีหลัง
+    const table = (examLookupCache && examLookupCache.courses) || {};
+    const unknown = codes.filter((c) => !(c in table));
+    const valid = codes.filter((c) => c in table);
+    if (valid.length === 0) {
+      showToast(`✕ ไม่พบ ${unknown.slice(0, 3).join(', ')} ในตารางสอบภาค ${examLookupCache ? examLookupCache.term : ''}`);
+      return;
+    }
+
     addBtn.disabled = true;
     let addedCount = 0;
 
-    for (const code of codes) {
+    for (const code of valid) {
       try {
         await fetchJSON('/api/schedule', {
           method: 'POST',
@@ -1599,7 +1633,8 @@ function renderScheduleForm(container, userId) {
         });
         addedCount++;
       } catch (err) {
-        if (DEV_MODE) addedCount++;
+        // เดิมนับว่าสำเร็จเมื่ออยู่ใน DEV_MODE ทำให้ toast ขึ้น "✓ เพิ่มแล้ว" ทั้งที่ POST คืน 400
+        // ปิดบังของจริงจนกว่าจะไปเปิดดู network เอง — dev ควรเห็นความพังชัดกว่า production ไม่ใช่น้อยกว่า
         console.error('Error adding course', code, err);
       }
     }
@@ -1609,7 +1644,8 @@ function renderScheduleForm(container, userId) {
     inputEl.focus(); // โฟกัสรอพิมพ์วิชาถัดไปต่อเนื่องทันที
 
     if (addedCount > 0) {
-      showToast(codes.length === 1 ? `✓ เพิ่ม ${codes[0]} แล้ว` : `✓ เพิ่มแล้ว ${addedCount} วิชา`);
+      const skipped = unknown.length ? ` (ข้าม ${unknown.length} รหัสที่ไม่พบ)` : '';
+      showToast(valid.length === 1 ? `✓ เพิ่ม ${valid[0]} แล้ว${skipped}` : `✓ เพิ่มแล้ว ${addedCount} วิชา${skipped}`);
       await refreshScheduleList(userId);
     } else {
       showToast('✕ ไม่สามารถบันทึกได้ กรุณาลองใหม่');
@@ -1681,13 +1717,14 @@ async function refreshScheduleList(userId) {
           <div class="exam-item-content">
             <div class="exam-col-code">${escapeXml(s.course_code)}</div>
             <div class="exam-col-info">
-              <div class="exam-datetime">${escapeXml(info.date_th)}<span class="exam-time-dot">•</span>${escapeXml(info.time_th)}</div>
-              <div class="exam-location">${escapeXml(info.room)} (${escapeXml(info.building_name)})</div>
+              <div class="exam-datetime">${escapeXml(info.date_th)}${info.time_th ? `<span class="exam-time-dot">•</span>${escapeXml(info.time_th)}` : ''}</div>
+              <div class="exam-location">${escapeXml(info.location_th)}</div>
             </div>
             <div class="exam-col-action">
-              <button type="button" class="btn-go-circle" data-dest="${escapeXml(info.building_id)}" title="นำทางไป ${escapeXml(info.building_name)}">
+              ${info.building_id ? `
+              <button type="button" class="btn-go-circle" data-dest="${escapeXml(info.building_id)}" title="นำทางไปห้องสอบ">
                 <span>Go</span>
-              </button>
+              </button>` : ''}
             </div>
           </div>
         </div>
