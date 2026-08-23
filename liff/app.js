@@ -148,7 +148,10 @@ function main() {
   // Flex Message Integration (Module_2_Technical_Specification.md §6)
   // dest_id&mode=nav -> เลือกอาคารให้ทันที, zone_id&mode=parking -> เลือกลานจอดให้ทันที
   // ไม่มี param เลย -> Single Canvas Overview (§1) ให้ผู้ใช้แตะเลือกเองจากแผนที่
-  if (params.has('dest_id')) {
+  // ?car=lat,lng — ลิงก์ที่เพื่อนแชร์ตำแหน่งรถมาให้ เปิดแล้วนำทางไปหารถคันนั้นได้เลย
+  if (params.has('car')) {
+    renderMapView({ presetCar: params.get('car') });
+  } else if (params.has('dest_id')) {
     renderMapView({ presetDestId: params.get('dest_id') });
   } else if (mode === 'parking' && params.has('zone_id')) {
     renderMapView({ presetZoneId: params.get('zone_id') });
@@ -419,7 +422,7 @@ function isWithinCampusBounds({ lat, lng }) {
   return lat >= g.minLat && lat <= g.maxLat && lng >= g.minLng && lng <= g.maxLng;
 }
 
-async function renderMapView({ presetDestId, presetZoneId } = {}) {
+async function renderMapView({ presetDestId, presetZoneId, presetCar } = {}) {
   const container = getApp();
 
   // เฉพาะ view นี้เท่านั้นที่ต้องมี Google Maps — ถ้าโหลดไม่ขึ้นให้เหลือทางไป view อื่นที่ยังใช้ได้
@@ -491,7 +494,14 @@ async function renderMapView({ presetDestId, presetZoneId } = {}) {
   renderLayers();
   updateCarPin();
 
-  if (presetDestId) {
+  if (presetCar) {
+    const [lat, lng] = presetCar.split(',').map(Number);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      renderError('ลิงก์ตำแหน่งรถไม่ถูกต้องครับ');
+      return;
+    }
+    await selectTarget({ id: 'MY_CAR', name: 'รถที่เพื่อนแชร์', type: 'MY_CAR', coords: { lat, lng } });
+  } else if (presetDestId) {
     const target = await resolvePresetBuilding(presetDestId, features);
     if (!target) {
       renderError('ไม่พบข้อมูลอาคารนี้ครับ กรุณาลองใหม่จากเมนูแชท');
@@ -2050,6 +2060,75 @@ function formatDistance(meters) {
   return `${Math.round(meters)} m`;
 }
 
+// --- แชร์จุดนัดพบเข้าแชท LINE ---
+
+// ลิงก์ deep link ที่รองรับอยู่แล้ว เพื่อนกดแล้วเปิดแผนที่ปักหมุดจุดนั้นให้ทันที ไม่ต้องพิมพ์หาเอง
+function shareUrlFor(target) {
+  const base = `https://liff.line.me/${LIFF_ID}`;
+  if (target.type === 'PARKING') return `${base}?mode=parking&zone_id=${encodeURIComponent(target.id)}`;
+  if (target.type === 'MY_CAR') return `${base}?car=${target.coords.lat},${target.coords.lng}`;
+  return `${base}?dest_id=${encodeURIComponent(target.id)}`;
+}
+
+function shareFlexMessage(target) {
+  const name = shortPlaceName(target.name);
+  const url = shareUrlFor(target);
+  return {
+    type: 'flex',
+    altText: `จุดนัดพบ: ${name}`,
+    contents: {
+      type: 'bubble',
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'sm',
+        contents: [
+          { type: 'text', text: 'จุดนัดพบใน ม.รามฯ', size: 'xs', color: '#8a8f98' },
+          { type: 'text', text: name, weight: 'bold', size: 'lg', wrap: true },
+        ],
+      },
+      footer: {
+        type: 'box',
+        layout: 'vertical',
+        contents: [
+          {
+            type: 'button',
+            style: 'primary',
+            color: '#06c755',
+            action: { type: 'uri', label: 'ดูเส้นทาง', uri: url },
+          },
+        ],
+      },
+    },
+  };
+}
+
+// ไล่ตามความสามารถของที่ที่เปิดอยู่: ในแอป LINE ส่งเข้าแชทได้เลย, นอก LINE ใช้แชร์ของระบบ,
+// ถ้าไม่มีอะไรเลยก็คัดลอกลิงก์ให้ — ผู้ใช้จะได้ไม่กดแล้วเงียบไม่ว่าจะเปิดจากที่ไหน
+async function shareTarget(target) {
+  const url = shareUrlFor(target);
+  const text = `จุดนัดพบ: ${shortPlaceName(target.name)}\n${url}`;
+
+  try {
+    if (!DEV_MODE && typeof liff !== 'undefined' && liff.isApiAvailable && liff.isApiAvailable('shareTargetPicker')) {
+      const result = await liff.shareTargetPicker([shareFlexMessage(target)]);
+      if (result) SheetManager.showNotice('ส่งจุดนัดพบให้เพื่อนแล้ว');
+      return;
+    }
+    if (navigator.share) {
+      await navigator.share({ title: shortPlaceName(target.name), text, url });
+      return;
+    }
+    await navigator.clipboard.writeText(url);
+    SheetManager.showNotice('คัดลอกลิงก์แล้ว วางในแชทเพื่อส่งให้เพื่อนได้เลย');
+  } catch (err) {
+    // ผู้ใช้กดยกเลิกหน้าเลือกผู้รับ ไม่ใช่ error ที่ต้องบอก
+    if (err && err.name === 'AbortError') return;
+    console.error('แชร์ไม่สำเร็จ', err);
+    SheetManager.showNotice('แชร์ไม่สำเร็จ ลองใหม่อีกครั้งครับ');
+  }
+}
+
 // --- จำที่จอดรถ + รายงานสภาพลานจอด ---
 
 const MY_CAR_STORAGE_KEY = 'ram-roo-thang:my-car';
@@ -2182,6 +2261,40 @@ function offerParkingActions(location) {
 
   appState.parking.offeredZoneId = zoneKey;
   showParkingActionSheet(here, location);
+}
+
+// ถึงลานจอดด้วยการนำทาง — ห้ามใช้ parkingZoneAt ตัดสินตรงนี้ เพราะการนำทางถือว่า "ถึง" เมื่อเข้าใกล้
+// 25 ม. และ Google พาไปจอดที่ถนนริมลาน ซึ่งมักอยู่นอก polygon ทำให้ตรวจไม่เจอแล้วไม่แสดงปุ่มอะไรเลย
+// ตรงนี้เรารู้อยู่แล้วว่าผู้ใช้ตั้งใจมาลานไหน (target.id) ใช้ค่านั้นเลยตรงกว่า
+// ส่วนการรายงานสภาพยังปลอดภัย เพราะ backend ตรวจ geofence 150 ม. ให้อีกชั้น
+function showParkingArrival(target) {
+  const location = appState.user.location || target.coords;
+  const here = parkingShapes.find((entry) => entry.zone && entry.zone.zone_id === target.id)
+    || parkingZoneAt(location);
+
+  SheetManager.showParkingArrivalSheet({
+    title: shortPlaceName(target.name),
+    onSaveCar: () => {
+      saveCar(location, target.name);
+      finishParkingNavigation();
+      if (here) showParkingActionSheet(here, location);
+      SheetManager.showNotice('บันทึกตำแหน่งรถแล้ว กดปุ่มรูปรถเพื่อกลับมาหาได้ทุกเมื่อ');
+    },
+    onFinish: () => {
+      finishParkingNavigation();
+      // ยังไม่ได้บันทึกรถ แต่ยืนอยู่ในลานจริง -> เสนอปุ่มบันทึก/รายงานต่อ ไม่ปล่อยให้จบห้วนๆ
+      const inZone = parkingZoneAt(location);
+      if (inZone) showParkingActionSheet(inZone, location);
+    },
+  });
+}
+
+// ต้องเคลียร์ target ก่อนหยุดนำทาง ไม่งั้น onStop ของ NavigationController จะเรียก selectTarget
+// ซ้ำแล้วการ์ดเส้นทางเด้งกลับมาทับการ์ดที่จอดรถที่เพิ่งเปิด
+function finishParkingNavigation() {
+  appState.target = null;
+  clearTargetPin();
+  NavigationController.stop();
 }
 
 function showParkingActionSheet(here, location) {
@@ -2459,16 +2572,7 @@ function startNavigation(target, route) {
     },
     onArrive: () => {
       SheetManager.updateNavigationStats('ถึงแล้ว', '-');
-      // ถึงลานจอดแล้วสิ่งที่ผู้ใช้จะทำต่อคือจอดรถ — เสนอปุ่มจำที่จอด/รายงานสภาพให้เลย
-      // ไม่ต้องกดจบการนำทางก่อนแล้วค่อยมาหาเมนูเอง
-      if (target.type !== 'PARKING') return;
-      const location = appState.user.location;
-      const here = parkingZoneAt(location);
-      if (!here) return;
-      NavigationController.stop();
-      appState.target = null;
-      clearTargetPin();
-      showParkingActionSheet(here, location);
+      if (target.type === 'PARKING') showParkingArrival(target);
     },
     // เดินหลงออกนอกเส้นทาง — คำนวณใหม่จากตำแหน่งปัจจุบันไปจุดหมายเดิม แล้วยัดเส้นใหม่เข้า session
     // ที่กำลังทำงานอยู่ ไม่ต้องเริ่มโหมดนำทางใหม่ (watch จะได้ไม่ขาดช่วง)
@@ -2561,6 +2665,7 @@ async function runContextRouting(target, originLocation, opts) {
       durationText: `${route.durationMinutes} นาที${originNote}`,
       actionLabel: 'เริ่มเดินทาง',
       onAction: () => startNavigation(target, route),
+      onShare: () => shareTarget(target),
     });
   } catch (err) {
     console.error('คำนวณเส้นทางไม่สำเร็จ', err);

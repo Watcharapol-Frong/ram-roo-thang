@@ -41,13 +41,18 @@
     onCloseHandler = handler;
   }
 
-  function showRouteSheet({ title, distanceText, durationText, actionLabel, onAction }) {
+  const SHARE_ICON = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M18 16.1c-.8 0-1.5.3-2 .8l-7.1-4.2c.1-.2.1-.5.1-.7s0-.5-.1-.7L16 7.1c.5.5 1.2.8 2 .8a3 3 0 100-6 3 3 0 00-3 3c0 .2 0 .5.1.7L8 9.8a3 3 0 100 4.4l7.1 4.2c0 .2-.1.4-.1.6a2.9 2.9 0 102.9-2.9z"/></svg>';
+
+  function showRouteSheet({ title, distanceText, durationText, actionLabel, onAction, onShare }) {
     const slot = sheetSlot();
     if (!slot) return;
     slot.innerHTML = `
       <div class="nav-info-card">
         <div class="sheet-handle"></div>
-        <button class="sheet-close" id="sheet-close-btn" aria-label="ยกเลิกจุดหมาย">&times;</button>
+        <div class="sheet-actions">
+          ${onShare ? `<button class="sheet-icon-btn" id="sheet-share-btn" aria-label="แชร์จุดนี้ให้เพื่อน">${SHARE_ICON}</button>` : ''}
+          <button class="sheet-close" id="sheet-close-btn" aria-label="ยกเลิกจุดหมาย">&times;</button>
+        </div>
         <h2>${title}</h2>
         <div class="nav-stats">
           <span><small>ระยะเวลา</small>${durationText}</span>
@@ -78,6 +83,25 @@
     `;
     document.getElementById('primer-allow-btn').addEventListener('click', onAllow);
     document.getElementById('primer-skip-btn').addEventListener('click', onSkip);
+    syncSheetHeight();
+  }
+
+  // ถึงลานจอดแล้ว — ให้ทั้งบันทึกรถและจบการนำทางอยู่ในการ์ดเดียว ผู้ใช้จะได้ไม่ต้องเลือกว่า
+  // จะจบก่อนแล้วหาปุ่มบันทึกทีหลัง (ซึ่งเดิมหาไม่เจอ)
+  function showParkingArrivalSheet({ title, onSaveCar, onFinish }) {
+    const slot = sheetSlot();
+    if (!slot) return;
+    slot.innerHTML = `
+      <div class="nav-info-card">
+        <div class="sheet-handle"></div>
+        <h2>ถึง ${title} แล้ว</h2>
+        <p class="muted sheet-hint">บันทึกตำแหน่งรถไว้ก่อนไหม จะได้กดนำทางกลับมาหาได้ตอนขากลับ</p>
+        <button class="btn btn-primary" id="arrival-save-car-btn">บันทึกตำแหน่งรถ</button>
+        <button class="btn btn-ghost" id="arrival-finish-btn">จบการนำทาง</button>
+      </div>
+    `;
+    document.getElementById('arrival-save-car-btn').addEventListener('click', onSaveCar);
+    document.getElementById('arrival-finish-btn').addEventListener('click', onFinish);
     syncSheetHeight();
   }
 
@@ -242,6 +266,7 @@
     setOnClose,
     showLocationPrimer,
     showParkingActionSheet,
+    showParkingArrivalSheet,
     showRouteSheet,
     showGpsDeniedSheet,
     showNavigationSheet,
