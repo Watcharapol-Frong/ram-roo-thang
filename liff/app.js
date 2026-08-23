@@ -224,9 +224,6 @@ const ICON_SVG = {
   building: '<path d="M3 21V5h8v4h10v12H3zm2-2h6V7H5v12zm8 0h6v-8h-6v8z"/>',
   parking: '<path d="M5 11l1.5-4.5A2 2 0 018.4 5h7.2a2 2 0 011.9 1.5L19 11v7a1 1 0 01-1 1h-1a1 1 0 01-1-1v-1H8v1a1 1 0 01-1 1H6a1 1 0 01-1-1v-7zm2.2-1h9.6l-1-3H8.2l-1 3zM7.5 15a1 1 0 100-2 1 1 0 000 2zm9 0a1 1 0 100-2 1 1 0 000 2z"/>',
   other: '<path d="M12 22s7-6.2 7-12A7 7 0 005 10c0 5.8 7 12 7 12zm0-9.5A2.5 2.5 0 1112 7a2.5 2.5 0 010 5.5z"/>',
-  zoomIn: '<path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5z"/>',
-  zoomOut: '<path d="M5 11h14v2H5z"/>',
-  locate: '<path d="M12 8a4 4 0 100 8 4 4 0 000-8zm0 6a2 2 0 110-4 2 2 0 010 4zm1-11h-2v2.06A7 7 0 005.06 11H3v2h2.06A7 7 0 0011 18.94V21h2v-2.06A7 7 0 0018.94 13H21v-2h-2.06A7 7 0 0013 5.06V3zm-1 14a5 5 0 110-10 5 5 0 010 10z"/>',
 };
 
 function icon(name) {
@@ -268,6 +265,8 @@ function altitudeToZoom(altitudeMeters) {
 const BUILDING_MARKER_MIN_ZOOM = altitudeToZoom(CAMERA_PRESETS['2d'].altitudeMeters) - 0.5;
 
 let masterFeatures = null;
+let targetPin = null;
+let targetHighlight = null;
 const layerOverlays = { building: [], parking: [], other: [] };
 const buildingMarkers = [];
 
@@ -356,24 +355,16 @@ async function renderMapView({ presetDestId, presetZoneId } = {}) {
         <div class="control-group">
           <button class="map-control-btn is-text" id="layer-toggle-btn" aria-label="สลับมุมมอง 2 มิติ/3 มิติ">3D</button>
         </div>
-        <div class="control-group">
-          <button class="map-control-btn" id="zoom-in-btn" aria-label="ซูมเข้า">${icon('zoomIn')}</button>
-          <button class="map-control-btn" id="zoom-out-btn" aria-label="ซูมออก">${icon('zoomOut')}</button>
-        </div>
-        <div class="control-group">
-          <button class="map-control-btn" id="locate-btn" aria-label="ไปที่ตำแหน่งของฉัน">${icon('locate')}</button>
-        </div>
       </div>
       <div id="notice-bar-slot"></div>
       <div id="action-sheet-slot"></div>
     </div>
   `;
   document.getElementById('layer-toggle-btn').addEventListener('click', toggle3D);
-  document.getElementById('zoom-in-btn').addEventListener('click', () => zoomBy(1));
-  document.getElementById('zoom-out-btn').addEventListener('click', () => zoomBy(-1));
-  document.getElementById('locate-btn').addEventListener('click', centerOnUser);
 
   buildingMarkers.length = 0;
+  targetPin = null;
+  targetHighlight = null;
   Object.keys(layerOverlays).forEach((k) => { layerOverlays[k] = []; });
 
   appState.map.instance = new google.maps.Map(document.getElementById('map'), {
@@ -732,30 +723,6 @@ function toggle3D() {
   btn.classList.toggle('active', appState.map.is3DMode);
 }
 
-function zoomBy(delta) {
-  const map = appState.map.instance;
-  if (!map) return;
-  map.setZoom(map.getZoom() + delta);
-  nudgeMapRepaint(map);
-}
-
-// ปุ่มหาตำแหน่งตัวเอง — ถ้าไม่ได้สิทธิ์ GPS ให้ขึ้นแถบเตือนเดิม (พฤติกรรมเดียวกับตอนเลือกจุดหมาย)
-// ไม่ได้ทำหมุดตำแหน่งผู้ใช้ เพราะจะซ้ำกับหมุดฟ้าของ Google เองที่ขึ้นมาพร้อมกัน
-async function centerOnUser() {
-  try {
-    const location = await getUserLocation();
-    appState.user.location = location;
-    appState.user.isGpsAllowed = true;
-    appState.user.isInsideCampus = isWithinCampusBounds(location);
-    SheetManager.hideGpsWarning();
-    appState.map.instance.panTo(location);
-    nudgeMapRepaint(appState.map.instance);
-  } catch (err) {
-    appState.user.isGpsAllowed = false;
-    SheetManager.showGpsWarning(centerOnUser);
-  }
-}
-
 function applyViewMode() {
   const map = appState.map.instance;
   const preset = CAMERA_PRESETS[appState.map.is3DMode ? '3d' : '2d'];
@@ -787,12 +754,71 @@ function updateLayerToggleAvailability() {
   }
 }
 
+// --- หมุดจุดหมาย + ไฮไลต์ตึก ---
+
+// หมุดหยดน้ำสีเข้ม วาดเป็น SVG เองเพราะหมุดมาตรฐานของ Google เป็นสีแดงสด ตัดกับโทนแผนที่
+// และชนกับสีของพื้นที่ลานจอด (แดง = เต็ม) จนสับสนว่าอันไหนคือจุดหมาย
+function targetPinIcon() {
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="42" viewBox="0 0 32 42">'
+    + '<path d="M16 0C7.2 0 0 7.2 0 16c0 11.2 16 26 16 26s16-14.8 16-26c0-8.8-7.2-16-16-16z" fill="#1c1c1e"/>'
+    + '<circle cx="16" cy="16" r="6" fill="#ffffff"/></svg>';
+  return {
+    url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
+    anchor: new google.maps.Point(16, 42),
+  };
+}
+
+// ไฮไลต์คลุมตัวตึกด้วย polygon จริงจาก ru_master.geojson — ปกติเราไม่วาดรูปทรงอาคารแล้ว
+// แต่เฉพาะตึกที่เป็นจุดหมายวาดทับให้เห็นว่า "ตึกนี้แหละ" โดยเฉพาะตอนเปิด 3D ที่ตึกของ Google
+// บังป้ายชิปจนหาไม่เจอ
+//
+// ข้อจำกัด: Google วาดตึก 3D ของตัวเองทับ polygon ของเรา ไฮไลต์จึงเห็นเป็นฐานรอบตัวตึก
+// ไม่ได้ย้อมทั้งก้อนแบบในภาพตัวอย่าง — จะย้อมทั้งก้อนต้องมีข้อมูลความสูงตึกมาสร้าง extrusion เอง
+// ซึ่งชุดข้อมูลปัจจุบันไม่มี
+function updateTargetOverlays(target) {
+  const map = appState.map.instance;
+  if (!map) return;
+
+  if (targetPin) targetPin.setMap(null);
+  targetPin = new google.maps.Marker({
+    position: target.coords,
+    map,
+    title: target.name,
+    icon: targetPinIcon(),
+    zIndex: 999,
+  });
+
+  if (targetHighlight) {
+    targetHighlight.setMap(null);
+    targetHighlight = null;
+  }
+
+  if (target.type !== 'BUILDING' || !masterFeatures) return;
+  const feature = masterFeatures.find(
+    (f) => f.category === 'building' && f.polygon && buildingCodeFromName(f.name) === target.id
+  );
+  if (!feature) return;
+
+  targetHighlight = new google.maps.Polygon({
+    map,
+    paths: feature.polygon,
+    strokeColor: '#f2b705',
+    strokeOpacity: 1,
+    strokeWeight: 3,
+    fillColor: '#f2b705',
+    fillOpacity: 0.55,
+    clickable: false,
+    zIndex: 998,
+  });
+}
+
 // ผู้ใช้แตะเลือกอาคาร/ลานจอด/ร้านค้าจากแผนที่ (หรือถูกเลือกให้อัตโนมัติจาก dest_id/zone_id) —
 // จุดเริ่มต้นของ Context Routing Matrix (§3) ทั้งหมด
 async function selectTarget(target) {
   appState.target = target;
   SheetManager.hide();
   highlightBuildingMarker(target.type === 'BUILDING' ? target.id : null);
+  updateTargetOverlays(target);
   appState.map.instance.panTo(target.coords);
 
   if (appState.user.isGpsAllowed && appState.user.location) {
