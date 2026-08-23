@@ -124,8 +124,30 @@ function initApp() {
   mapsBoot.resolve();
 }
 
-function main() {
+// LINE ไม่ได้พาไป endpoint พร้อม query string ตรงๆ — มันยัดของจริงไว้ใน ?liff.state= แทน
+// เปิด https://liff.line.me/<id>?mode=profile จะได้ https://<endpoint>/?liff.state=%3Fmode%3Dprofile
+// แล้ว SDK ค่อยพาไป ?mode=profile อีกทีหลัง liff.init() เสร็จ
+//
+// main() รันทันทีโดยไม่รอ SDK (ตั้งใจ — แต่ละ view รอ dependency ของตัวเอง) จังหวะแรกจึงอ่าน mode
+// ไม่เจอ ตกไปเข้าสาขาสุดท้ายคือ renderMapView({}) ผู้ใช้เห็นแผนที่แวบหนึ่งก่อนทุกครั้ง แล้วค่อยเด้ง
+// เป็นหน้าที่ขอจริงตอนโหลดใหม่ — กระทบทั้ง mode=profile/shop/settings/feedback และ dest_id/zone_id/car
+// จาก Flex Message ด้วย อ่านจาก liff.state ตั้งแต่เฟรมแรกเลย จะได้ route ถูกโดยไม่ต้องรอ SDK
+function readAppParams() {
   const params = new URLSearchParams(window.location.search);
+  const state = params.get('liff.state');
+  if (!state) return params;
+  const inner = new URLSearchParams(state.startsWith('?') ? state.slice(1) : state);
+  // param ที่ติดมานอก liff.state ยังใช้ได้ แต่ตัวใน liff.state ชนะ เพราะนั่นคือเจตนาของลิงก์ที่ถูกกด
+  for (const [key, value] of params) {
+    if (key !== 'liff.state' && !inner.has(key)) inner.set(key, value);
+  }
+  return inner;
+}
+
+const APP_PARAMS = readAppParams();
+
+function main() {
+  const params = APP_PARAMS;
   const mode = params.get('mode');
 
   if (mode === 'profile') {
@@ -2776,6 +2798,13 @@ async function retryLocation(target) {
 // โหลด Google Maps JS API script แบบ dynamic (ไม่ผูกไว้ตรงๆ ใน index.html) เพื่อให้ GOOGLE_MAPS_API_KEY
 // มี source of truth เดียวอยู่ในไฟล์นี้ — เรียก initApp() (นิยามไว้ด้านบน) เป็น callback เมื่อโหลดเสร็จ
 (function loadGoogleMaps() {
+  // หน้า profile/shop/settings/feedback ไม่ได้แตะแผนที่เลย แต่เดิมโหลดสคริปต์ Maps ทุกครั้งอยู่ดี
+  // เสีย quota ฟรีทุกครั้งที่เปิดหน้าโปรไฟล์ — ข้ามไปเลยถ้า mode ที่ขอมาไม่ใช้แผนที่
+  // (mapsBoot จะถูก reject ตอน timeout ซึ่งไม่มีใคร await ในหน้าพวกนี้ และ deferred() กัน
+  //  unhandled rejection ไว้ให้แล้ว)
+  const MAP_FREE_MODES = ['profile', 'shop', 'settings', 'feedback'];
+  if (MAP_FREE_MODES.includes(APP_PARAMS.get('mode'))) return;
+
   const script = document.createElement('script');
   script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(GOOGLE_MAPS_API_KEY)}&callback=initApp&libraries=geometry`;
   script.async = true;
