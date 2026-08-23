@@ -2145,8 +2145,30 @@ function loadSavedCar() {
   }
 }
 
-function saveCar(location, zoneName) {
-  const car = { lat: location.lat, lng: location.lng, zoneName: zoneName || '', savedAt: new Date().toISOString() };
+// ตอนกด "ถึงแล้ว" ผู้ใช้ยังนั่งอยู่ในรถริมถนนหน้าลาน ยังไม่ได้เข้าไปจอดจริง ถ้าบันทึกพิกัดตรงนั้น
+// ตรงๆ หมุดรถจะไปโผล่นอกลานบนถนน ซึ่งผิดและชวนสับสนตอนกลับมาหา
+// ถ้าอยู่นอกขอบลาน ให้ยึดกลางลานไว้ก่อนแล้วทำเครื่องหมายว่าเป็นค่าประมาณ พอเดินเข้าไปจอดจริง
+// การ์ดในลานจะเสนอ "อัปเดตตำแหน่งรถ" ให้บันทึกจุดที่จอดจริงทับได้
+function resolveCarLocation(location, zoneEntry) {
+  if (!zoneEntry || !location) {
+    return { coords: location || null, approximate: false };
+  }
+  const inside = google.maps.geometry.poly.containsLocation(
+    new google.maps.LatLng(location.lat, location.lng),
+    zoneEntry.shape
+  );
+  if (inside) return { coords: location, approximate: false };
+  return { coords: { lat: zoneEntry.feature.lat, lng: zoneEntry.feature.lng }, approximate: true };
+}
+
+function saveCar(location, zoneName, approximate) {
+  const car = {
+    lat: location.lat,
+    lng: location.lng,
+    zoneName: zoneName || '',
+    approximate: Boolean(approximate),
+    savedAt: new Date().toISOString(),
+  };
   try {
     localStorage.setItem(MY_CAR_STORAGE_KEY, JSON.stringify(car));
   } catch (err) {
@@ -2275,10 +2297,13 @@ function showParkingArrival(target) {
   SheetManager.showParkingArrivalSheet({
     title: shortPlaceName(target.name),
     onSaveCar: () => {
-      saveCar(location, target.name);
+      const resolved = resolveCarLocation(location, here);
+      saveCar(resolved.coords, target.name, resolved.approximate);
       finishParkingNavigation();
       if (here) showParkingActionSheet(here, location);
-      SheetManager.showNotice('บันทึกตำแหน่งรถแล้ว กดปุ่มรูปรถเพื่อกลับมาหาได้ทุกเมื่อ');
+      SheetManager.showNotice(resolved.approximate
+        ? 'บันทึกไว้ที่กลางลานจอดก่อน จอดเสร็จแล้วกดอัปเดตตำแหน่งรถให้ตรงจุดได้'
+        : 'บันทึกตำแหน่งรถแล้ว กดปุ่มรูปรถเพื่อกลับมาหาได้ทุกเมื่อ');
     },
     onFinish: () => {
       finishParkingNavigation();
@@ -2309,9 +2334,12 @@ function showParkingActionSheet(here, location) {
   const saved = appState.car;
   SheetManager.showParkingActionSheet({
     title: zoneName.replace(/^ที่จอดรถ\s*/, ''),
-    savedNote: saved ? `จดจำตำแหน่งรถไว้แล้วเมื่อ ${formatSavedAt(saved.savedAt)}` : '',
+    savedNote: saved
+      ? `จดจำตำแหน่งรถไว้แล้วเมื่อ ${formatSavedAt(saved.savedAt)}${saved.approximate ? ' (ตำแหน่งโดยประมาณ)' : ''}`
+      : '',
     onSaveCar: () => {
-      saveCar(location, zoneName);
+      const resolved = resolveCarLocation(location, here);
+      saveCar(resolved.coords, zoneName, resolved.approximate);
       showParkingActionSheet(here, location);
       SheetManager.showNotice('จดจำตำแหน่งรถแล้ว กดปุ่มรูปรถเพื่อกลับมาหาได้ทุกเมื่อ');
     },
