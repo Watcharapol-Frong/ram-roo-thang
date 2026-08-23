@@ -44,6 +44,13 @@ jq -c '.services[]' "$DATA_FILE" | while read -r service; do
   npx wrangler kv key put "service:$service_id" "$service" --binding=BASELINE_DATA --remote
 done
 
+echo "Seeding shops..."
+jq -c '.shops[]' "$DATA_FILE" | while read -r shop; do
+  shop_id=$(printf '%s' "$shop" | jq -r '.shop_id')
+  echo "  shop:$shop_id"
+  npx wrangler kv key put "shop:$shop_id" "$shop" --binding=BASELINE_DATA --remote
+done
+
 # poi ยังไม่มี KV namespace/endpoint รองรับ (community submission + moderation — ยังไม่เริ่มพัฒนา)
 # จึงตั้งใจไม่ seed ตรงนี้ ดู docs/adr/0004
 

@@ -40,6 +40,14 @@ export async function listParkingZones(env) {
   return listByPrefix(env.BASELINE_DATA, 'parking_zone:');
 }
 
+// --- shops (ร้านค้า/ซุ้ม — ข้อมูลนิ่งที่ทีมสำรวจเอง ดู data/ru_master.geojson) ---
+// ต่างจาก poi ใน docs/adr/0004 ตรงที่ไม่ใช่ของที่ผู้ใช้ส่งเข้ามาเอง จึงไม่ต้องมีระบบ moderation
+// (ADR-0004 ตัด "community POI" ออกเพราะยังไม่มีคนตรวจ ไม่ได้ตัดร้านค้าที่ทีมกรอกเองออกไปด้วย)
+
+export async function listShops(env) {
+  return listByPrefix(env.BASELINE_DATA, 'shop:');
+}
+
 // --- services (บริการ/ขั้นตอนราชการ — team กรอกเอง เหมือน building/parking_zone) ---
 // docs/adr/0004-service-faq-vs-community-poi.md
 

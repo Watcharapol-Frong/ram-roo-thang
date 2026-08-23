@@ -3,6 +3,7 @@
 import { handleWebhookRequest } from './line.js';
 import { handleParkingReport, handleParkingStatus, handleParkingZone, handleParkingZones } from './parking.js';
 import { handleGetBuilding, handleListBuildings } from './building.js';
+import { handleListShops } from './shop.js';
 import { handlePostSchedule, handleGetSchedule, handleDeleteSchedule } from './schedule.js';
 
 // LIFF (liff/) เป็น static site คนละ origin กับ worker นี้เสมอ — ต้องมี CORS ให้ /api/* ถึงจะเรียก
@@ -56,6 +57,10 @@ async function route(request, env, ctx) {
   }
   if (method === 'GET' && pathname === '/api/parking/zones') {
     return handleParkingZones(request, env);
+  }
+
+  if (method === 'GET' && pathname === '/api/shops') {
+    return handleListShops(request, env);
   }
 
   if (method === 'GET' && pathname === '/api/building') {

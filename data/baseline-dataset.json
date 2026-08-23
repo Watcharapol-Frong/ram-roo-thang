@@ -906,5 +906,157 @@
     }
   ],
   "_poi_comment": "จุดสนใจแบบ community-submitted (ร้านอาหาร ฯลฯ) — ยังไม่เปิดใช้งานใน MVP นี้ เป็นแค่โครง placeholder เก็บ shape ไว้ล่วงหน้า ยังไม่มี endpoint/logic ใดๆ อ่านค่านี้ (ดู MVP-SPEC-for-Dev.md §9 Out of Scope: Community POI + Moderation และ docs/adr/0004)",
-  "poi": []
+  "poi": [],
+  "shops": [
+    {
+      "shop_id": "SHOP_01",
+      "name": "7-Eleven",
+      "lat": 13.7572514,
+      "lng": 100.6194799
+    },
+    {
+      "shop_id": "SHOP_02",
+      "name": "ลุงอ้วนต้นเหรียง",
+      "lat": 13.7571429,
+      "lng": 100.6215097
+    },
+    {
+      "shop_id": "SHOP_03",
+      "name": "Bello Cafe",
+      "lat": 13.7572113,
+      "lng": 100.6216925
+    },
+    {
+      "shop_id": "SHOP_04",
+      "name": "Aroi Aroi Vegetarian Kitchen #33",
+      "lat": 13.757151,
+      "lng": 100.6216272
+    },
+    {
+      "shop_id": "SHOP_05",
+      "name": "Khanom Jeen Halal Restaurant 46",
+      "lat": 13.7572445,
+      "lng": 100.6218273
+    },
+    {
+      "shop_id": "SHOP_06",
+      "name": "ยูซุปข้าวมันไก่ ข้าวหมกไก่ ม.ราม",
+      "lat": 13.7571403,
+      "lng": 100.6218236
+    },
+    {
+      "shop_id": "SHOP_07",
+      "name": "เฮ้ย ร้านนี้เขาว่าอร่อย (ล็อก 43)",
+      "lat": 13.7572151,
+      "lng": 100.6219334
+    },
+    {
+      "shop_id": "SHOP_08",
+      "name": "แม่นุชกาแฟสด รามคำแหง",
+      "lat": 13.7572696,
+      "lng": 100.622038
+    },
+    {
+      "shop_id": "SHOP_09",
+      "name": "Parabola(สาขา ม.ราม)",
+      "lat": 13.7571485,
+      "lng": 100.6220701
+    },
+    {
+      "shop_id": "SHOP_10",
+      "name": "Parabola สาขารามคำแหง",
+      "lat": 13.7570853,
+      "lng": 100.6220701
+    },
+    {
+      "shop_id": "SHOP_11",
+      "name": "โรงอาหารอาคารนพมาศ",
+      "lat": 13.7571227,
+      "lng": 100.6218414
+    },
+    {
+      "shop_id": "SHOP_12",
+      "name": "39ข้าวไข่ข้น",
+      "lat": 13.7570492,
+      "lng": 100.621655
+    },
+    {
+      "shop_id": "SHOP_13",
+      "name": "เอส.พี.ก๊อปปี้ แอนด์ เซอร์วิส",
+      "lat": 13.7569931,
+      "lng": 100.6215464
+    },
+    {
+      "shop_id": "SHOP_14",
+      "name": "ร้านถ่ายรูป MiniStudio (สุนทร สวป.)",
+      "lat": 13.7583491,
+      "lng": 100.6201067
+    },
+    {
+      "shop_id": "SHOP_15",
+      "name": "Gustavia Coffee สาขา มหาวิทยาลัยรามคำแหง",
+      "lat": 13.7595049,
+      "lng": 100.6219157
+    },
+    {
+      "shop_id": "SHOP_16",
+      "name": "T-cafè 2",
+      "lat": 13.7573165,
+      "lng": 100.6173497
+    },
+    {
+      "shop_id": "SHOP_17",
+      "name": "ขนุนคอฟฟี่",
+      "lat": 13.7567223,
+      "lng": 100.6171172
+    },
+    {
+      "shop_id": "SHOP_18",
+      "name": "ร้านน้ำเจ๊หนิง Indy (ฝั่งสำนักฯเทคโน) Beverage shop",
+      "lat": 13.7560188,
+      "lng": 100.6166875
+    },
+    {
+      "shop_id": "SHOP_19",
+      "name": "ร้านน้ำเจ๊หนิง (ฝั่งสนามเทนนิส) Beverage shop",
+      "lat": 13.7540212,
+      "lng": 100.6162808
+    },
+    {
+      "shop_id": "SHOP_20",
+      "name": "T-cafè. By Thip",
+      "lat": 13.7549037,
+      "lng": 100.6181668
+    },
+    {
+      "shop_id": "SHOP_21",
+      "name": "ร้าน ข.ไข่ ใต้ตึกนิติศาสตร์ ม.รามคำแหง",
+      "lat": 13.7547763,
+      "lng": 100.61803
+    },
+    {
+      "shop_id": "SHOP_22",
+      "name": "Khao -Ta-Lu coffee @Sci-Ru",
+      "lat": 13.75424,
+      "lng": 100.6191684
+    },
+    {
+      "shop_id": "SHOP_23",
+      "name": "Café Amazon มหาวิทยาลัยรามคำแหง",
+      "lat": 13.7541367,
+      "lng": 100.6200299
+    },
+    {
+      "shop_id": "SHOP_24",
+      "name": "ร้าน​ สำราญรมย์",
+      "lat": 13.7535092,
+      "lng": 100.6201371
+    },
+    {
+      "shop_id": "SHOP_25",
+      "name": "coffee & tea store",
+      "lat": 13.754602,
+      "lng": 100.6204123
+    }
+  ]
 }

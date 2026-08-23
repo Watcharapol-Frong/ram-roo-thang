@@ -45,6 +45,7 @@ const baseline = {};
 for (const b of dataset.buildings) baseline[`building:${b.building_id}`] = JSON.stringify(b);
 for (const z of dataset.parking_zones) baseline[`parking_zone:${z.zone_id}`] = JSON.stringify(z);
 for (const s of dataset.services) baseline[`service:${s.service_id}`] = JSON.stringify(s);
+for (const sh of dataset.shops || []) baseline[`shop:${sh.shop_id}`] = JSON.stringify(sh);
 
 const env = {
   BASELINE_DATA: createKV(baseline),

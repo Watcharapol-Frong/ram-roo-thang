@@ -223,7 +223,7 @@ function isWithinCampusBounds({ lat, lng }) {
   return lat >= g.minLat && lat <= g.maxLat && lng >= g.minLng && lng <= g.maxLng;
 }
 
-async function renderMapView({ presetDestId, presetZoneId }) {
+async function renderMapView({ presetDestId, presetZoneId, activeTab = 'nav' }) {
   const container = getApp();
 
   // เฉพาะ view นี้เท่านั้นที่ต้องมี Google Maps — ถ้าโหลดไม่ขึ้นให้เหลือทางไป view อื่นที่ยังใช้ได้
@@ -243,10 +243,11 @@ async function renderMapView({ presetDestId, presetZoneId }) {
       <div id="action-sheet-slot"></div>
     </div>
   `;
-  renderModeBar(container, 'nav');
+  renderModeBar(container, activeTab);
   document.getElementById('layer-toggle-btn').addEventListener('click', toggle3D);
 
   buildingMarkers.length = 0;
+  shopMarkers.length = 0;
   appState.map.instance = new google.maps.Map(document.getElementById('map'), {
     center: CAMPUS_CONSTANTS.INITIAL_VIEW.center,
     zoom: CAMPUS_CONSTANTS.INITIAL_VIEW.zoom,
@@ -268,6 +269,14 @@ async function renderMapView({ presetDestId, presetZoneId }) {
     return;
   }
   const buildings = buildingsData.buildings || [];
+
+  // แท็บร้านค้าโชว์เฉพาะร้าน ไม่ต้องมีชิปอาคาร 35 ตัวกับพื้นที่ลานจอดมาแย่งพื้นที่จอ
+  if (activeTab === 'shop') {
+    const shops = await placeShopMarkers();
+    frameFeatures(shops.length ? shops : buildings);
+    return;
+  }
+
   placeBuildingMarkers(buildings);
   await placeParkingMarkers();
   if (!presetDestId && !presetZoneId) frameCampus(buildings);
@@ -345,10 +354,14 @@ function placeBuildingMarkers(buildings) {
 // หลังจากแผนที่นิ่งแล้ว จนกว่ากล้องจะขยับ — หมุดจะหายทั้งแผนที่แบบไม่มี error (เจอตอนเทสจริง
 // ลองแล้วทั้ง trigger 'resize' และ panBy(0,0) ไม่ช่วย ต้องเป็นการขยับกล้องจริงเท่านั้น)
 function frameCampus(buildings) {
+  frameFeatures(buildings);
+}
+
+function frameFeatures(features) {
   const map = appState.map.instance;
-  if (!map || !buildings.length) return;
+  if (!map || !features.length) return;
   const bounds = new google.maps.LatLngBounds();
-  buildings.forEach((b) => bounds.extend({ lat: b.lat, lng: b.lng }));
+  features.forEach((f) => bounds.extend({ lat: f.lat, lng: f.lng }));
   map.fitBounds(bounds, 40);
   google.maps.event.addListenerOnce(map, 'idle', () => {
     // fitBounds อาจซูมออกจนต่ำกว่าเกณฑ์ที่ป้ายชิปจะโชว์ (จอแคบ) — ดันกลับขึ้นมาให้เห็นหมุดเสมอ
@@ -416,6 +429,47 @@ async function placeParkingMarkers() {
   });
 }
 
+// หมุดร้านค้า/ซุ้ม — ร้านกระจุกตัวหนาแน่นแถวอาคารนพมาศ ใช้จุดเล็กๆ ไม่ใส่ชื่อบนแผนที่
+// (ชื่อร้านยาวกว่ารหัสอาคารมาก ถ้าโชว์ชื่อทั้ง 25 ร้านจะทับกันจนอ่านไม่ออก) แตะแล้วชื่อขึ้นในการ์ดล่าง
+const SHOP_MARKER_COLOR = '#f39c12';
+const shopMarkers = [];
+
+function shopMarkerIcon() {
+  return {
+    path: google.maps.SymbolPath.CIRCLE,
+    scale: 7,
+    fillColor: SHOP_MARKER_COLOR,
+    fillOpacity: 1,
+    strokeColor: '#ffffff',
+    strokeWeight: 2,
+  };
+}
+
+async function placeShopMarkers() {
+  let shopsData;
+  try {
+    shopsData = await fetchJSON('/api/shops');
+  } catch (err) {
+    console.error('โหลดข้อมูลร้านค้าไม่สำเร็จ', err);
+    return [];
+  }
+
+  const shops = shopsData.shops || [];
+  shops.forEach((shop) => {
+    const marker = new google.maps.Marker({
+      position: { lat: shop.lat, lng: shop.lng },
+      map: appState.map.instance,
+      title: shop.name,
+      icon: shopMarkerIcon(),
+    });
+    marker.addListener('click', () => {
+      selectTarget({ id: shop.shop_id, name: shop.name, type: 'SHOP', coords: { lat: shop.lat, lng: shop.lng } });
+    });
+    shopMarkers.push(marker);
+  });
+  return shops;
+}
+
 // Bottom Mode Selector Bar — แปะท้ายทุกหน้าในกลุ่มแผนที่/ที่จอดรถ "ร้านค้า/ซุ้ม" ยังไม่มี POI
 // submission/moderation backend (docs/adr/0004, MVP-SPEC §9 Out of Scope) จึงมีแค่ tab โชว์ empty
 // state เฉยๆ ไม่ได้ทำระบบเบื้องหลังเพิ่ม
@@ -437,7 +491,7 @@ function renderModeBar(container, activeMode) {
       if (mode === activeMode) return;
       appState.map.activeTab = mode;
       if (mode === 'parking') renderParkingReportView();
-      else if (mode === 'shop') renderShopPlaceholderView();
+      else if (mode === 'shop') renderMapView({ activeTab: 'shop' });
       else if (mode === 'nav') renderMapView({});
     });
   });
@@ -455,18 +509,7 @@ function renderMapUnavailable() {
     </div>
   `;
   document.getElementById('maps-retry-btn').addEventListener('click', () => window.location.reload());
-  renderModeBar(container, 'nav');
-}
-
-function renderShopPlaceholderView() {
-  const container = getApp();
-  container.innerHTML = `
-    <div class="card">
-      <h2>ร้านค้า/ซุ้ม</h2>
-      <p class="muted">ยังไม่มีข้อมูลร้านค้าในระบบครับ (ฟีเจอร์นี้อยู่ระหว่างวางแผน)</p>
-    </div>
-  `;
-  renderModeBar(container, 'shop');
+  renderModeBar(container, activeTab);
 }
 
 // เปิด 3D ได้เฉพาะตอนศูนย์กลางแผนที่อยู่ในรั้ว ม.รามฯ เท่านั้น (AC-05) — ใช้อาคาร 3D ของ Google เอง
