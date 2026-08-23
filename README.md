@@ -89,7 +89,8 @@ ram-roo-thang-bot/
 │   ├── wrangler.toml              — bindings: 4 KV + D1 + Workers AI
 │   ├── .secrets.env.example       — copy to .secrets.env and fill in tokens
 │   ├── migrations/
-│   │   └── 0001_users_and_coin_ledger.sql
+│   │   ├── 0001_users_and_coin_ledger.sql
+│   │   └── 0002_exam_alerts.sql
 │   └── src/
 │       ├── index.js               — router (LINE webhook + /api/*) + CORS
 │       ├── line.js                — signature verify, chat history, Flex Messages, reply
@@ -97,6 +98,7 @@ ram-roo-thang-bot/
 │       ├── data.js                — KV access
 │       ├── user.js                — users, coins, ledger (D1)
 │       ├── schedule.js            — saved courses (D1)
+│       ├── exam.js                — proactive exam alerts (cron + manual trigger)
 │       ├── parking.js             — parking reports: geofence, rate limit, aggregation
 │       ├── building.js            — building lookup
 │       ├── shop.js                — shop/stall listing
@@ -144,6 +146,7 @@ Every `/api/*` endpoint has CORS enabled, because the LIFF is always on a differ
 | GET | `/api/user/ledger?user_id=&limit=` | Full coin transaction history |
 | POST | `/api/user/feedback` · `/api/user/save-car` | Claim coins (idempotent) |
 | GET/POST/DELETE | `/api/schedule` | The user's saved courses |
+| POST | `/api/admin/exam-alerts` | Manually trigger exam alerts (requires `x-admin-token`) |
 
 ## LIFF deep links
 
@@ -159,6 +162,51 @@ Every `/api/*` endpoint has CORS enabled, because the LIFF is always on a differ
 > LINE delivers the real query string inside `?liff.state=`, not directly. `readAppParams()` in
 > `app.js` handles this. **Do not read `window.location.search` directly when adding a new deep
 > link** — the page will flash the map first before landing on the right view.
+
+## Proactive Exam Alerts
+
+A Cron Trigger runs daily at **11:00 UTC = 18:00 Bangkok** (`[triggers]` in `worker/wrangler.toml`)
+and pushes a LINE message to every user who has a saved course with an exam **the next day**.
+Evening was chosen because it still leaves time to prepare; a morning-of alert would be too late.
+Cloudflare crons are always UTC — there is no timezone setting.
+
+The message lists each course sorted by exam period, with times, plus a link to the profile page.
+Exam rooms are not in the university announcement, so the message says so explicitly rather than
+guessing. When room data arrives, `formatAlertMessage()` in `worker/src/exam.js` is the only place to change.
+
+`PERIOD_TIME` in `worker/src/exam.js` must stay in sync with `EXAM_PERIOD_TIME` in `liff/app.js`.
+
+### Delivery guarantees
+
+`exam_alerts_sent` has `UNIQUE (user_id, exam_date, kind)`. A row is claimed **before** the LINE push,
+because Cloudflare crons are not exactly-once and the endpoint can be triggered manually too.
+
+On a push failure the claim is rolled back **only when retrying could plausibly work** (5xx or a
+network error). A 4xx — typically the user blocked the OA — keeps the row, so we don't retry every
+day and burn the LINE message quota on someone who will never receive it.
+
+> ⚠️ **LINE push messages count against the Official Account's monthly quota** (reply messages don't).
+> With 200 users across a 14-day exam period this adds up fast — check the OA plan before the beta.
+
+### Triggering it manually
+
+The exam period is Oct 14–28, 2026, which is after demo day, so the cron has nothing to send during
+the demo. Use the admin endpoint to show it working:
+
+```bash
+# Dry run — returns who would receive what, sends nothing
+curl -X POST https://<worker>/api/admin/exam-alerts \
+  -H "x-admin-token: $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"date":"2026-10-25","dry_run":true}'
+
+# Actually send — dry_run must be explicitly false
+curl -X POST https://<worker>/api/admin/exam-alerts \
+  -H "x-admin-token: $ADMIN_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"date":"2026-10-25","dry_run":false}'
+```
+
+`ADMIN_TOKEN` lives in `worker/.secrets.env`. Without it the endpoint always returns 401; the cron
+still works regardless.
 
 ## Setup
 
@@ -182,6 +230,7 @@ npx wrangler d1 execute ram-roo-thang --remote --file=migrations/0001_users_and_
 cp .secrets.env.example .secrets.env
 #    LINE_CHANNEL_SECRET       -> Console, Basic settings tab
 #    LINE_CHANNEL_ACCESS_TOKEN -> Console, Messaging API tab (the long-lived one)
+#    ADMIN_TOKEN               -> any long random string (guards the manual alert endpoint)
 
 # 4. Seed building/parking data into KV
 cd .. && ./scripts/seed-kv.sh
@@ -236,6 +285,8 @@ Open **http://localhost:8123/?dev=1&api=http://localhost:8787**
   production — so the UNIQUE constraints that prevent double coin claims are genuinely exercised locally.
 - Data is lost when the process exits, and `/webhook` doesn't work here (needs real LINE + Workers AI).
 - **Restart `dev-api.mjs` after editing worker code** — there is no hot reload.
+- The dev D1 shim runs **every** file in `worker/migrations/` in name order, so new migrations are
+  picked up automatically on restart.
 - `?dev=1` stubs out the LIFF SDK and fakes a GPS position on campus (add `&lat=&lng=` to simulate
   elsewhere). It **only works on localhost** — on production the parameter is deliberately ignored,
   otherwise anyone could spoof coordinates past the parking geofence from a normal browser.
@@ -280,12 +331,14 @@ the wrong time. Course codes not present in the timetable are now rejected at in
 | User database + coins | ✅ | D1 + ledger, double-claim prevention enforced by the database |
 | Survey → Google Sheets | ⚠️ | Code is ready but `FEEDBACK_ENDPOINT_URL` is unset, so no responses are collected yet |
 | Shop / spending coins | ❌ | Page is Coming Soon. The spend path is supported in the backend; we just need to decide what's redeemable |
-| Proactive Exam Alerts (Cron) | ❌ | No `[triggers]` and no `scheduled` handler yet — blocked on exam room data + period times |
+| Proactive Exam Alerts (Cron) | ⚠️ | Working end to end, but the message can't name the exam room yet (not in the announcement) |
 | Community | ❌ | Not started (ADR-0004 kept it out of the MVP) |
 
 ### Before demo day
 
-- [ ] Add exam buildings/rooms and confirm the A/B period times (this blocks Exam Alerts)
+- [ ] Add exam buildings/rooms and confirm the A/B period times (alerts work without them, but can't name the room)
+- [ ] Set `ADMIN_TOKEN` in `worker/.secrets.env` so the alerts can be demoed manually
+- [ ] Check the LINE OA message quota against the expected beta volume
 - [ ] Set `FEEDBACK_ENDPOINT_URL` after deploying the Google Apps Script
 - [ ] Real load test with 100–200 concurrent users — this has never been done
 - [ ] Seed real parking reports before the event (requires people physically checking in)

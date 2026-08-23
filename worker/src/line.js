@@ -24,6 +24,28 @@ async function showLoadingAnimation(chatId, accessToken) {
   } catch (e) { console.error("Error showing loading animation", e); }
 }
 
+// ส่งข้อความหาผู้ใช้โดยไม่ต้องรอให้เขาทักมาก่อน (ใช้กับแจ้งเตือนสอบ)
+// ต่างจาก replyToLINE ตรงที่ reply ใช้ได้เฉพาะตอบกลับภายในไม่กี่นาทีหลังผู้ใช้ส่งข้อความมา
+//
+// ข้อควรรู้: push นับรวมในโควตาข้อความรายเดือนของ LINE OA ส่วน reply ไม่นับ — อย่าเอาไปใช้พร่ำเพรื่อ
+// และผู้ใช้ต้องเป็นเพื่อนกับ OA อยู่ ถ้าบล็อกหรือเลิกเป็นเพื่อนจะได้ 403 กลับมา
+export async function pushToLINE(userId, messages, accessToken) {
+  const res = await fetch('https://api.line.me/v2/bot/message/push', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
+    body: JSON.stringify({ to: userId, messages }),
+  });
+  if (!res.ok) {
+    // ติด status ไปกับ error ด้วย เพราะผู้เรียกต้องแยกให้ออกว่าควรลองใหม่ไหม
+    // 4xx = ผู้ใช้บล็อก OA / userId ใช้ไม่ได้ ลองใหม่ก็ไม่มีวันสำเร็จ
+    // 5xx หรือเน็ตพัง = ฝั่ง LINE มีปัญหาชั่วคราว ควรได้ลองใหม่รอบหน้า
+    const err = new Error(`push ไม่สำเร็จ (${res.status}): ${await res.text().catch(() => '')}`);
+    err.status = res.status;
+    throw err;
+  }
+  return res;
+}
+
 export async function replyToLINE(replyToken, messages, accessToken) {
   return fetch('https://api.line.me/v2/bot/message/reply', {
     method: 'POST',

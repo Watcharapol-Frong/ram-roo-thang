@@ -6,6 +6,7 @@ import { handleGetBuilding, handleListBuildings } from './building.js';
 import { handleListShops } from './shop.js';
 import { handlePostSchedule, handleGetSchedule, handleDeleteSchedule } from './schedule.js';
 import { handleGetUser, handleGetLedger, handleFeedbackAward, handleSaveCarAward } from './user.js';
+import { handleAdminExamAlerts, runDailyExamAlerts } from './exam.js';
 
 // LIFF (liff/) เป็น static site คนละ origin กับ worker นี้เสมอ — ต้องมี CORS ให้ /api/* ถึงจะเรียก
 // fetch() จากฝั่ง browser ได้จริง (ไม่มีมาก่อนหน้านี้ ทำให้ทุก endpoint ใต้ /api/ เรียกจาก LIFF ไม่ได้เลย
@@ -35,7 +36,12 @@ export default {
       console.error('Error in fetch:', error);
       return new Response('Internal Server Error', { status: 500 });
     }
-  }
+  },
+
+  // Cron Trigger (ดู [triggers] ใน wrangler.toml) — เตือนล่วงหน้าว่าพรุ่งนี้มีสอบวิชาอะไร
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(runDailyExamAlerts(env).catch((err) => console.error('scheduled error', err)));
+  },
 };
 
 async function route(request, env, ctx) {
@@ -69,6 +75,10 @@ async function route(request, env, ctx) {
   }
   if (method === 'GET' && pathname === '/api/buildings') {
     return handleListBuildings(request, env);
+  }
+
+  if (method === 'POST' && pathname === '/api/admin/exam-alerts') {
+    return handleAdminExamAlerts(request, env);
   }
 
   if (method === 'GET' && pathname === '/api/user') {

@@ -12,7 +12,7 @@
 
 import { createServer } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -46,7 +46,12 @@ function createKV(seed = {}) {
 // ไม่ได้ mock ผลลัพธ์ ดังนั้น UNIQUE constraint ที่ใช้กันรับเหรียญซ้ำก็ถูกทดสอบจริงในเครื่องด้วย
 function createD1() {
   const db = new DatabaseSync(':memory:');
-  db.exec(readFileSync(path.join(ROOT_DIR, 'worker/migrations/0001_users_and_coin_ledger.sql'), 'utf8'));
+  // รัน migration ทุกไฟล์ตามลำดับชื่อ ไม่ใช่ระบุทีละไฟล์ — ไม่งั้นพอเพิ่ม migration ใหม่แล้วลืมมาแก้
+  // ตรงนี้ dev จะพังแบบงงๆ ว่า "no such table" ทั้งที่ production ปกติดี
+  const migrationsDir = path.join(ROOT_DIR, 'worker/migrations');
+  for (const file of readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort()) {
+    db.exec(readFileSync(path.join(migrationsDir, file), 'utf8'));
+  }
 
   const wrap = (sql, params = []) => ({
     bind: (...args) => wrap(sql, args),
@@ -98,6 +103,9 @@ const env = {
   RATE_LIMIT: createKV(),
   DB: createD1(),
   CHAT_HISTORY_RAM: createKV(),
+  // token ปลอมสำหรับทดสอบ endpoint แจ้งเตือนสอบในเครื่อง (production ใช้ค่าจาก .secrets.env)
+  ADMIN_TOKEN: 'dev-admin-token',
+  LINE_CHANNEL_ACCESS_TOKEN: 'dev-fake-token',
   LIFF_URL: `http://localhost:8123/?dev=1&api=http://localhost:${port}`,
 };
 const ctx = { waitUntil: () => {} };
