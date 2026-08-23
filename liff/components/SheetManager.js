@@ -132,6 +132,18 @@
     stats[1].innerHTML = `<small>ถึงใน</small>${etaText}`;
   }
 
+  // ข้อความแจ้งสั้นๆ ที่หายเองใน 3 วิ — ใช้บอกเหตุผลเวลากดปุ่มแล้วไม่เกิดอะไร (เช่น อยู่นอกรั้ว)
+  // ไม่ใช้ alert เพราะบล็อกทั้งหน้าและหน้าตาไม่เข้ากับแอป
+  let noticeTimer = null;
+
+  function showNotice(message) {
+    const slot = noticeSlot();
+    if (!slot) return;
+    slot.innerHTML = `<div class="notice-bar"><p>${message}</p></div>`;
+    clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(() => { if (noticeSlot()) noticeSlot().innerHTML = ''; }, 3000);
+  }
+
   function showGpsWarning(onRetry) {
     const slot = noticeSlot();
     if (!slot) return;
@@ -157,6 +169,7 @@
     updateNavigationStats,
     showOffCampusSheet,
     showRouteErrorSheet,
+    showNotice,
     showGpsWarning,
     hideGpsWarning,
   };

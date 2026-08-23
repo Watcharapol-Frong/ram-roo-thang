@@ -839,3 +839,9 @@ body.is-navigating .search-results {
 .nav-mute-btn:active {
   background: rgba(255, 255, 255, 0.3);
 }
+
+/* ปุ่มตำแหน่งของฉันตอนกำลังหมุนตามเข็มทิศ — ย้ำว่ากำลังทำงานอยู่ กดซ้ำเพื่อเลิก */
+.view-toggle-btn.active {
+  background: #1c1c1e;
+  color: #ffffff;
+}

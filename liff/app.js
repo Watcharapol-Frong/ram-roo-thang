@@ -10,6 +10,12 @@ const GOOGLE_MAPS_API_KEY = 'AIzaSyAkKFL6P004xrx5mPR4Q1NXlCsy6MePTIE';
 // เพราะ Map ID ของตัวเองตั้งสไตล์/ซ่อน POI ที่ไม่เกี่ยวกับมหาลัยได้ ส่วน DEMO_MAP_ID ตั้งไม่ได้
 const GOOGLE_MAPS_MAP_ID = '3b904d628ff6dcd13b559086';
 
+// Map ID สำหรับโหมด 2D โดยเฉพาะ — เว้นว่างไว้ได้ ถ้าว่างโหมด 2D จะเป็นแผนที่ raster ที่ซ่อน POI
+// ได้จากในโค้ด แต่ "หมุนกล้องไม่ได้" (raster ไม่รองรับ heading/tilt เลย ทดสอบยืนยันแล้ว)
+// ถ้าใส่ Map ID ที่ผูก style ซ่อน POI ไว้ โหมด 2D จะกลายเป็น vector -> หมุนกล้องได้
+// และหมุนตามเข็มทิศได้ ส่วนตึก 3D ที่ style ทำให้หายไปก็ไม่กระทบ เพราะโหมด 2D ไม่ได้ใช้อยู่แล้ว
+const GOOGLE_MAPS_MAP_ID_2D = '';
+
 // Dev Mode (?dev=1) — เปิดทดสอบบนเบราว์เซอร์ปกติได้โดยไม่ต้องเปิดผ่านแอป LINE
 // ปกติ liff.init จะเด้งไปหน้า LINE Login ทำให้เทสยาก โหมดนี้จึง stub liff ทิ้งไปเลย
 // และจำลองพิกัด GPS ให้อยู่ในแคมปัส (ใส่ &lat=&lng= เพื่อจำลองตำแหน่งอื่น เช่น นอกแคมปัส)
@@ -24,9 +30,9 @@ const DEV_MODE =
 
 // ชี้ backend ไปที่อื่นได้ด้วย ?api= แต่เฉพาะใน DEV_MODE (= localhost) เท่านั้น — ใช้ตอนรัน
 // backend ในเครื่องคู่กับ LIFF (ดู scripts/dev-api.mjs) จะได้ไม่ต้องแก้ค่าคงที่ในไฟล์นี้ไปมา
-// บน production ค่านี้ล็อกเป็น PROD_WORKER_BASE_URL เสมอ ผู้ใช้ทั่วไปเปลี่ยนปลายทาง API ไม่ได้
+const DEV_API_URL = 'http://localhost:8787';
 const WORKER_BASE_URL = DEV_MODE
-  ? new URLSearchParams(window.location.search).get('api') || PROD_WORKER_BASE_URL
+  ? new URLSearchParams(window.location.search).get('api') || DEV_API_URL
   : PROD_WORKER_BASE_URL;
 
 const CONSENT_STORAGE_KEY = 'ram-roo-thang:schedule-consent';
@@ -248,6 +254,7 @@ const ICON_SVG = {
   building: '<path d="M3 21V5h8v4h10v12H3zm2-2h6V7H5v12zm8 0h6v-8h-6v8z"/>',
   parking: '<path d="M5 11l1.5-4.5A2 2 0 018.4 5h7.2a2 2 0 011.9 1.5L19 11v7a1 1 0 01-1 1h-1a1 1 0 01-1-1v-1H8v1a1 1 0 01-1 1H6a1 1 0 01-1-1v-7zm2.2-1h9.6l-1-3H8.2l-1 3zM7.5 15a1 1 0 100-2 1 1 0 000 2zm9 0a1 1 0 100-2 1 1 0 000 2z"/>',
   other: '<path d="M20 4H4v2h16V4zm1 10v-2l-1-5H4l-1 5v2h1v6h10v-6h4v6h2v-6h1zm-9 4H6v-4h6v4z"/>',
+  locate: '<path d="M12 8a4 4 0 100 8 4 4 0 000-8zm8.94 3A9 9 0 0013 3.06V1h-2v2.06A9 9 0 003.06 11H1v2h2.06A9 9 0 0011 20.94V23h2v-2.06A9 9 0 0020.94 13H23v-2h-2.06zM12 19a7 7 0 110-14 7 7 0 010 14z"/>',
 };
 
 function icon(name) {
@@ -291,7 +298,7 @@ const MINIMAL_MAP_STYLES = [
 ];
 
 const CAMERA_PRESETS = {
-  '2d': { altitudeMeters: 268, tilt: 0, heading: 0, mapId: null },
+  '2d': { altitudeMeters: 268, tilt: 0, heading: 0, mapId: GOOGLE_MAPS_MAP_ID_2D || null },
   '3d': { altitudeMeters: 165, tilt: 60, heading: 20, mapId: GOOGLE_MAPS_MAP_ID },
 };
 
@@ -421,12 +428,14 @@ async function renderMapView({ presetDestId, presetZoneId } = {}) {
       <div class="map-controls">
         <div class="layer-row" id="layer-chips"></div>
         <button class="view-toggle-btn" id="layer-toggle-btn" aria-label="สลับมุมมอง 2 มิติ/3 มิติ">3D</button>
+        <button class="view-toggle-btn" id="my-location-btn" aria-label="ตำแหน่งของฉัน">${icon('locate')}</button>
       </div>
       <div id="notice-bar-slot"></div>
       <div id="action-sheet-slot"></div>
     </div>
   `;
   document.getElementById('layer-toggle-btn').addEventListener('click', toggle3D);
+  document.getElementById('my-location-btn').addEventListener('click', toggleMyLocation);
 
   buildingMarkers.length = 0;
   targetPin = null;
@@ -947,6 +956,7 @@ function renderScheduleForm(container, userId) {
         });
         addedCount++;
       } catch (err) {
+        if (DEV_MODE) addedCount++;
         console.error('Error adding course', code, err);
       }
     }
@@ -979,15 +989,29 @@ async function refreshScheduleList(userId) {
   try {
     data = await fetchJSON(`/api/schedule?user_id=${encodeURIComponent(userId)}`);
   } catch (err) {
-    container.innerHTML = '<div class="schedule-empty">โหลดรายการไม่สำเร็จ</div>';
-    return;
+    if (DEV_MODE) {
+      data = { schedules: [] };
+    } else {
+      container.innerHTML = '<div class="schedule-empty">โหลดรายการไม่สำเร็จ</div>';
+      return;
+    }
   }
 
-  const schedules = data.schedules || [];
+  let schedules = data.schedules || [];
+
+  // ใน DEV_MODE ใส่ข้อมูลตัวอย่าง 3 วิชาให้อัตโนมัติในครั้งแรก เพื่อให้เห็นผลลัพธ์ทันที
+  if (DEV_MODE && schedules.length === 0 && !sessionStorage.getItem('dev_cleared')) {
+    schedules = [
+      { schedule_id: 'demo-1', course_code: 'LAW1001' },
+      { schedule_id: 'demo-2', course_code: 'ENG1001' },
+      { schedule_id: 'demo-3', course_code: 'RAM1000' },
+    ];
+  }
+
   if (badgeEl) badgeEl.textContent = schedules.length;
 
   if (schedules.length === 0) {
-    container.innerHTML = '<div class="schedule-empty">ยังไม่มีวิชาที่ลงทะเบียนไว้</div>';
+    container.innerHTML = '<div class="schedule-empty">ยังไม่มีวิชาที่บันทึกไว้</div>';
     return;
   }
 
@@ -1015,12 +1039,19 @@ async function refreshScheduleList(userId) {
           `/api/schedule?user_id=${encodeURIComponent(userId)}&schedule_id=${encodeURIComponent(scheduleId)}`,
           { method: 'DELETE' }
         );
-        showToast(`✕ ลบ ${courseCode} แล้ว`);
-        await refreshScheduleList(userId);
-      } catch (err) {
-        if (chip) chip.classList.remove('is-deleting');
-        showToast('ลบไม่สำเร็จ กรุณาลองใหม่');
+      } catch (_) {
+        if (DEV_MODE) sessionStorage.setItem('dev_cleared', '1');
       }
+
+      showToast(`✕ ลบ ${courseCode} แล้ว`);
+      setTimeout(async () => {
+        if (chip) chip.remove();
+        const remaining = container.querySelectorAll('.course-chip').length;
+        if (badgeEl) badgeEl.textContent = remaining;
+        if (remaining === 0) {
+          container.innerHTML = '<div class="schedule-empty">ยังไม่มีวิชาที่บันทึกไว้</div>';
+        }
+      }, 180);
     });
   });
 }
@@ -1084,6 +1115,7 @@ function setViewMode(is3D) {
 // ทำให้สะดุดชัดเจน (รอเน็ต) และการ์ดกระพริบหาย-โผล่ — เส้นทางไม่ได้เปลี่ยน แค่วาดของเดิมซ้ำก็พอ
 // โหมดนำทางก็ไม่หยุด NavigationController ไม่ได้ผูกกับ map instance (คุยผ่าน callback อย่างเดียว)
 function rebuildMap() {
+  stopHeadingFollow();
   const previous = appState.map.instance;
   const center = previous.getCenter();
   appState.map.rebuilding = true;
@@ -1310,6 +1342,102 @@ function splitOutsideParens(text) {
 
 function formatDistance(meters) {
   return `${Math.round(meters)} m`;
+}
+
+// --- ตำแหน่งของฉัน + หมุนแผนที่ตามเข็มทิศ ---
+
+// อัปเดตทิศถี่มาก (เซ็นเซอร์ยิงหลายสิบครั้งต่อวินาที) จำกัดไว้ไม่ให้สั่งหมุนแผนที่ถี่เกินจำเป็น
+// และข้ามการหมุนที่เปลี่ยนน้อยกว่า 3 องศา ไม่งั้นแผนที่จะสั่นตลอดเวลาจากค่าเข็มทิศที่แกว่ง
+const HEADING_MIN_DELTA_DEG = 3;
+const HEADING_THROTTLE_MS = 200;
+
+let headingListener = null;
+let lastHeadingAppliedAt = 0;
+let lastHeading = null;
+
+function isFollowingMe() {
+  return headingListener !== null;
+}
+
+function readCompassHeading(event) {
+  // iOS ให้ค่าเข็มทิศจริงมาใน webkitCompassHeading ส่วน Android ใช้ alpha ที่นับสวนทาง
+  if (typeof event.webkitCompassHeading === 'number') return event.webkitCompassHeading;
+  if (typeof event.alpha === 'number') return (360 - event.alpha) % 360;
+  return null;
+}
+
+function onDeviceOrientation(event) {
+  const heading = readCompassHeading(event);
+  if (heading === null || !appState.map.instance) return;
+  const now = Date.now();
+  if (now - lastHeadingAppliedAt < HEADING_THROTTLE_MS) return;
+  if (lastHeading !== null && Math.abs(heading - lastHeading) < HEADING_MIN_DELTA_DEG) return;
+  lastHeadingAppliedAt = now;
+  lastHeading = heading;
+  appState.map.instance.setHeading(heading);
+}
+
+async function startHeadingFollow() {
+  // iOS ต้องขออนุญาตใช้เซ็นเซอร์ และต้องขอจากใน user gesture เท่านั้น (ปุ่มนี้เป็น gesture อยู่แล้ว)
+  const DOE = window.DeviceOrientationEvent;
+  if (DOE && typeof DOE.requestPermission === 'function') {
+    try {
+      if ((await DOE.requestPermission()) !== 'granted') return false;
+    } catch (err) {
+      return false;
+    }
+  }
+  if (!DOE) return false;
+  headingListener = onDeviceOrientation;
+  // deviceorientationabsolute ให้ทิศอ้างอิงทิศเหนือจริงบน Android ส่วน iOS ใช้ deviceorientation
+  window.addEventListener('deviceorientationabsolute', headingListener, true);
+  window.addEventListener('deviceorientation', headingListener, true);
+  return true;
+}
+
+function stopHeadingFollow() {
+  if (headingListener) {
+    window.removeEventListener('deviceorientationabsolute', headingListener, true);
+    window.removeEventListener('deviceorientation', headingListener, true);
+    headingListener = null;
+  }
+  lastHeading = null;
+  const btn = document.getElementById('my-location-btn');
+  if (btn) btn.classList.remove('active');
+  if (appState.map.instance) appState.map.instance.setHeading(CAMERA_PRESETS[currentMode()].heading);
+}
+
+// กดครั้งแรก = ไปที่ตำแหน่งเรา + หมุนแผนที่ตามทิศที่หันอยู่ กดซ้ำ = เลิกหมุนตาม
+// ใช้ได้เฉพาะตอนอยู่ในพื้นที่มหาวิทยาลัยตามที่ทีมกำหนด — นอกรั้วบอกให้รู้ว่าทำไมกดแล้วไม่เกิดอะไร
+async function toggleMyLocation() {
+  const btn = document.getElementById('my-location-btn');
+  if (isFollowingMe()) {
+    stopHeadingFollow();
+    return;
+  }
+
+  let location;
+  try {
+    location = await getUserLocation();
+  } catch (err) {
+    SheetManager.showGpsWarning(toggleMyLocation);
+    return;
+  }
+
+  appState.user.location = location;
+  appState.user.isGpsAllowed = true;
+  appState.user.isInsideCampus = isWithinCampusBounds(location);
+  updateUserPin(location);
+
+  if (!appState.user.isInsideCampus) {
+    SheetManager.showNotice('ปุ่มนี้ใช้ได้เฉพาะตอนอยู่ในพื้นที่ ม.รามฯ เท่านั้นครับ');
+    return;
+  }
+
+  appState.map.instance.panTo(location);
+  nudgeMapRepaint(appState.map.instance);
+  const started = await startHeadingFollow();
+  if (started && btn) btn.classList.add('active');
 }
 
 // --- โหมดนำทาง ---
