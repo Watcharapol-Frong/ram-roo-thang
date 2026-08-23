@@ -81,18 +81,6 @@ export async function setLastReportedAt(env, userId, isoTimestamp) {
   return env.RATE_LIMIT.put(`ratelimit:${userId}`, isoTimestamp, { expirationTtl: 30 * 60 });
 }
 
-// --- STUDENT_SCHEDULES (ไม่มี PII — docs/adr/0003) ---
-// Key: schedule:{user_id}:{schedule_id} — ผูกกับ LINE userId เท่านั้น ไม่มีชื่อ/เบอร์โทร
-
-export async function putSchedule(env, userId, schedule) {
-  const key = `schedule:${userId}:${schedule.schedule_id}`;
-  await env.STUDENT_SCHEDULES.put(key, JSON.stringify(schedule));
-}
-
-export async function listSchedulesForUser(env, userId) {
-  return listByPrefix(env.STUDENT_SCHEDULES, `schedule:${userId}:`);
-}
-
-export async function deleteSchedule(env, userId, scheduleId) {
-  await env.STUDENT_SCHEDULES.delete(`schedule:${userId}:${scheduleId}`);
-}
+// วิชาที่ผู้ใช้บันทึกไว้ย้ายไป D1 แล้ว (ตาราง user_courses) — ดู worker/src/schedule.js
+// ฟังก์ชัน putSchedule/listSchedulesForUser/deleteSchedule ที่เคยอยู่ตรงนี้ถูกลบพร้อมกับ
+// KV namespace STUDENT_SCHEDULES ไม่ปล่อยไว้ให้เรียกแล้วพังเงียบๆ เพราะ binding ไม่มีอยู่จริงแล้ว
