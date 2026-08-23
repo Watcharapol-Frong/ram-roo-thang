@@ -1946,41 +1946,6 @@
       "type": "Feature",
       "properties": {
         "category": "building",
-        "name": "SLB (อาคารสระหลวง)",
-        "description": "Sa Luang Building"
-      },
-      "geometry": {
-        "type": "Polygon",
-        "coordinates": [
-          [
-            [
-              100.619778,
-              13.753482
-            ],
-            [
-              100.619836,
-              13.753335
-            ],
-            [
-              100.620383,
-              13.753541
-            ],
-            [
-              100.620324,
-              13.753688
-            ],
-            [
-              100.619778,
-              13.753482
-            ]
-          ]
-        ]
-      }
-    },
-    {
-      "type": "Feature",
-      "properties": {
-        "category": "building",
         "name": "SWB (อาคารสวรรคโลก)",
         "description": "Sawankhalok Building"
       },
