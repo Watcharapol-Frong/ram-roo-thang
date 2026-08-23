@@ -174,7 +174,10 @@ The message lists each course sorted by exam period, with times, plus a link to 
 Exam rooms are not in the university announcement, so the message says so explicitly rather than
 guessing. When room data arrives, `formatAlertMessage()` in `worker/src/exam.js` is the only place to change.
 
-`PERIOD_TIME` in `worker/src/exam.js` must stay in sync with `EXAM_PERIOD_TIME` in `liff/app.js`.
+Period times (confirmed against the university announcement, Aug 23 2026):
+**A = 09:30–12:00/12:30**, **B = 14:00–16:30**. `PERIOD_TIME` in `worker/src/exam.js` must stay in
+sync with `EXAM_PERIOD_TIME` in `liff/app.js`. An earlier value of 13:30–16:00 for period B was
+wrong — it came from a hardcoded demo table, not the announcement.
 
 ### Delivery guarantees
 
@@ -327,7 +330,7 @@ the wrong time. Course codes not present in the timetable are now rejected at in
 | Parking | ✅ | 8 zones as polygons, 3-level reports, geofence, aggregation |
 | Find My Car | ✅ | Stored in localStorage — lost when switching devices (by design) |
 | ruMaster dataset | ✅ | 91 places |
-| Exam schedule dataset | ⚠️ | 2,865 courses with dates + periods, **but no building/room**, and the A/B period times are unconfirmed |
+| Exam schedule dataset | ⚠️ | 2,865 courses with dates + periods (times confirmed). **Rooms are still missing** — the university only publishes them close to the exam week, per-student via e-Service |
 | User database + coins | ✅ | D1 + ledger, double-claim prevention enforced by the database |
 | Survey → Google Sheets | ⚠️ | Code is ready but `FEEDBACK_ENDPOINT_URL` is unset, so no responses are collected yet |
 | Shop / spending coins | ❌ | Page is Coming Soon. The spend path is supported in the backend; we just need to decide what's redeemable |
@@ -336,7 +339,7 @@ the wrong time. Course codes not present in the timetable are now rejected at in
 
 ### Before demo day
 
-- [ ] Add exam buildings/rooms and confirm the A/B period times (alerts work without them, but can't name the room)
+- [ ] Decide how users supply their exam room (rooms are per-student and published late — see the OCR feasibility note below)
 - [ ] Set `ADMIN_TOKEN` in `worker/.secrets.env` so the alerts can be demoed manually
 - [ ] Check the LINE OA message quota against the expected beta volume
 - [ ] Set `FEEDBACK_ENDPOINT_URL` after deploying the Google Apps Script
