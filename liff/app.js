@@ -14,7 +14,7 @@ const GOOGLE_MAPS_MAP_ID = '3b904d628ff6dcd13b559086';
 // ได้จากในโค้ด แต่ "หมุนกล้องไม่ได้" (raster ไม่รองรับ heading/tilt เลย ทดสอบยืนยันแล้ว)
 // ถ้าใส่ Map ID ที่ผูก style ซ่อน POI ไว้ โหมด 2D จะกลายเป็น vector -> หมุนกล้องได้
 // และหมุนตามเข็มทิศได้ ส่วนตึก 3D ที่ style ทำให้หายไปก็ไม่กระทบ เพราะโหมด 2D ไม่ได้ใช้อยู่แล้ว
-const GOOGLE_MAPS_MAP_ID_2D = '';
+const GOOGLE_MAPS_MAP_ID_2D = '3b904d628ff6dcdec4f81588';
 
 // Dev Mode (?dev=1) — เปิดทดสอบบนเบราว์เซอร์ปกติได้โดยไม่ต้องเปิดผ่านแอป LINE
 // ปกติ liff.init จะเด้งไปหน้า LINE Login ทำให้เทสยาก โหมดนี้จึง stub liff ทิ้งไปเลย
@@ -766,9 +766,10 @@ function renderDaysLeft(days) {
 }
 
 // --- สร้าง HTML ของ Profile header card ---
-// profile = { userId, displayName, pictureUrl } | null
+// profile = { userId, displayName, pictureUrl, coins } | null
 function renderProfileHeaderHTML(profile) {
   const name = (profile && profile.displayName) ? escapeXml(profile.displayName) : '—';
+  const coins = (profile && profile.coins !== undefined) ? profile.coins : 120; // คะแนนสะสมจากการช่วยรายงานที่จอดรถ
 
   // รูปโปรไฟล์: ถ้ามี pictureUrl ใช้ <img>, ไม่มีใช้ตัวอักษรแรกของชื่อ
   const firstChar = (profile && profile.displayName)
@@ -784,6 +785,17 @@ function renderProfileHeaderHTML(profile) {
         ${avatarHTML}
       </div>
       <h2 class="profile-name">${name}</h2>
+      <div class="profile-coin-wrap">
+        <div class="profile-coin-pill" title="คะแนนสะสมจากการมีส่วนร่วมบอกข้อมูลที่จอดรถ">
+          <svg class="coin-svg" viewBox="0 0 24 24" width="18" height="18" fill="none">
+            <circle cx="12" cy="12" r="10" fill="#f59e0b"/>
+            <circle cx="12" cy="12" r="8" stroke="#fde68a" stroke-width="1.2" fill="#fbbf24"/>
+            <text x="12" y="16" font-size="11" font-weight="bold" fill="#78350f" text-anchor="middle" font-family="sans-serif">R</text>
+          </svg>
+          <span class="coin-count">${coins}</span>
+          <span class="coin-unit">Coins</span>
+        </div>
+      </div>
     </div>
   `;
 }
@@ -887,11 +899,46 @@ async function renderScheduleView(container) {
   await refreshScheduleList(userId);
 }
 
+// ข้อมูลจำลองตารางสอบและห้องสอบสำหรับวิชา ม.รามคำแหง (Demo dataset)
+const COURSE_EXAM_DATA = {
+  'LAW1001': { building_id: 'VKB', room: 'VKB 401', date_th: '15 ต.ค. 69', time_th: '09:30 - 12:00', building_name: 'อาคารเวียงคำ' },
+  'ENG1001': { building_id: 'KLB', room: 'KLB 201', date_th: '18 ต.ค. 69', time_th: '13:30 - 16:00', building_name: 'อาคารกงไกรลาศ' },
+  'RAM1000': { building_id: 'SBB', room: 'SBB 301', date_th: '20 ต.ค. 69', time_th: '09:30 - 12:00', building_name: 'อาคารศิลาบาตร' },
+  'POL1100': { building_id: 'VPB', room: 'VPB 502', date_th: '22 ต.ค. 69', time_th: '09:30 - 12:00', building_name: 'อาคารเวียงผา' },
+  'THA1003': { building_id: 'HUB', room: 'HUB 102', date_th: '24 ต.ค. 69', time_th: '13:30 - 16:00', building_name: 'คณะมนุษยศาสตร์' },
+  'HIS1003': { building_id: 'KLB', room: 'KLB 305', date_th: '26 ต.ค. 69', time_th: '09:30 - 12:00', building_name: 'อาคารกงไกรลาศ' },
+  'MTH1001': { building_id: 'SCL', room: 'SCL 204', date_th: '28 ต.ค. 69', time_th: '09:30 - 12:00', building_name: 'อาคารปฏิบัติการวิทย์' },
+};
+
+function getCourseExamInfo(courseCode) {
+  const code = (courseCode || '').toUpperCase().trim();
+  if (COURSE_EXAM_DATA[code]) return COURSE_EXAM_DATA[code];
+
+  // Fallback คำนวณแบบสุ่มคงที่จากรหัสวิชา เพื่อให้แสดงผลตารางได้เสมอ
+  const buildings = [
+    { id: 'KLB', name: 'อาคารกงไกรลาศ', room: 'KLB 301' },
+    { id: 'VPB', name: 'อาคารเวียงผา', room: 'VPB 204' },
+    { id: 'VKB', name: 'อาคารเวียงคำ', room: 'VKB 501' },
+    { id: 'SBB', name: 'อาคารศิลาบาตร', room: 'SBB 402' },
+  ];
+  let hash = 0;
+  for (let i = 0; i < code.length; i++) hash = (hash + code.charCodeAt(i)) % buildings.length;
+  const b = buildings[hash];
+  const day = 15 + (hash * 3);
+  return {
+    building_id: b.id,
+    room: b.room,
+    date_th: `${day} ต.ค. 69`,
+    time_th: hash % 2 === 0 ? '09:30 - 12:00' : '13:30 - 16:00',
+    building_name: b.name,
+  };
+}
+
 function renderScheduleForm(container, userId) {
   container.innerHTML = `
     <div class="card schedule-section">
       <div class="schedule-header-row">
-        <h2>วิชาที่บันทึกไว้ <span class="badge-beta">Beta</span></h2>
+        <h2>ตารางสอบ <span class="badge-beta">Beta</span></h2>
         <span id="course-count-badge" class="course-count-badge">0</span>
       </div>
       
@@ -917,8 +964,8 @@ function renderScheduleForm(container, userId) {
         </div>
       </form>
 
-      <div id="course-chips-container" class="course-chips-container">
-        <div class="schedule-empty">กำลังโหลด...</div>
+      <div id="exam-table-container">
+        <div class="schedule-empty">กำลังโหลดตารางสอบ...</div>
       </div>
     </div>
   `;
@@ -981,7 +1028,7 @@ function renderScheduleForm(container, userId) {
 }
 
 async function refreshScheduleList(userId) {
-  const container = document.getElementById('course-chips-container');
+  const container = document.getElementById('exam-table-container');
   const badgeEl = document.getElementById('course-count-badge');
   if (!container) return;
 
@@ -1011,28 +1058,110 @@ async function refreshScheduleList(userId) {
   if (badgeEl) badgeEl.textContent = schedules.length;
 
   if (schedules.length === 0) {
-    container.innerHTML = '<div class="schedule-empty">ยังไม่มีวิชาที่บันทึกไว้</div>';
+    container.innerHTML = '<div class="schedule-empty">ยังไม่มีวิชาในตารางสอบ</div>';
     return;
   }
 
-  container.innerHTML = schedules
-    .map(
-      (s) => `
-      <div class="course-chip" id="chip-${escapeXml(s.schedule_id)}">
-        <span class="course-chip-code">${escapeXml(s.course_code)}</span>
-        <button type="button" class="course-chip-del" data-id="${escapeXml(s.schedule_id)}" data-code="${escapeXml(s.course_code)}" aria-label="ลบ">&times;</button>
-      </div>
-    `
-    )
+  const rowsHTML = schedules
+    .map((s) => {
+      const info = getCourseExamInfo(s.course_code);
+      return `
+        <div class="exam-swipe-wrapper" id="row-${escapeXml(s.schedule_id)}">
+          <div class="exam-behind-actions">
+            <button type="button" class="btn-del-circle" data-id="${escapeXml(s.schedule_id)}" data-code="${escapeXml(s.course_code)}" title="ลบวิชานี้" aria-label="ลบ">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 6h18"></path>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              </svg>
+            </button>
+          </div>
+          <div class="exam-item-content">
+            <div class="exam-col-code">${escapeXml(s.course_code)}</div>
+            <div class="exam-col-info">
+              <div class="exam-datetime">${escapeXml(info.date_th)}<span class="exam-time-dot">•</span>${escapeXml(info.time_th)}</div>
+              <div class="exam-location">${escapeXml(info.room)} (${escapeXml(info.building_name)})</div>
+            </div>
+            <div class="exam-col-action">
+              <button type="button" class="btn-go-circle" data-dest="${escapeXml(info.building_id)}" title="นำทางไป ${escapeXml(info.building_name)}">
+                <span>Go</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    })
     .join('');
 
-  container.querySelectorAll('.course-chip-del').forEach((btn) => {
-    btn.addEventListener('click', async () => {
+  container.innerHTML = `
+    <div class="exam-list-container">
+      ${rowsHTML}
+    </div>
+  `;
+
+  // ฟังก์ชัน Swipe to Reveal สำหรับการ Slide เพื่อแสดงปุ่มลบ
+  let activeSwiped = null;
+  container.querySelectorAll('.exam-item-content').forEach((row) => {
+    let startX = 0;
+    let currentX = 0;
+    let isTouching = false;
+
+    row.addEventListener('touchstart', (e) => {
+      startX = e.touches[0].clientX;
+      currentX = startX;
+      isTouching = true;
+    }, { passive: true });
+
+    row.addEventListener('touchmove', (e) => {
+      if (!isTouching) return;
+      currentX = e.touches[0].clientX;
+    }, { passive: true });
+
+    row.addEventListener('touchend', () => {
+      if (!isTouching) return;
+      isTouching = false;
+      const diffX = startX - currentX;
+
+      // เลื่อนไปทางซ้าย -> เปิดปุ่มลบ
+      if (diffX > 30) {
+        if (activeSwiped && activeSwiped !== row) {
+          activeSwiped.classList.remove('is-swiped');
+        }
+        row.classList.add('is-swiped');
+        activeSwiped = row;
+      }
+      // เลื่อนกลับไปทางขวา -> ปิดปุ่มลบ
+      else if (diffX < -30) {
+        row.classList.remove('is-swiped');
+        if (activeSwiped === row) activeSwiped = null;
+      }
+    });
+
+    // Double click / Long press fallback สำหรับ desktop
+    row.addEventListener('dblclick', () => {
+      row.classList.toggle('is-swiped');
+    });
+  });
+
+  // ผูก Event ปุ่มนำทางวงกลมสีเขียว (Go)
+  container.querySelectorAll('.btn-go-circle').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const bId = btn.dataset.dest;
+      if (!bId) return;
+      const devParam = DEV_MODE ? '&dev=1' : '';
+      window.location.href = `?dest_id=${encodeURIComponent(bId)}${devParam}`;
+    });
+  });
+
+  // ผูก Event ปุ่มลบวงกลมสีแดง
+  container.querySelectorAll('.btn-del-circle').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
       const scheduleId = btn.dataset.id;
       const courseCode = btn.dataset.code;
-      const chip = document.getElementById(`chip-${scheduleId}`);
+      const row = document.getElementById(`row-${scheduleId}`);
 
-      if (chip) chip.classList.add('is-deleting');
+      if (row) row.classList.add('is-deleting');
 
       try {
         await fetchJSON(
@@ -1045,13 +1174,13 @@ async function refreshScheduleList(userId) {
 
       showToast(`✕ ลบ ${courseCode} แล้ว`);
       setTimeout(async () => {
-        if (chip) chip.remove();
-        const remaining = container.querySelectorAll('.course-chip').length;
+        if (row) row.remove();
+        const remaining = container.querySelectorAll('.exam-swipe-wrapper').length;
         if (badgeEl) badgeEl.textContent = remaining;
         if (remaining === 0) {
-          container.innerHTML = '<div class="schedule-empty">ยังไม่มีวิชาที่บันทึกไว้</div>';
+          container.innerHTML = '<div class="schedule-empty">ยังไม่มีวิชาในตารางสอบ</div>';
         }
-      }, 180);
+      }, 200);
     });
   });
 }
@@ -1541,7 +1670,8 @@ async function runContextRouting(target, originLocation, opts) {
     if (zone) appState.map.instance.panTo(destination);
     SheetManager.showOffCampusSheet({
       title: shortPlaceName(target.name),
-      parkingName: zone ? zone.zone_name : null,
+      // ตัดคำว่า "ที่จอดรถ" นำหน้าออก เพราะประโยครอบๆ บอกอยู่แล้วว่ากำลังพูดถึงที่จอดรถ
+      parkingName: zone ? zone.zone_name.replace(/^ที่จอดรถ\s*/, '') : null,
       parkingStatus: zone ? PARKING_STATUS_LABEL[zone.status] || null : null,
       onOpenGoogleMaps: () => window.open(googleDirectionsUrl(destination), '_blank'),
     });

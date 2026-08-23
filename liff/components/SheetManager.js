@@ -68,9 +68,9 @@
     const slot = sheetSlot();
     if (!slot) return;
     const destination = parkingName
-      ? `<p class="muted">📍 คุณอยู่นอกพื้นที่ ม.รามฯ — จะนำทางไปที่ <strong>${parkingName}</strong>` +
-        `${parkingStatus ? ` (ตอนนี้${parkingStatus})` : ''} ซึ่งเป็นลานจอดที่ใกล้จุดหมายที่สุด</p>`
-      : '<p class="muted">📍 คุณอยู่นอกพื้นที่ ม.รามฯ แนะนำเดินทางด้วยรถยนต์หรือขนส่งสาธารณะมายังจุดนัดพบหลัก</p>';
+      ? `<p class="muted">อยู่นอก ม.รามฯ พาไปจอดที่ <strong>${parkingName}</strong>` +
+        ` ซึ่งใกล้จุดหมายที่สุด${parkingStatus ? ` (ตอนนี้${parkingStatus})` : ''}</p>`
+      : '<p class="muted">อยู่นอก ม.รามฯ พาไปที่ประตูหน้ามหาวิทยาลัย</p>';
     slot.innerHTML = `
       <div class="nav-info-card">
         <div class="sheet-handle"></div>
