@@ -16,6 +16,12 @@ const GOOGLE_MAPS_MAP_ID = '3b904d628ff6dcd13b559086';
 // และหมุนตามเข็มทิศได้ ส่วนตึก 3D ที่ style ทำให้หายไปก็ไม่กระทบ เพราะโหมด 2D ไม่ได้ใช้อยู่แล้ว
 const GOOGLE_MAPS_MAP_ID_2D = '3b904d628ff6dcdec4f81588';
 
+// ปลายทางเก็บผลแบบประเมิน Beta — Web App URL ของ Google Apps Script
+// (ดู scripts/google-sheets-apps-script.js สำหรับโค้ดฝั่ง Sheets และวิธี deploy)
+// เว้นว่างไว้ = ไม่ส่งไปไหน เก็บลง localStorage ของเครื่องคนตอบอย่างเดียว ซึ่งเท่ากับเก็บผลไม่ได้จริง
+// เพราะข้อมูลติดอยู่ในเครื่องแต่ละคน ต้องใส่ค่านี้ก่อนเปิดให้คนทดสอบ ไม่งั้นได้ผลกลับมา 0 ชุด
+const FEEDBACK_ENDPOINT_URL = '';
+
 // Dev Mode (?dev=1) — เปิดทดสอบบนเบราว์เซอร์ปกติได้โดยไม่ต้องเปิดผ่านแอป LINE
 // ปกติ liff.init จะเด้งไปหน้า LINE Login ทำให้เทสยาก โหมดนี้จึง stub liff ทิ้งไปเลย
 // และจำลองพิกัด GPS ให้อยู่ในแคมปัส (ใส่ &lat=&lng= เพื่อจำลองตำแหน่งอื่น เช่น นอกแคมปัส)
@@ -1296,18 +1302,28 @@ async function renderFeedbackView() {
       q11_general_comments: (formData.get('q11_general_comments') || '').trim()
     };
 
-    // ส่งข้อมูลไปยัง Google Apps Script Web App Endpoint ถ้ามีการตั้งค่าไว้
-    const endpointUrl = localStorage.getItem('ram-roo-thang:feedback-sheet-url') || '';
+    // ส่งไป Google Apps Script (localStorage ใช้ override ตอนทดสอบได้ ไม่ต้องแก้โค้ด)
+    //
+    // ส่งเป็น text/plain ไม่ใช่ application/json ทั้งที่ body เป็น JSON — เพราะ application/json
+    // ทำให้เบราว์เซอร์ยิง preflight OPTIONS ก่อน ซึ่ง Apps Script ไม่ตอบ เลยต้องหนีไปใช้
+    // mode:'no-cors' ที่อ่าน response ไม่ได้เลย (opaque) แปลว่าส่งไม่ผ่านก็ไม่มีทางรู้
+    // text/plain เป็น simple request ไม่มี preflight อ่านผลได้จริง ส่วนฝั่ง Apps Script อ่านจาก
+    // e.postData.contents ซึ่งได้ body ดิบอยู่แล้วไม่ว่า Content-Type จะเป็นอะไร
+    const endpointUrl = localStorage.getItem('ram-roo-thang:feedback-sheet-url') || FEEDBACK_ENDPOINT_URL;
+    let syncedToSheet = false;
     if (endpointUrl) {
       try {
-        await fetch(endpointUrl, {
+        const res = await fetch(endpointUrl, {
           method: 'POST',
-          mode: 'no-cors',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify(payload),
+          redirect: 'follow',
         });
+        const result = await res.json().catch(() => ({}));
+        syncedToSheet = res.ok && result.status === 'success';
+        if (!syncedToSheet) console.error('บันทึกลง Google Sheets ไม่สำเร็จ', res.status, result);
       } catch (err) {
-        console.warn('Google Sheets sync warning:', err);
+        console.error('ส่งผลประเมินไป Google Sheets ไม่สำเร็จ', err);
       }
     }
 
@@ -1319,7 +1335,13 @@ async function renderFeedbackView() {
     } catch (_) {}
 
     localStorage.setItem('ram-roo-thang:feedback-done', 'true');
-    showToast('ส่งแบบประเมินสำเร็จ! ได้รับ 30 เหรียญ');
+    // ถ้ายังไม่ได้ตั้ง endpoint ก็ไม่ใช่ความผิดผู้ใช้ ไม่ต้องขู่ — แต่ถ้าตั้งไว้แล้วส่งไม่ผ่าน
+    // ต้องบอกตามจริง ไม่งั้นทั้งคนตอบและเราเข้าใจว่าเก็บได้แล้วทั้งที่ข้อมูลไม่ถึงไหน
+    if (endpointUrl && !syncedToSheet) {
+      showToast('บันทึกในเครื่องแล้ว แต่ส่งเข้าระบบไม่สำเร็จ');
+    } else {
+      showToast('ส่งแบบประเมินสำเร็จ! ได้รับ 30 เหรียญ');
+    }
     renderProfileView();
   });
 }
