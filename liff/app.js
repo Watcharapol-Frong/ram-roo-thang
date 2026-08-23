@@ -49,7 +49,9 @@ const CAMPUS_CONSTANTS = {
   INITIAL_VIEW: { center: { lat: 13.7565, lng: 100.6185 }, zoom: 17 },
 };
 
-const PARKING_STATUS_LABEL = { GREEN: 'ว่าง', YELLOW: 'ปานกลาง', RED: 'เต็ม' };
+// สื่อถึง "ความหนาแน่นของรถในลาน" ตรงกว่าคำว่า ว่าง/เต็ม ซึ่งฟังเหมือนสถานะแบบมี-ไม่มีที่จอด
+// ทั้งที่ข้อมูลจริงเป็นการประเมินความแออัดจากคนที่อยู่ตรงนั้น ไม่ได้นับช่องจอดจริง
+const PARKING_STATUS_LABEL = { GREEN: 'เบาบาง', YELLOW: 'ปานกลาง', RED: 'หนาแน่น' };
 const PARKING_STATUS_COLOR = { GREEN: '#2ecc71', YELLOW: '#f1c40f', RED: '#e74c3c' };
 
 // Global State Architecture (Module_2_Technical_Specification.md §5) — เก็บไว้ให้ฟีเจอร์ในอนาคต
@@ -64,6 +66,7 @@ const appState = {
   },
   target: null, // { id, name, type: 'BUILDING'|'PARKING'|'MY_CAR'|'COMMUNITY', coords: {lat,lng} }
   parkingZones: [],
+  car: null,
   navigation: { path: [] }, // โหลดจาก /api/parking/zones — ใช้ทั้งทาสีเลเยอร์และหาลานจอดใกล้จุดหมาย
   map: {
     instance: null,
@@ -353,6 +356,8 @@ const BUILDING_MARKER_MIN_ZOOM = altitudeToZoom(CAMERA_PRESETS['2d'].altitudeMet
 let masterFeatures = null;
 let targetPin = null;
 let userPin = null;
+let carPin = null;
+const parkingShapes = [];
 const layerOverlays = { building: [], parking: [], other: [] };
 const buildingMarkers = [];
 
@@ -442,6 +447,7 @@ async function renderMapView({ presetDestId, presetZoneId } = {}) {
         <div class="layer-row" id="layer-chips"></div>
         <button class="view-toggle-btn" id="layer-toggle-btn" aria-label="สลับมุมมอง 2 มิติ/3 มิติ">3D</button>
         <button class="view-toggle-btn" id="my-location-btn" aria-label="ตำแหน่งของฉัน">${icon('locate')}</button>
+        <button class="view-toggle-btn" id="my-car-btn" aria-label="ไปที่รถของฉัน" hidden>${icon('parking')}</button>
       </div>
       <div id="notice-bar-slot"></div>
       <div id="action-sheet-slot"></div>
@@ -449,11 +455,16 @@ async function renderMapView({ presetDestId, presetZoneId } = {}) {
   `;
   document.getElementById('layer-toggle-btn').addEventListener('click', toggle3D);
   document.getElementById('my-location-btn').addEventListener('click', toggleMyLocation);
+  document.getElementById('my-car-btn').addEventListener('click', navigateToCar);
   updateMyLocationAvailability();
+  appState.car = loadSavedCar();
+  updateCarButtonAvailability();
 
   buildingMarkers.length = 0;
   targetPin = null;
   userPin = null;
+  carPin = null;
+  parkingShapes.length = 0;
   Object.keys(layerOverlays).forEach((k) => { layerOverlays[k] = []; });
 
   createMapInstance(CAMPUS_CONSTANTS.INITIAL_VIEW.center);
@@ -476,6 +487,7 @@ async function renderMapView({ presetDestId, presetZoneId } = {}) {
   renderLayerChips();
   renderSearch(features);
   renderLayers();
+  updateCarPin();
 
   if (presetDestId) {
     const target = await resolvePresetBuilding(presetDestId, features);
@@ -659,6 +671,9 @@ function clearLayerOverlays() {
     layerOverlays[id] = [];
   });
   buildingMarkers.length = 0;
+  // ต้องล้างด้วย ไม่งั้นทุกครั้งที่วาดเลเยอร์ใหม่ (เช่น หลังส่งรายงานแล้วรีเฟรชสี) จะสะสมรูปทรง
+  // ลานจอดเพิ่มอีกชุด ชี้ไป polygon ที่ถูกถอดออกจากแผนที่ไปแล้ว
+  parkingShapes.length = 0;
 }
 
 function renderLayers() {
@@ -729,6 +744,9 @@ function addParkingOverlay(feature) {
     });
   });
   layerOverlays.parking.push(shape);
+  // เก็บรูปทรงไว้ตรวจว่าผู้ใช้ยืนอยู่ในเขตลานไหน (ใช้ polygon จริง ไม่ใช่รัศมีจากจุดกึ่งกลาง
+  // เพราะลานจอดเป็นรูปยาวๆ วงกลมจะกินพื้นที่นอกลานไปด้วย)
+  parkingShapes.push({ zone, feature, shape });
 }
 
 // หมุด "อื่นๆ" เดิมเป็นจุดกลมสีเดียวกันหมด แยกไม่ออกว่าร้านกาแฟหรือสนามกีฬา ต้องแตะดูทีละอัน
@@ -1055,56 +1073,15 @@ function renderFeedbackView() {
   });
 }
 
-// renderShopView — หน้าร้านค้า & สิทธิพิเศษ (Minimal Pure Typography สไตล์เดียวกับ Profile)
+// renderShopView — หน้าร้านค้า & สิทธิพิเศษ (Coming Soon กลางจอใหญ่ๆ)
 function renderShopView() {
   const container = getApp();
-  const bonus = localStorage.getItem('ram-roo-thang:feedback-done') === 'true' ? 30 : 0;
-  const coins = 120 + bonus;
 
   container.innerHTML = `
-    <div class="profile-flat-container">
-      <!-- Header -->
-      <div class="profile-flat-header" style="justify-content: space-between;">
-        <div>
-          <h1 class="profile-flat-name" style="font-size: 1.25rem;">ร้านค้าและสิทธิพิเศษ</h1>
-          <div class="profile-flat-sub">แลกของรางวัลด้วยคะแนนสะสม</div>
-        </div>
-        <div class="profile-coin-text" style="font-size: 0.92rem;">${coins} เหรียญ</div>
-      </div>
-
-      <!-- Shop Items List -->
-      <div class="schedule-flat-section">
-        <div class="schedule-flat-header-row">
-          <h2>สิทธิพิเศษสำหรับนักศึกษา</h2>
-          <span class="badge-beta">Coming Soon</span>
-        </div>
-
-        <div class="shop-items-list">
-          <div class="shop-item-row">
-            <div class="shop-item-info">
-              <div class="shop-item-title">คูปองส่วนลดเครื่องดื่ม 10 บาท</div>
-              <div class="shop-item-sub">ร้านกาแฟและคาเฟ่รอบมหาวิทยาลัย</div>
-            </div>
-            <button type="button" class="btn-shop-cost" disabled>50 เหรียญ</button>
-          </div>
-
-          <div class="shop-item-row">
-            <div class="shop-item-info">
-              <div class="shop-item-title">สติกเกอร์รามรู้ทาง Limited Edition</div>
-              <div class="shop-item-sub">รับได้ที่จุดประชาสัมพันธ์ อาคาร สวป.</div>
-            </div>
-            <button type="button" class="btn-shop-cost" disabled>100 เหรียญ</button>
-          </div>
-
-          <div class="shop-item-row">
-            <div class="shop-item-info">
-              <div class="shop-item-title">สิทธิพิเศษสำรองที่จอดรถล่วงหน้า</div>
-              <div class="shop-item-sub">ลานจอดรถรอบมหาวิทยาลัย (เร็วๆ นี้)</div>
-            </div>
-            <button type="button" class="btn-shop-cost" disabled>200 เหรียญ</button>
-          </div>
-        </div>
-      </div>
+    <div class="coming-soon-container">
+      <div class="coming-soon-badge">Shop</div>
+      <h1 class="coming-soon-title">Coming Soon</h1>
+      <p class="coming-soon-sub">ระบบร้านค้าและแลกสิทธิพิเศษกำลังอยู่ระหว่างการพัฒนา</p>
     </div>
 
     ${renderBottomNavHTML('shop')}
@@ -1628,6 +1605,8 @@ function rebuildMap() {
   Object.keys(layerOverlays).forEach((k) => { layerOverlays[k] = []; });
   targetPin = null;
   userPin = null;
+  carPin = null;
+  parkingShapes.length = 0;
 
   const map = createMapInstance({ lat: center.lat(), lng: center.lng() });
   renderLayers();
@@ -1851,6 +1830,138 @@ function formatDistance(meters) {
   return `${Math.round(meters)} m`;
 }
 
+// --- จำที่จอดรถ + รายงานสภาพลานจอด ---
+
+const MY_CAR_STORAGE_KEY = 'ram-roo-thang:my-car';
+
+// เก็บไว้ในเครื่องอย่างเดียว ไม่ส่งขึ้น server — พิกัดรถเป็นข้อมูลที่บอกได้ว่าเจ้าของอยู่ไหน
+// เก็บบนเครื่องตัวเองจึงไม่ต้องมีเรื่อง privacy ให้ดูแล และไม่ต้องมี endpoint เพิ่ม
+// ข้อแลกคือเปลี่ยนเครื่อง/ล้างข้อมูลเบราว์เซอร์แล้วหาย ซึ่งรับได้ เพราะจอดแล้วกลับมาเอารถวันเดียวกัน
+function loadSavedCar() {
+  try {
+    const raw = localStorage.getItem(MY_CAR_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (err) {
+    return null;
+  }
+}
+
+function saveCar(location, zoneName) {
+  const car = { lat: location.lat, lng: location.lng, zoneName: zoneName || '', savedAt: new Date().toISOString() };
+  try {
+    localStorage.setItem(MY_CAR_STORAGE_KEY, JSON.stringify(car));
+  } catch (err) {
+    console.error('บันทึกตำแหน่งรถไม่สำเร็จ', err);
+  }
+  appState.car = car;
+  updateCarPin();
+  updateCarButtonAvailability();
+  return car;
+}
+
+function forgetCar() {
+  try {
+    localStorage.removeItem(MY_CAR_STORAGE_KEY);
+  } catch (err) { /* ไม่เป็นไร ถือว่าลืมแล้ว */ }
+  appState.car = null;
+  updateCarPin();
+  updateCarButtonAvailability();
+}
+
+const CAR_GLYPH = '<path d="M5 11l1.5-4.5A2 2 0 018.4 5h7.2a2 2 0 011.9 1.5L19 11v7a1 1 0 01-1 1h-1a1 1 0 01-1-1v-1H8v1a1 1 0 01-1 1H6a1 1 0 01-1-1v-7zm2.2-1h9.6l-1-3H8.2l-1 3zM7.5 15a1 1 0 100-2 1 1 0 000 2zm9 0a1 1 0 100-2 1 1 0 000 2z"/>';
+
+function updateCarPin() {
+  if (carPin) {
+    carPin.setMap(null);
+    carPin = null;
+  }
+  if (!appState.car || !appState.map.instance) return;
+  carPin = new google.maps.Marker({
+    position: { lat: appState.car.lat, lng: appState.car.lng },
+    map: appState.map.instance,
+    title: 'รถของคุณ',
+    icon: pinIcon('#e8590c', `<g transform="scale(0.62) translate(-12 -12)">${CAR_GLYPH}</g>`),
+    zIndex: 997,
+  });
+  carPin.addListener('click', () => navigateToCar());
+}
+
+function updateCarButtonAvailability() {
+  const btn = document.getElementById('my-car-btn');
+  if (btn) btn.hidden = !appState.car;
+}
+
+function navigateToCar() {
+  if (!appState.car) return;
+  selectTarget({
+    id: 'MY_CAR',
+    name: 'รถของคุณ',
+    type: 'MY_CAR',
+    coords: { lat: appState.car.lat, lng: appState.car.lng },
+  });
+}
+
+// ผู้ใช้ยืนอยู่ในเขตลานจอดไหน (null = ไม่ได้อยู่ในลานไหนเลย)
+function parkingZoneAt(location) {
+  if (!location) return null;
+  const point = new google.maps.LatLng(location.lat, location.lng);
+  const hit = parkingShapes.find((entry) => google.maps.geometry.poly.containsLocation(point, entry.shape));
+  return hit || null;
+}
+
+// เรียกทุกครั้งที่รู้ตำแหน่งใหม่ — ถ้ายืนอยู่ในลานจอดและยังไม่ได้เลือกจุดหมายอะไร ให้เสนอสิ่งที่
+// ทำได้ตรงนั้นเลย (จำที่จอด / รายงานสภาพ) ไม่ต้องให้ผู้ใช้ไปหาเมนูเอง
+function offerParkingActions(location) {
+  if (appState.target || NavigationController.isActive()) return;
+  const here = parkingZoneAt(location);
+  if (!here) return;
+  showParkingActionSheet(here, location);
+}
+
+function showParkingActionSheet(here, location) {
+  const zoneName = here.feature.name;
+  const saved = appState.car;
+  SheetManager.showParkingActionSheet({
+    title: zoneName.replace(/^ที่จอดรถ\s*/, ''),
+    savedNote: saved ? `จดจำตำแหน่งรถไว้แล้วเมื่อ ${formatSavedAt(saved.savedAt)}` : '',
+    onSaveCar: () => {
+      saveCar(location, zoneName);
+      showParkingActionSheet(here, location);
+      SheetManager.showNotice('จดจำตำแหน่งรถแล้ว กดปุ่มรูปรถเพื่อกลับมาหาได้ทุกเมื่อ');
+    },
+    onReport: (status) => submitParkingReport(here, location, status),
+  });
+}
+
+function formatSavedAt(iso) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+}
+
+// ยิงเข้า endpoint เดิมที่มีอยู่แล้ว — backend ตรวจ geofence กับ rate limit ให้เอง เราไม่ต้อง
+// เช็คซ้ำฝั่ง client (และไม่ควรเชื่อ client อยู่แล้ว)
+async function submitParkingReport(here, location, status) {
+  const zoneId = here.zone && here.zone.zone_id;
+  if (!zoneId) {
+    SheetManager.showNotice('ลานจอดนี้ยังไม่มีข้อมูลในระบบ รายงานไม่ได้ครับ');
+    return;
+  }
+  try {
+    const userId = await getUserId();
+    await fetchJSON('/api/parking/report', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: userId, zone_id: zoneId, status, user_lat: location.lat, user_lng: location.lng }),
+    });
+    SheetManager.showNotice('ขอบคุณครับ รายงานสภาพที่จอดเรียบร้อย');
+    await loadParkingZones();
+    renderLayers();
+  } catch (err) {
+    SheetManager.showNotice(err.data && err.data.error ? err.data.error : 'ส่งรายงานไม่สำเร็จ ลองใหม่อีกครั้งครับ');
+  }
+}
+
 // --- ขอตำแหน่งตั้งแต่เปิดแอป ---
 
 const LOCATION_PRIMER_SKIPPED_KEY = 'ram-roo-thang:location-primer-skipped';
@@ -1894,6 +2005,7 @@ async function acceptLocation() {
     SheetManager.hide();
     appState.map.instance.panTo(location);
     nudgeMapRepaint(appState.map.instance);
+    offerParkingActions(location);
     return true;
   } catch (err) {
     SheetManager.hide();
@@ -2005,6 +2117,7 @@ async function toggleMyLocation() {
 
   appState.map.instance.panTo(location);
   nudgeMapRepaint(appState.map.instance);
+  offerParkingActions(location);
   const started = await startHeadingFollow();
   if (started && btn) btn.classList.add('active');
 }
@@ -2073,6 +2186,16 @@ function startNavigation(target, route) {
     },
     onArrive: () => {
       SheetManager.updateNavigationStats('ถึงแล้ว', '-');
+      // ถึงลานจอดแล้วสิ่งที่ผู้ใช้จะทำต่อคือจอดรถ — เสนอปุ่มจำที่จอด/รายงานสภาพให้เลย
+      // ไม่ต้องกดจบการนำทางก่อนแล้วค่อยมาหาเมนูเอง
+      if (target.type !== 'PARKING') return;
+      const location = appState.user.location;
+      const here = parkingZoneAt(location);
+      if (!here) return;
+      NavigationController.stop();
+      appState.target = null;
+      clearTargetPin();
+      showParkingActionSheet(here, location);
     },
     // เดินหลงออกนอกเส้นทาง — คำนวณใหม่จากตำแหน่งปัจจุบันไปจุดหมายเดิม แล้วยัดเส้นใหม่เข้า session
     // ที่กำลังทำงานอยู่ ไม่ต้องเริ่มโหมดนำทางใหม่ (watch จะได้ไม่ขาดช่วง)

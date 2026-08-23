@@ -653,6 +653,46 @@ body.map-view {
   letter-spacing: -0.01em;
 }
 
+/* --- Coming Soon Fullscreen Centered --- */
+.coming-soon-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: calc(100vh - 180px);
+  text-align: center;
+  padding: 32px 20px;
+}
+
+.coming-soon-badge {
+  display: inline-block;
+  padding: 4px 14px;
+  background: #f1f5f9;
+  color: #64748b;
+  font-size: 0.85rem;
+  font-weight: 700;
+  border-radius: 999px;
+  margin-bottom: 16px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.coming-soon-title {
+  font-size: 2.4rem;
+  font-weight: 900;
+  color: #0f172a;
+  margin: 0 0 10px;
+  letter-spacing: -0.03em;
+}
+
+.coming-soon-sub {
+  font-size: 0.95rem;
+  color: #64748b;
+  margin: 0;
+  max-width: 290px;
+  line-height: 1.5;
+}
+
 /* --- Shop & Settings Flat List Styles --- */
 .shop-items-list {
   display: flex;
@@ -1244,3 +1284,32 @@ body.is-searching #action-sheet-slot {
   font-size: 0.8rem;
   line-height: 1.45;
 }
+
+/* ปุ่มรายงานสภาพที่จอด — สีเดียวกับที่ใช้ระบายพื้นที่ลานจอดบนแผนที่ จะได้เชื่อมโยงกันทันที */
+.nav-info-card .report-label {
+  margin: 16px 0 8px;
+  font-size: 0.85rem;
+}
+
+.report-choices {
+  display: flex;
+  gap: 8px;
+}
+
+.report-btn {
+  flex: 1;
+  padding: 13px 8px;
+  border: none;
+  border-radius: 14px;
+  font-family: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #ffffff;
+  cursor: pointer;
+}
+
+.report-green  { background: #2ecc71; }
+.report-yellow { background: #d9a406; }
+.report-red    { background: #e74c3c; }
+
+.report-btn:active { filter: brightness(0.92); }

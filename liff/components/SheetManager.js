@@ -81,6 +81,38 @@
     syncSheetHeight();
   }
 
+  // การ์ดตอนยืนอยู่ในลานจอด — เสนอสิ่งที่ทำได้ตรงจุดนั้นเลย ไม่ต้องให้ไปหาเมนูเอง
+  // ปุ่มรายงานสภาพอยู่ต่อจากปุ่มจำที่จอด เพราะคนที่เพิ่งจอดเสร็จคือคนที่รู้สภาพลานดีที่สุดตอนนั้น
+  const PARKING_REPORT_CHOICES = [
+    { status: 'GREEN', label: 'เบาบาง' },
+    { status: 'YELLOW', label: 'ปานกลาง' },
+    { status: 'RED', label: 'หนาแน่น' },
+  ];
+
+  function showParkingActionSheet({ title, savedNote, onSaveCar, onReport }) {
+    const slot = sheetSlot();
+    if (!slot) return;
+    slot.innerHTML = `
+      <div class="nav-info-card">
+        <div class="sheet-handle"></div>
+        <button class="sheet-close" id="sheet-close-btn" aria-label="ปิด">&times;</button>
+        <h2>คุณอยู่ที่ ${title}</h2>
+        ${savedNote ? `<p class="muted sheet-hint">${savedNote}</p>` : ''}
+        <button class="btn btn-primary" id="save-car-btn">${savedNote ? 'อัปเดตตำแหน่งรถ' : 'จดจำตำแหน่งรถ'}</button>
+        <p class="muted report-label">สภาพที่จอดตอนนี้เป็นยังไง</p>
+        <div class="report-choices">
+          ${PARKING_REPORT_CHOICES.map((c) => `<button class="report-btn report-${c.status.toLowerCase()}" data-status="${c.status}">${c.label}</button>`).join('')}
+        </div>
+      </div>
+    `;
+    document.getElementById('save-car-btn').addEventListener('click', onSaveCar);
+    slot.querySelectorAll('.report-btn').forEach((btn) => {
+      btn.addEventListener('click', () => onReport(btn.dataset.status));
+    });
+    bindClose();
+    syncSheetHeight();
+  }
+
   // Scenario: ไม่ได้สิทธิ์ GPS — ไม่รู้ว่าผู้ใช้อยู่ไหน จึงไม่ควรมีปุ่ม "เริ่มเดินทาง" เพราะการนำทาง
   // แบบเลี้ยวซ้ายเลี้ยวขวาจากจุดที่เดาเอาเองอันตรายกว่าไม่มีให้เลย — เปลี่ยนเป็นชวนเปิดตำแหน่งแทน
   // ซึ่งเป็นสิ่งเดียวที่ทำแล้วสถานการณ์ดีขึ้นจริง ส่วนระยะทางยังบอกไว้เป็นข้อมูลอ้างอิงคร่าวๆ
@@ -209,6 +241,7 @@
     hide,
     setOnClose,
     showLocationPrimer,
+    showParkingActionSheet,
     showRouteSheet,
     showGpsDeniedSheet,
     showNavigationSheet,
