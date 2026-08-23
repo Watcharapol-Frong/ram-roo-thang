@@ -336,7 +336,6 @@ async function renderMapView({ presetDestId, presetZoneId } = {}) {
       <div id="action-sheet-slot"></div>
     </div>
   `;
-  renderBottomNav(container, 'map');
   document.getElementById('layer-toggle-btn').addEventListener('click', toggle3D);
 
   buildingMarkers.length = 0;
@@ -596,37 +595,6 @@ function highlightBuildingMarker(buildingId) {
   });
 }
 
-// --- Bottom navigation (แผนที่ / รายงานที่จอด / โปรไฟล์) ---
-
-const BOTTOM_NAV_ITEMS = [
-  { id: 'map', icon: '🗺', label: 'แผนที่' },
-  { id: 'profile', icon: '👤', label: 'โปรไฟล์' },
-];
-
-function renderBottomNav(container, activeId) {
-  const wrapper = document.createElement('div');
-  wrapper.innerHTML = `
-    <nav class="bottom-nav">
-      ${BOTTOM_NAV_ITEMS.map((item) => `
-        <button class="bottom-nav-item${item.id === activeId ? ' active' : ''}" data-nav="${item.id}">
-          <span class="bottom-nav-icon">${item.icon}</span>
-          <span class="bottom-nav-label">${item.label}</span>
-        </button>`).join('')}
-    </nav>
-  `;
-  const nav = wrapper.firstElementChild;
-  container.appendChild(nav);
-
-  nav.querySelectorAll('.bottom-nav-item').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const id = btn.dataset.nav;
-      if (id === activeId) return;
-      if (id === 'map') renderMapView({});
-      else if (id === 'profile') renderProfileView();
-    });
-  });
-}
-
 // Maps ล่ม (เน็ตสะดุด / key เกิน quota / referrer ไม่ผ่าน) — ยังต้องกดไปหน้าอื่นได้
 // เพราะการรายงานลานจอดกับตารางสอบไม่ได้ใช้ Google Maps เลย
 function renderMapUnavailable() {
@@ -639,7 +607,6 @@ function renderMapUnavailable() {
     </div>
   `;
   document.getElementById('maps-retry-btn').addEventListener('click', () => window.location.reload());
-  renderBottomNav(container, 'map');
 }
 
 // เปิด 3D ได้เฉพาะตอนศูนย์กลางแผนที่อยู่ในรั้ว ม.รามฯ เท่านั้น (AC-05) — ใช้อาคาร 3D ของ Google เอง
@@ -785,8 +752,6 @@ function renderProfileView() {
   } else {
     renderConsentGate(container);
   }
-  // แถบล่างต้องอยู่ทุกหน้า ไม่งั้นเข้าหน้าโปรไฟล์แล้วกลับไปแผนที่ไม่ได้
-  renderBottomNav(container, 'profile');
 }
 
 function renderConsentGate(container) {
