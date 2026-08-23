@@ -61,6 +61,26 @@
     syncSheetHeight();
   }
 
+  // การ์ดอธิบายก่อนขอสิทธิ์ตำแหน่ง — ขึ้นก่อนหน้าขอสิทธิ์จริงของระบบ เพราะหน้าขอสิทธิ์ของ
+  // เบราว์เซอร์กดปฏิเสธได้ครั้งเดียวแล้วจำถาวร ถ้าเด้งมาลอยๆ โดยผู้ใช้ยังไม่รู้ว่าจะเอาไปทำอะไร
+  // โอกาสโดนกดปฏิเสธสูง แล้วจะแก้ยากมากหลังจากนั้น
+  function showLocationPrimer({ onAllow, onSkip }) {
+    const slot = sheetSlot();
+    if (!slot) return;
+    slot.innerHTML = `
+      <div class="nav-info-card">
+        <div class="sheet-handle"></div>
+        <h2>เปิดตำแหน่งก่อนไหม</h2>
+        <p class="muted">จะได้เห็นว่าคุณอยู่ตรงไหนในมหาลัย และนำทางจากจุดที่ยืนอยู่จริงได้</p>
+        <button class="btn btn-primary" id="primer-allow-btn">เปิดตำแหน่ง</button>
+        <button class="btn btn-ghost" id="primer-skip-btn">ดูแผนที่ก่อน</button>
+      </div>
+    `;
+    document.getElementById('primer-allow-btn').addEventListener('click', onAllow);
+    document.getElementById('primer-skip-btn').addEventListener('click', onSkip);
+    syncSheetHeight();
+  }
+
   // Scenario: ไม่ได้สิทธิ์ GPS — ไม่รู้ว่าผู้ใช้อยู่ไหน จึงไม่ควรมีปุ่ม "เริ่มเดินทาง" เพราะการนำทาง
   // แบบเลี้ยวซ้ายเลี้ยวขวาจากจุดที่เดาเอาเองอันตรายกว่าไม่มีให้เลย — เปลี่ยนเป็นชวนเปิดตำแหน่งแทน
   // ซึ่งเป็นสิ่งเดียวที่ทำแล้วสถานการณ์ดีขึ้นจริง ส่วนระยะทางยังบอกไว้เป็นข้อมูลอ้างอิงคร่าวๆ
@@ -188,6 +208,7 @@
   window.SheetManager = {
     hide,
     setOnClose,
+    showLocationPrimer,
     showRouteSheet,
     showGpsDeniedSheet,
     showNavigationSheet,

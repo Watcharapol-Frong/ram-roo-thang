@@ -425,6 +425,7 @@ async function renderMapView({ presetDestId, presetZoneId } = {}) {
     return;
   }
 
+  document.body.classList.add('map-view');
   container.innerHTML = `
     <div class="map-container">
       <div id="map"></div>
@@ -492,6 +493,7 @@ async function renderMapView({ presetDestId, presetZoneId } = {}) {
     await selectTarget({ id: zone.zone_id, name: zone.zone_name, type: 'PARKING', coords: { lat: zone.lat, lng: zone.lng } });
   } else {
     centerOnFeatures(features);
+    primeLocationAccess();
   }
 
   // Google ปัด zoom ที่ส่งเข้า constructor เป็นจำนวนเต็ม (15.83 -> 16) ความสูงกล้องเริ่มต้นเลย
@@ -551,34 +553,41 @@ function featureToTarget(feature) {
   };
 }
 
+// พิมพ์เร็วๆ แล้วสร้างรายการใหม่ทุกตัวอักษรทำให้กระตุก — หน่วงไว้เล็กน้อยให้พิมพ์จบคำก่อน
+// 120ms สั้นพอที่ยังรู้สึกว่าตอบสนองทันที แต่ยาวพอให้การพิมพ์รัวๆ ยิงงานแค่ครั้งเดียว
+const SEARCH_DEBOUNCE_MS = 120;
+
 function renderSearch(features) {
   const input = document.getElementById('search-input');
   const list = document.getElementById('search-results');
   const clearBtn = document.getElementById('search-clear');
   if (!input || !list) return;
 
+  let matches = [];
+  let debounceTimer = null;
+
   const closeResults = () => {
     list.hidden = true;
     list.innerHTML = '';
+    matches = [];
     document.body.classList.remove('is-searching');
   };
 
-  const run = () => {
+  const render = () => {
     const query = input.value.trim().toLowerCase();
     clearBtn.hidden = !query;
     if (!query) return closeResults();
 
-    const matches = features
-      .filter((f) => f.name.toLowerCase().includes(query))
-      .slice(0, SEARCH_MAX_RESULTS);
-
-    // ผลค้นหากับแถบแจ้งเตือนอยู่ใต้ช่องค้นหาตำแหน่งเดียวกัน ถ้าโผล่พร้อมกันแถบแจ้งเตือนจะทับ
-    // จนกดผลค้นหาไม่ได้ — ระหว่างค้นหาให้ซ่อนแถบแจ้งเตือนไปก่อน
+    // ระหว่างค้นหา ซ่อนของที่เกาะขอบล่างทั้งหมด (ปุ่มควบคุม/การ์ดจุดหมาย/แถบแจ้งเตือน) —
+    // พอคีย์บอร์ดเด้งขึ้นมา พื้นที่จอหดลง ของพวกนี้จะกระโดดขึ้นมาทับกันจนดูกระตุก
+    // และตอนกำลังพิมพ์ค้นหาก็ไม่ได้ใช้มันอยู่แล้ว
     document.body.classList.add('is-searching');
+
+    matches = features.filter((f) => f.name.toLowerCase().includes(query)).slice(0, SEARCH_MAX_RESULTS);
+    list.hidden = false;
 
     if (!matches.length) {
       list.innerHTML = '<li class="search-empty">ไม่พบสถานที่ที่ค้นหา</li>';
-      list.hidden = false;
       return;
     }
 
@@ -587,22 +596,30 @@ function renderSearch(features) {
         <span class="search-result-name">${escapeXml(f.name)}</span>
         <span class="search-result-category">${CATEGORY_LABEL[f.category] || f.category}</span>
       </button></li>`).join('');
-    list.hidden = false;
-
-    list.querySelectorAll('.search-result').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const feature = matches[Number(btn.dataset.index)];
-        input.value = '';
-        clearBtn.hidden = true;
-        closeResults();
-        input.blur();
-        selectTarget(featureToTarget(feature));
-      });
-    });
   };
 
-  input.addEventListener('input', run);
-  input.addEventListener('focus', run);
+  const scheduleRender = () => {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(render, SEARCH_DEBOUNCE_MS);
+  };
+
+  input.addEventListener('input', scheduleRender);
+  input.addEventListener('focus', scheduleRender);
+
+  // ผูก listener ตัวเดียวไว้ที่รายการ แทนการผูกใหม่ทุกปุ่มทุกครั้งที่พิมพ์ — ลดงานตอนพิมพ์
+  // และไม่ต้องกังวลว่า listener เก่าจะค้าง
+  list.addEventListener('click', (event) => {
+    const button = event.target.closest('.search-result');
+    if (!button) return;
+    const feature = matches[Number(button.dataset.index)];
+    if (!feature) return;
+    input.value = '';
+    clearBtn.hidden = true;
+    closeResults();
+    input.blur();
+    selectTarget(featureToTarget(feature));
+  });
+
   clearBtn.addEventListener('click', () => {
     input.value = '';
     clearBtn.hidden = true;
@@ -714,20 +731,61 @@ function addParkingOverlay(feature) {
   layerOverlays.parking.push(shape);
 }
 
+// หมุด "อื่นๆ" เดิมเป็นจุดกลมสีเดียวกันหมด แยกไม่ออกว่าร้านกาแฟหรือสนามกีฬา ต้องแตะดูทีละอัน
+// เดาหมวดจากชื่อสถานที่แล้วใส่ไอคอนให้ตรงหมวด — ชุดข้อมูลไม่มีฟิลด์ประเภทร้าน มีแค่ name
+// ถ้าวันหลังทีมเพิ่มฟิลด์ประเภทมาในไฟล์ ก็เปลี่ยนมาอ่านจากฟิลด์ตรงๆ แทนการเดาได้เลย
+const PLACE_GLYPH = {
+  coffee: '<path d="M4 5h13v6a5 5 0 01-5 5H9a5 5 0 01-5-5V5zm13 1h2a2.5 2.5 0 010 5h-2V6zM3 19h16v2H3z"/>',
+  food: '<path d="M7 2v7a2 2 0 001 1.7V22h2V10.7A2 2 0 0011 9V2H9.5v5h-1V2H7zm8 0c-1.1 0-2 1.8-2 4v4h1.5v12H16V2h-1z"/>',
+  store: '<path d="M20 4H4v2h16V4zm1 10v-2l-1-5H4l-1 5v2h1v6h10v-6h4v6h2v-6h1zm-9 4H6v-4h6v4z"/>',
+  service: '<path d="M6 2h8l4 4v16H6V2zm8 1.5V7h3.5L14 3.5zM8 11h8v1.5H8V11zm0 3h8v1.5H8V14zm0 3h5v1.5H8V17z"/>',
+  sports: '<path d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 2a8 8 0 018 8h-3.5A4.5 4.5 0 0012 7.5V4zm-2 .3V8a4 4 0 00-2.8 2.8L4 10a8 8 0 016-5.7zM4.3 12H8a4 4 0 002.5 3.7l-1.2 3.4A8 8 0 014.3 12zm8.9 7.7l-1.2-3.4A4 4 0 0016 12h3.7a8 8 0 01-6.5 7.7z"/>',
+  monument: '<path d="M12 2l3 5H9l3-5zm-2 6h4v9h-4V8zM5 19h14v3H5v-3z"/>',
+  transit: '<path d="M12 2C8 2 5 2.5 5 6v9a3 3 0 003 3l-1.5 1.5V20h11v-.5L16 18a3 3 0 003-3V6c0-3.5-3-4-7-4zM7.5 15a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm9 0a1.5 1.5 0 110-3 1.5 1.5 0 010 3zM17 10H7V6h10v4z"/>',
+};
+
+// เรียงจากเฉพาะเจาะจงไปกว้าง ตัวแรกที่ตรงชนะ — "โรงอาหารอาคารนพมาศ" ต้องเป็นอาหาร ไม่ใช่ร้านค้าทั่วไป
+const PLACE_TYPES = [
+  { test: /คอฟฟี่|กาแฟ|coffee|cafe|caf\u00e8|caf\u00e9|amazon|tea|น้ำ/i, glyph: 'coffee', color: '#8a5a2b' },
+  { test: /ข้าว|อาหาร|ครัว|kitchen|restaurant|halal|ไก่|ไข่|เจ|vegetarian|อร่อย|ต้นเหรียง|ไชยา/i, glyph: 'food', color: '#e8590c' },
+  { test: /ก๊อปปี้|copy|ถ่ายรูป|studio|เซอร์วิส|service/i, glyph: 'service', color: '#1971c2' },
+  { test: /สนาม|กีฬา|เทนนิส|เปตอง|stadium/i, glyph: 'sports', color: '#2f9e44' },
+  { test: /อนุสาวรีย์|monument|พระบรม|นาฬิกา|clock|ศาลา|pavilion/i, glyph: 'monument', color: '#c2255c' },
+  { test: /mrt|สถานี|station|ท่าเรือ|pier/i, glyph: 'transit', color: '#1098ad' },
+];
+
+function placeTypeOf(feature) {
+  const found = PLACE_TYPES.find((type) => type.test.test(feature.name));
+  if (found) return found;
+  // ไม่เข้าหมวดไหนเลย: ร้านค้าใช้ไอคอนร้าน ที่เหลือถือเป็นจุดสังเกต
+  return feature.category === 'shop'
+    ? { glyph: 'store', color: '#f0932b' }
+    : { glyph: 'monument', color: '#7048e8' };
+}
+
+const PLACE_BADGE_SIZE = 30;
+
+function placeBadgeIcon(type) {
+  const half = PLACE_BADGE_SIZE / 2;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${PLACE_BADGE_SIZE}" height="${PLACE_BADGE_SIZE}" viewBox="0 0 30 30">`
+    + `<circle cx="15" cy="15" r="14.2" fill="#ffffff"/>`
+    + `<circle cx="15" cy="15" r="12.4" fill="${type.color}"/>`
+    + `<g transform="translate(15 15) scale(0.6) translate(-12 -12)" fill="#ffffff">${PLACE_GLYPH[type.glyph]}</g>`
+    + `</svg>`;
+  return {
+    url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
+    scaledSize: new google.maps.Size(PLACE_BADGE_SIZE, PLACE_BADGE_SIZE),
+    anchor: new google.maps.Point(half, half),
+  };
+}
+
 function addPointOverlay(feature) {
   const isShop = feature.category === 'shop';
   const marker = new google.maps.Marker({
     position: { lat: feature.lat, lng: feature.lng },
     map: appState.map.instance,
     title: feature.name,
-    icon: {
-      path: google.maps.SymbolPath.CIRCLE,
-      scale: 6,
-      fillColor: isShop ? LAYER_STYLE.shop : LAYER_STYLE.landmark,
-      fillOpacity: 1,
-      strokeColor: '#ffffff',
-      strokeWeight: 2,
-    },
+    icon: placeBadgeIcon(placeTypeOf(feature)),
   });
   marker.addListener('click', () => {
     selectTarget({ id: feature.name, name: feature.name, type: isShop ? 'SHOP' : 'PLACE', coords: { lat: feature.lat, lng: feature.lng } });
@@ -783,7 +841,7 @@ function renderDaysLeft(days) {
   return `<span class="schedule-days-left normal">เหลืออีก ${days} วัน</span>`;
 }
 
-// --- สร้าง HTML ของ Profile header card (Compact & Horizontal: รูปซ้าย ชื่อขวา) ---
+// --- สร้าง HTML ของ Profile header แบบ Flat Minimal (เหมือนตัวอย่าง: รูปซ้าย ชื่อขวา ไร้ Card) ---
 // profile = { userId, displayName, pictureUrl, coins } | null
 function renderProfileHeaderHTML(profile) {
   const name = (profile && profile.displayName) ? escapeXml(profile.displayName) : 'นักพัฒนา (Dev)';
@@ -795,51 +853,48 @@ function renderProfileHeaderHTML(profile) {
     ? escapeXml(profile.displayName.charAt(0).toUpperCase())
     : 'น';
   const avatarHTML = (profile && profile.pictureUrl)
-    ? `<img class="profile-avatar-compact" src="${escapeXml(profile.pictureUrl)}" alt="รูปโปรไฟล์ LINE" />`
-    : `<div class="profile-avatar-placeholder-compact">${firstChar}</div>`;
+    ? `<img class="profile-flat-avatar" src="${escapeXml(profile.pictureUrl)}" alt="รูปโปรไฟล์ LINE" />`
+    : `<div class="profile-flat-avatar-placeholder">${firstChar}</div>`;
 
   return `
-    <div class="card profile-header-compact">
+    <div class="profile-flat-header">
       ${avatarHTML}
-      <div class="profile-info-compact">
-        <h2 class="profile-name-compact">${name}</h2>
-        <div class="profile-coin-text" title="คะแนนสะสมจากการมีส่วนร่วมบอกข้อมูลที่จอดรถ">${coins} เหรียญ</div>
+      <div class="profile-flat-info">
+        <div class="profile-flat-name-row">
+          <h1 class="profile-flat-name">${name}</h1>
+          <div class="profile-verified-badge" title="บัญชีผู้ใช้ LINE">
+            <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+          </div>
+        </div>
+        <div class="profile-flat-sub">${coins} เหรียญ</div>
       </div>
     </div>
   `;
 }
 
-// --- สร้าง HTML การ์ดเชิญชวนทำแบบประเมิน (ใต้ Profile) ---
+// --- สร้าง HTML แถบแบบประเมิน (ใต้ Profile ไร้ Card, Pure Typography) ---
 function renderFeedbackTeaserHTML() {
   const isDone = localStorage.getItem('ram-roo-thang:feedback-done') === 'true';
   if (isDone) {
     return `
-      <div class="card feedback-teaser-card is-done">
-        <div class="feedback-teaser-left">
-          <div class="feedback-icon-box done">✓</div>
-          <div class="feedback-teaser-info">
-            <div class="feedback-teaser-title">ส่งแบบประเมินเรียบร้อยแล้ว</div>
-            <div class="feedback-teaser-sub">ขอบคุณสำหรับข้อเสนอแนะในการพัฒนา (+30 เหรียญ)</div>
-          </div>
+      <div class="feedback-flat-banner is-done">
+        <div class="feedback-flat-left">
+          <span class="feedback-flat-text" style="color:#15803d; font-weight:700;">ส่งแบบประเมินแล้ว</span>
+          <span class="badge-reward-coin">+30 เหรียญ</span>
         </div>
       </div>
     `;
   }
 
   return `
-    <div class="card feedback-teaser-card" id="btn-open-feedback">
-      <div class="feedback-teaser-left">
-        <div class="feedback-icon-box">💬</div>
-        <div class="feedback-teaser-info">
-          <div class="feedback-teaser-title">แบบประเมินพัฒนาระบบ <span class="badge-reward-coin">+30 เหรียญ</span></div>
-          <div class="feedback-teaser-sub">ร่วมแสดงความคิดเห็นเพื่อช่วยพัฒนาระบบ (ทำได้ 1 ครั้ง)</div>
-        </div>
+    <div class="feedback-flat-banner" id="btn-open-feedback">
+      <div class="feedback-flat-left">
+        <span class="feedback-flat-text">แบบประเมินพัฒนาระบบ</span>
+        <span class="badge-reward-coin">+30 เหรียญ</span>
       </div>
-      <div class="feedback-teaser-arrow">
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="9 18 15 12 9 6"></polyline>
-        </svg>
-      </div>
+      <span class="feedback-flat-action-text">ทำแบบประเมิน &rsaquo;</span>
     </div>
   `;
 }
@@ -950,19 +1005,19 @@ function renderFeedbackView() {
         <div class="feedback-rating-group">
           <label class="rating-pill-label">
             <input type="radio" name="rating" value="5" checked />
-            <div>😍 ดีเยี่ยม</div>
+            <div>ดีเยี่ยม</div>
           </label>
           <label class="rating-pill-label">
             <input type="radio" name="rating" value="4" />
-            <div>😊 ดีมาก</div>
+            <div>ดีมาก</div>
           </label>
           <label class="rating-pill-label">
             <input type="radio" name="rating" value="3" />
-            <div>😐 ปานกลาง</div>
+            <div>ปานกลาง</div>
           </label>
           <label class="rating-pill-label">
             <input type="radio" name="rating" value="2" />
-            <div>🙁 ปรับปรุง</div>
+            <div>ปรับปรุง</div>
           </label>
         </div>
 
@@ -994,45 +1049,60 @@ function renderFeedbackView() {
 
     setTimeout(() => {
       localStorage.setItem('ram-roo-thang:feedback-done', 'true');
-      showToast('🎉 ส่งแบบประเมินสำเร็จ! ได้รับ 30 เหรียญ');
+      showToast('ส่งแบบประเมินสำเร็จ! ได้รับ 30 เหรียญ');
       renderProfileView();
     }, 500);
   });
 }
 
-// renderShopView — หน้าร้านค้า & สิทธิพิเศษ
+// renderShopView — หน้าร้านค้า & สิทธิพิเศษ (Minimal Pure Typography สไตล์เดียวกับ Profile)
 function renderShopView() {
   const container = getApp();
   const bonus = localStorage.getItem('ram-roo-thang:feedback-done') === 'true' ? 30 : 0;
   const coins = 120 + bonus;
 
   container.innerHTML = `
-    <div class="card" style="padding: 16px;">
-      <div style="display:flex; justify-content:space-between; align-items:center;">
+    <div class="profile-flat-container">
+      <!-- Header -->
+      <div class="profile-flat-header" style="justify-content: space-between;">
         <div>
-          <h2 style="margin:0; font-size: 1.15rem;">ร้านค้า & สิทธิพิเศษ</h2>
-          <p class="muted" style="margin:2px 0 0; font-size:0.8rem;">แลกของรางวัลด้วยคะแนนสะสมเหรียญ</p>
+          <h1 class="profile-flat-name" style="font-size: 1.25rem;">ร้านค้าและสิทธิพิเศษ</h1>
+          <div class="profile-flat-sub">แลกของรางวัลด้วยคะแนนสะสม</div>
         </div>
-        <div class="profile-coin-text">${coins} เหรียญ</div>
+        <div class="profile-coin-text" style="font-size: 0.92rem;">${coins} เหรียญ</div>
       </div>
-    </div>
 
-    <div class="card">
-      <h2 style="font-size: 0.95rem; margin-bottom: 12px;">สิทธิพิเศษสำหรับนักศึกษา <span class="badge-beta">Coming Soon</span></h2>
-      <div style="display:flex; flex-direction:column; gap:10px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; padding:12px; background:var(--bg); border-radius:10px;">
-          <div>
-            <div style="font-weight:700; font-size:0.9rem;">☕ คูปองส่วนลดเครื่องดื่ม 10 บาท</div>
-            <div class="muted" style="font-size:0.75rem;">ร้านกาแฟและคาเฟ่รอบมหาวิทยาลัย</div>
-          </div>
-          <button class="btn-nav-exam" style="background:#f1f5f9; color:#475569;" disabled>50 เหรียญ</button>
+      <!-- Shop Items List -->
+      <div class="schedule-flat-section">
+        <div class="schedule-flat-header-row">
+          <h2>สิทธิพิเศษสำหรับนักศึกษา</h2>
+          <span class="badge-beta">Coming Soon</span>
         </div>
-        <div style="display:flex; justify-content:space-between; align-items:center; padding:12px; background:var(--bg); border-radius:10px;">
-          <div>
-            <div style="font-weight:700; font-size:0.9rem;">🎁 สติกเกอร์รามรู้ทาง Limited</div>
-            <div class="muted" style="font-size:0.75rem;">รับได้ที่จุดประชาสัมพันธ์ สวป.</div>
+
+        <div class="shop-items-list">
+          <div class="shop-item-row">
+            <div class="shop-item-info">
+              <div class="shop-item-title">คูปองส่วนลดเครื่องดื่ม 10 บาท</div>
+              <div class="shop-item-sub">ร้านกาแฟและคาเฟ่รอบมหาวิทยาลัย</div>
+            </div>
+            <button type="button" class="btn-shop-cost" disabled>50 เหรียญ</button>
           </div>
-          <button class="btn-nav-exam" style="background:#f1f5f9; color:#475569;" disabled>100 เหรียญ</button>
+
+          <div class="shop-item-row">
+            <div class="shop-item-info">
+              <div class="shop-item-title">สติกเกอร์รามรู้ทาง Limited Edition</div>
+              <div class="shop-item-sub">รับได้ที่จุดประชาสัมพันธ์ อาคาร สวป.</div>
+            </div>
+            <button type="button" class="btn-shop-cost" disabled>100 เหรียญ</button>
+          </div>
+
+          <div class="shop-item-row">
+            <div class="shop-item-info">
+              <div class="shop-item-title">สิทธิพิเศษสำรองที่จอดรถล่วงหน้า</div>
+              <div class="shop-item-sub">ลานจอดรถรอบมหาวิทยาลัย (เร็วๆ นี้)</div>
+            </div>
+            <button type="button" class="btn-shop-cost" disabled>200 เหรียญ</button>
+          </div>
         </div>
       </div>
     </div>
@@ -1043,26 +1113,35 @@ function renderShopView() {
   bindBottomNavEvents();
 }
 
-// renderSettingsView — หน้าการตั้งค่า
+// renderSettingsView — หน้าการตั้งค่า (Minimal Pure Typography)
 function renderSettingsView() {
   const container = getApp();
   container.innerHTML = `
-    <div class="card">
-      <h2>การตั้งค่า <span class="badge-beta">Beta</span></h2>
-      <div style="display:flex; flex-direction:column; gap:12px; margin-top: 14px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; padding:12px; background:var(--bg); border-radius:10px;">
-          <div>
-            <div style="font-weight:700; font-size:0.9rem;">ข้อตกลงและนโยบายความเป็นส่วนตัว</div>
-            <div class="muted" style="font-size:0.76rem;">ระบบไม่จัดเก็บข้อมูลส่วนบุคคล (No-PII)</div>
-          </div>
-          <span style="font-size:0.8rem; color:var(--muted);">✓ ยินยอมแล้ว</span>
+    <div class="profile-flat-container">
+      <div class="profile-flat-header">
+        <div class="profile-flat-info">
+          <h1 class="profile-flat-name" style="font-size: 1.25rem;">การตั้งค่า</h1>
+          <div class="profile-flat-sub">จัดการข้อมูลและระบบรามรู้ทาง</div>
         </div>
-        <div style="display:flex; justify-content:space-between; align-items:center; padding:12px; background:var(--bg); border-radius:10px;">
-          <div>
-            <div style="font-weight:700; font-size:0.9rem;">เวอร์ชันระบบ</div>
-            <div class="muted" style="font-size:0.76rem;">รามรู้ทาง v1.0 (Beta Test)</div>
+      </div>
+
+      <div class="schedule-flat-section">
+        <div class="shop-items-list">
+          <div class="shop-item-row">
+            <div class="shop-item-info">
+              <div class="shop-item-title">ข้อตกลงและนโยบายความเป็นส่วนตัว</div>
+              <div class="shop-item-sub">ระบบไม่จัดเก็บข้อมูลส่วนบุคคล (No-PII)</div>
+            </div>
+            <span style="font-size:0.78rem; font-weight:700; color:#15803d; flex-shrink:0;">ยินยอมแล้ว</span>
           </div>
-          <span class="badge-beta" style="margin:0;">v1.0</span>
+
+          <div class="shop-item-row">
+            <div class="shop-item-info">
+              <div class="shop-item-title">เวอร์ชันระบบ</div>
+              <div class="shop-item-sub">รามรู้ทาง v1.0 (Beta Test)</div>
+            </div>
+            <span class="badge-beta" style="margin:0; flex-shrink:0;">v1.0</span>
+          </div>
         </div>
       </div>
     </div>
@@ -1075,6 +1154,7 @@ function renderSettingsView() {
 
 // renderProfileView — entry point สำหรับ ?mode=profile
 function renderProfileView() {
+  document.body.classList.remove('map-view');
   const container = getApp();
   const hasConsent = localStorage.getItem(CONSENT_STORAGE_KEY) === 'true';
 
@@ -1127,9 +1207,11 @@ async function renderFullProfile(container) {
   } catch (_) { /* แสดง header fallback */ }
 
   container.innerHTML = `
-    ${renderProfileHeaderHTML(profile)}
-    ${renderFeedbackTeaserHTML()}
-    <div id="profile-schedule-slot"></div>
+    <div class="profile-flat-container">
+      ${renderProfileHeaderHTML(profile)}
+      ${renderFeedbackTeaserHTML()}
+      <div id="profile-schedule-slot"></div>
+    </div>
     ${renderBottomNavHTML('profile')}
   `;
 
@@ -1221,8 +1303,8 @@ function getCourseExamInfo(courseCode) {
 
 function renderScheduleForm(container, userId) {
   container.innerHTML = `
-    <div class="card schedule-section">
-      <div class="schedule-header-row">
+    <div class="schedule-flat-section">
+      <div class="schedule-flat-header-row">
         <h2>ตารางสอบ <span class="badge-beta">Beta</span></h2>
         <span id="course-count-badge" class="course-count-badge">0</span>
       </div>
@@ -1498,6 +1580,7 @@ function highlightBuildingMarker(buildingId) {
 // Maps ล่ม (เน็ตสะดุด / key เกิน quota / referrer ไม่ผ่าน) — ยังต้องกดไปหน้าอื่นได้
 // เพราะการรายงานลานจอดกับตารางสอบไม่ได้ใช้ Google Maps เลย
 function renderMapUnavailable() {
+  document.body.classList.remove('map-view');
   const container = getApp();
   container.innerHTML = `
     <div class="card">
@@ -1766,6 +1849,57 @@ function splitOutsideParens(text) {
 
 function formatDistance(meters) {
   return `${Math.round(meters)} m`;
+}
+
+// --- ขอตำแหน่งตั้งแต่เปิดแอป ---
+
+const LOCATION_PRIMER_SKIPPED_KEY = 'ram-roo-thang:location-primer-skipped';
+
+// ขอตำแหน่งตั้งแต่เปิดหน้าแผนที่ ไม่ต้องรอให้เลือกจุดหมายก่อน — ตอนเปิดแอปผู้ใช้ยังไม่ได้รีบ
+// โอกาสกดอนุญาตสูงกว่าตอนกำลังหาตึกอยู่ และถ้าอนุญาตแล้วทุกอย่างหลังจากนั้นก็ลื่นหมด
+// (ไม่ต้องรอขอสิทธิ์กลางคันตอนกำลังจะนำทาง)
+//
+// เรียกเฉพาะตอนเปิดแผนที่รวมเท่านั้น ถ้ามาจากลิงก์ที่ระบุจุดหมายมาแล้ว ปล่อยให้ flow เลือกจุดหมาย
+// ขอเองตามเดิม จะได้ไม่มีการ์ดสองใบแย่งที่กัน
+async function primeLocationAccess() {
+  if (appState.user.isGpsAllowed) return;
+  const state = await locationPermissionState();
+
+  // เคยอนุญาตไว้แล้ว ไม่ต้องถามซ้ำ เอาตำแหน่งมาใช้เลย
+  if (state === 'granted') {
+    await acceptLocation();
+    return;
+  }
+  // เคยปฏิเสธถาวร หรือเคยกดข้ามไปแล้ว — ไม่ทวงซ้ำทุกครั้งที่เปิดแอป น่ารำคาญเกินไป
+  if (state === 'denied') return;
+  if (sessionStorage.getItem(LOCATION_PRIMER_SKIPPED_KEY) === 'true') return;
+
+  SheetManager.showLocationPrimer({
+    onAllow: () => acceptLocation(),
+    onSkip: () => {
+      sessionStorage.setItem(LOCATION_PRIMER_SKIPPED_KEY, 'true');
+      SheetManager.hide();
+    },
+  });
+}
+
+async function acceptLocation() {
+  try {
+    const location = await getUserLocation();
+    appState.user.location = location;
+    appState.user.isGpsAllowed = true;
+    appState.user.isInsideCampus = isWithinCampusBounds(location);
+    updateUserPin(location);
+    updateMyLocationAvailability();
+    SheetManager.hide();
+    appState.map.instance.panTo(location);
+    nudgeMapRepaint(appState.map.instance);
+    return true;
+  } catch (err) {
+    SheetManager.hide();
+    SheetManager.showNotice('ยังไม่ได้สิทธิ์ตำแหน่ง เลือกจุดหมายแล้วกดเปิดตำแหน่งอีกครั้งได้ครับ');
+    return false;
+  }
 }
 
 // --- ตำแหน่งของฉัน + หมุนแผนที่ตามเข็มทิศ ---

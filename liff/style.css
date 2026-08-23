@@ -93,7 +93,19 @@ body {
 .map-container {
   position: fixed;
   inset: 0;
+  /* inset: 0 อ้างอิง layout viewport ซึ่งใน in-app browser ของ LINE สั้นกว่าพื้นที่ที่เห็นจริง
+     (แถบบน/ล่างยุบเข้าออกได้) ทำให้เหลือช่องว่างขาวใต้แผนที่ — dvh วัดตามความสูงจริงขณะนั้น
+     ไล่ vh ไว้ก่อนเป็น fallback ให้เบราว์เซอร์เก่าที่ยังไม่รู้จัก dvh */
+  height: 100vh;
+  height: 100dvh;
   overflow: hidden;
+}
+
+/* ล็อกไม่ให้หน้าเลื่อนตอนอยู่หน้าแผนที่ ไม่งั้นเลื่อนแล้วเห็นพื้นขาวใต้แผนที่ที่ปักตายอยู่กับที่ */
+body.map-view {
+  overflow: hidden;
+  height: 100%;
+  padding: 0;
 }
 
 .map-container #map {
@@ -465,163 +477,249 @@ body {
   flex-shrink: 0;
 }
 
-/* --- Profile Header (Compact & Horizontal: Avatar Left, Info Right) --- */
-.profile-header-compact {
+/* --- Flat Minimal Profile Layout (Soft Minimal Backgrounds) --- */
+.profile-flat-container {
+  padding: 4px 0 100px;
+}
+
+.profile-flat-header {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 14px 16px;
+  gap: 16px;
+  padding: 16px;
   background: #ffffff;
+  border-radius: 16px;
+  border: 1px solid #edf2f7;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+  margin-bottom: 10px;
 }
 
-.profile-avatar-compact {
-  width: 52px;
-  height: 52px;
+.profile-flat-avatar {
+  width: 68px;
+  height: 68px;
   border-radius: 50%;
   object-fit: cover;
-  border: 2px solid #ffffff;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
   flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 }
 
-.profile-avatar-placeholder-compact {
-  width: 52px;
-  height: 52px;
+.profile-flat-avatar-placeholder {
+  width: 68px;
+  height: 68px;
   border-radius: 50%;
-  background: var(--accent);
+  background: linear-gradient(135deg, #10b981 0%, #06c755 100%);
   color: #ffffff;
-  font-size: 1.3rem;
+  font-size: 1.7rem;
   font-weight: 700;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 2px 6px rgba(6, 199, 85, 0.25);
   flex-shrink: 0;
+  box-shadow: 0 3px 10px rgba(6, 199, 85, 0.25);
 }
 
-.profile-info-compact {
+.profile-flat-info {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
 }
 
-.profile-name-compact {
-  font-size: 1.05rem;
-  font-weight: 700;
-  color: var(--text);
+.profile-flat-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.profile-flat-name {
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: #0f172a;
   margin: 0;
+  letter-spacing: -0.02em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.profile-coin-text {
+.profile-verified-badge {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  font-size: 0.84rem;
-  font-weight: 700;
-  color: #b45309;
-}
-
-.coin-svg {
-  display: block;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #06c755;
+  color: #ffffff;
   flex-shrink: 0;
 }
 
-/* --- Feedback Teaser Card (ใต้ Profile) --- */
-.feedback-teaser-card {
+.profile-flat-sub {
+  font-size: 0.92rem;
+  color: #64748b;
+  font-weight: 500;
+}
+
+/* --- Feedback Flat Banner (ใต้ Profile) --- */
+.feedback-flat-banner {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 14px 16px;
+  gap: 10px;
+  padding: 13px 16px;
   background: #ffffff;
-  border: 1.5px solid #e2e8f0;
+  border: 1px solid #edf2f7;
+  border-radius: 14px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
   cursor: pointer;
-  transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+  margin-bottom: 16px;
+  transition: background-color 0.15s ease, transform 0.15s ease;
 }
 
-.feedback-teaser-card:active {
+.feedback-flat-banner:active {
   transform: scale(0.98);
-  border-color: var(--accent);
-}
-
-.feedback-teaser-card.is-done {
-  cursor: default;
   background: #f8fafc;
-  border-color: #e2e8f0;
 }
 
-.feedback-teaser-card.is-done:active {
+.feedback-flat-banner.is-done {
+  cursor: default;
+  background: #ffffff;
+}
+
+.feedback-flat-banner.is-done:active {
   transform: none;
 }
 
-.feedback-teaser-left {
+.feedback-flat-left {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   min-width: 0;
   flex: 1;
 }
 
-.feedback-icon-box {
-  width: 38px;
-  height: 38px;
-  border-radius: 10px;
-  background: #eff6ff;
-  color: #2563eb;
-  font-size: 1.2rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
+.feedback-flat-emoji {
+  font-size: 1.1rem;
+  line-height: 1;
 }
 
-.feedback-icon-box.done {
-  background: #e8f5e9;
-  color: #2e7d32;
-  font-weight: 800;
-}
-
-.feedback-teaser-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.feedback-teaser-title {
-  font-size: 0.92rem;
+.feedback-flat-text {
+  font-size: 0.88rem;
   font-weight: 700;
-  color: var(--text);
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  color: #1e293b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .badge-reward-coin {
   display: inline-flex;
   align-items: center;
   padding: 1px 6px;
-  background: #fef3c7;
-  color: #b45309;
-  font-size: 0.68rem;
-  font-weight: 800;
+  background: #e8f5e9;
+  color: #1b5e20;
+  font-size: 0.72rem;
+  font-weight: 700;
   border-radius: 6px;
+  flex-shrink: 0;
 }
 
-.feedback-teaser-sub {
+.feedback-flat-action-text {
+  font-size: 0.8rem;
+  color: #64748b;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+/* --- Schedule Section (Flat & Minimal) --- */
+.schedule-flat-section {
+  margin-top: 6px;
+}
+
+.schedule-flat-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  padding: 0 2px;
+}
+
+.schedule-flat-header-row h2 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: -0.01em;
+}
+
+/* --- Shop & Settings Flat List Styles --- */
+.shop-items-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.shop-item-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 15px;
+  background: #ffffff;
+  border: 1px solid #edf2f7;
+  border-radius: 14px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.shop-item-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
+}
+
+.shop-item-emoji {
+  font-size: 1.4rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.shop-item-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.shop-item-title {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #1e293b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.shop-item-sub {
   font-size: 0.76rem;
-  color: var(--muted);
+  color: #64748b;
   margin-top: 2px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.feedback-teaser-arrow {
-  color: #94a3b8;
+.btn-shop-cost {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 0.78rem;
+  font-weight: 700;
+  font-family: inherit;
+  white-space: nowrap;
   flex-shrink: 0;
 }
 
@@ -859,19 +957,18 @@ body {
 .exam-list-container {
   display: flex;
   flex-direction: column;
-  margin-top: 4px;
+  gap: 8px;
+  margin-top: 10px;
 }
 
 .exam-swipe-wrapper {
   position: relative;
   overflow: hidden;
-  border-bottom: 1px solid #f0f2f5;
   background: #ffffff;
-  transition: opacity 0.2s, max-height 0.25s ease-out;
-}
-
-.exam-swipe-wrapper:last-child {
-  border-bottom: none;
+  border: 1px solid #edf2f7;
+  border-radius: 14px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  transition: opacity 0.2s, max-height 0.25s ease-out, transform 0.2s;
 }
 
 .exam-swipe-wrapper.is-deleting {
@@ -889,7 +986,9 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #fff5f5;
+  background: #fee2e2;
+  border-top-right-radius: 14px;
+  border-bottom-right-radius: 14px;
   z-index: 1;
 }
 
@@ -920,8 +1019,9 @@ body {
   background: #ffffff;
   display: flex;
   align-items: center;
-  padding: 11px 2px;
-  gap: 10px;
+  padding: 12px 14px;
+  gap: 12px;
+  border-radius: 14px;
   transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
   user-select: none;
   touch-action: pan-y;
@@ -1129,8 +1229,12 @@ body.is-navigating .search-results {
   color: #ffffff;
 }
 
-/* ระหว่างพิมพ์ค้นหา ซ่อนแถบแจ้งเตือนไว้ก่อน กันบังรายการผลลัพธ์จนกดไม่ได้ */
-body.is-searching .notice-bar {
+/* ระหว่างพิมพ์ค้นหา ซ่อนทุกอย่างที่เกาะขอบล่างกับแถบแจ้งเตือน — พอคีย์บอร์ดเด้ง พื้นที่จอหดลง
+   ของพวกนี้จะกระโดดขึ้นมาทับกันจนดูกระตุก และตอนพิมพ์ก็ไม่ได้ใช้มันอยู่แล้ว
+   เหลือแค่ช่องค้นหา รายการผลลัพธ์ และแผนที่ */
+body.is-searching .notice-bar,
+body.is-searching .map-controls,
+body.is-searching #action-sheet-slot {
   display: none;
 }
 
