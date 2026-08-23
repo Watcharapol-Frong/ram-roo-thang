@@ -176,16 +176,6 @@ function getUserLocation() {
   });
 }
 
-function renderLocationRetry(container, message, onRetry) {
-  container.innerHTML = `
-    <div class="card">
-      <p>${message}</p>
-      <button class="btn btn-primary" id="retry-location-btn">ลองอีกครั้ง</button>
-    </div>
-  `;
-  document.getElementById('retry-location-btn').addEventListener('click', onRetry);
-}
-
 let cachedUserId = null;
 async function getUserId() {
   if (cachedUserId) return cachedUserId;
@@ -241,8 +231,26 @@ const LAYER_STYLE = {
   landmark: '#9b59b6',
 };
 
-const BUILDING_MARKER_MIN_ZOOM = 17;
-const MIN_3D_ZOOM = 18;
+// กล้องเริ่มต้นกำหนดมาเป็น "ความสูงเหนือพื้น (เมตร)" + องศาก้มกล้อง แต่ Google Maps JS API
+// ตั้งกล้องด้วย zoom ไม่ใช่ altitude จึงต้องแปลงก่อน ใช้สูตรเทียบมาตรฐานของ Google Earth
+//   altitude = 35,200,000 / 2^zoom   =>   zoom = log2(35,200,000 / altitude)
+// เป็นค่าประมาณ ไม่ได้คิดผลของละติจูด (ที่ 13.75° ต่างราว 3%) ถ้าอยากเป๊ะกว่านี้ต้องวัดจากจอจริง
+// 605 ม. -> zoom ~15.83 (ภาพรวมทั้งแคมปัส) / 165 ม. -> zoom ~17.70 (ใกล้พอเห็นอาคาร 3D)
+const ZOOM_REFERENCE_ALTITUDE_M = 35200000;
+
+const CAMERA_PRESETS = {
+  '2d': { altitudeMeters: 605, tilt: 0, heading: 0 },
+  '3d': { altitudeMeters: 165, tilt: 60, heading: 20 },
+};
+
+function altitudeToZoom(altitudeMeters) {
+  return Math.log2(ZOOM_REFERENCE_ALTITUDE_M / altitudeMeters);
+}
+
+// ป้ายชิปต้องเห็นตั้งแต่มุมมองเริ่มต้น เพราะตอนนี้อาคารแสดงเป็นป้ายอย่างเดียว ไม่มีรูปทรงให้เห็นแล้ว
+// ถ้าตั้งเกณฑ์สูงกว่า zoom เริ่มต้น พอเปิดหน้ามาจะไม่เห็นอาคารเลยสักหลัง — ผูกกับ preset 2D ไว้
+// จะได้ไม่เพี้ยนถ้าวันหลังมีคนแก้ความสูงกล้อง (เผื่อไว้ 0.5 ระดับสำหรับตอนผู้ใช้ซูมออกเอง)
+const BUILDING_MARKER_MIN_ZOOM = altitudeToZoom(CAMERA_PRESETS['2d'].altitudeMeters) - 0.5;
 
 let masterFeatures = null;
 const layerOverlays = { building: [], parking: [], other: [] };
@@ -336,7 +344,9 @@ async function renderMapView({ presetDestId, presetZoneId } = {}) {
 
   appState.map.instance = new google.maps.Map(document.getElementById('map'), {
     center: CAMPUS_CONSTANTS.INITIAL_VIEW.center,
-    zoom: CAMPUS_CONSTANTS.INITIAL_VIEW.zoom,
+    zoom: altitudeToZoom(CAMERA_PRESETS['2d'].altitudeMeters),
+    tilt: CAMERA_PRESETS['2d'].tilt,
+    heading: CAMERA_PRESETS['2d'].heading,
     mapId: GOOGLE_MAPS_MAP_ID,
     disableDefaultUI: true,
     zoomControl: false,
@@ -377,8 +387,16 @@ async function renderMapView({ presetDestId, presetZoneId } = {}) {
     }
     await selectTarget({ id: zone.zone_id, name: zone.zone_name, type: 'PARKING', coords: { lat: zone.lat, lng: zone.lng } });
   } else {
-    frameFeatures(features);
+    centerOnFeatures(features);
   }
+
+  // Google ปัด zoom ที่ส่งเข้า constructor เป็นจำนวนเต็ม (15.83 -> 16) ความสูงกล้องเริ่มต้นเลย
+  // เพี้ยนเป็น 537 ม. แทน 605 ม. ต้องสั่งทับเอง — แต่ระหว่างที่ยังโหลด tile อยู่ Google จะปัด
+  // zoom ทศนิยมที่เราสั่งทิ้งทุกครั้ง (ลองทั้งตอน new Map(), หลัง idle รอบแรก และท้าย render
+  // แล้วโดนปัดกลับเป็น 16 หมด) ต้องรอ 'tilesloaded' ถึงจะยึดค่าทศนิยมได้จริง
+  // สั่งทันทีหนึ่งครั้งด้วยเผื่อ tile โหลดเสร็จไปก่อนแล้ว
+  applyViewMode();
+  google.maps.event.addListenerOnce(appState.map.instance, 'tilesloaded', applyViewMode);
 }
 
 // deep link จาก Flex Message ส่งมาเป็น building_id ของฐานข้อมูลบอท (มี alias/ข้อมูลบริการผูกอยู่)
@@ -465,28 +483,17 @@ function addFeatureOverlay(layerId, feature) {
   return addPointOverlay(feature);
 }
 
+// อาคารแสดงเป็น "ป้ายชิปรหัส" อย่างเดียว ไม่วาดรูปทรงพื้นที่ — พื้นที่ระบายสีสงวนไว้ให้ลานจอด
+// อย่างเดียว จะได้แยกออกทันทีว่าสีบนแผนที่หมายถึงที่จอดรถเสมอ (polygon อาคารยังอยู่ในไฟล์ต้นทาง
+// ถ้าวันหลังอยากวาดกลับมาก็ใช้ feature.polygon ได้เลย)
 function addBuildingOverlay(feature) {
-  const map = appState.map.instance;
   const code = buildingCodeFromName(feature.name);
-  const target = { id: code || feature.name, name: feature.name, type: 'BUILDING', coords: { lat: feature.lat, lng: feature.lng } };
-
-  const shape = new google.maps.Polygon({
-    map,
-    paths: feature.polygon,
-    strokeColor: LAYER_STYLE.building.stroke,
-    strokeOpacity: 0.9,
-    strokeWeight: 1.5,
-    fillColor: LAYER_STYLE.building.fill,
-    fillOpacity: LAYER_STYLE.building.fillOpacity,
-    clickable: true,
-  });
-  shape.addListener('click', () => selectTarget(target));
-  layerOverlays.building.push(shape);
-
   if (!code) return;
+  const target = { id: code, name: feature.name, type: 'BUILDING', coords: { lat: feature.lat, lng: feature.lng } };
+
   const marker = new google.maps.Marker({
     position: { lat: feature.lat, lng: feature.lng },
-    map,
+    map: appState.map.instance,
     title: feature.name,
     icon: buildingMarkerIcon(code, false),
   });
@@ -562,17 +569,13 @@ function buildingMarkerIcon(code, isSelected) {
 
 // จัดกล้องให้เห็นทุกอย่างพอดีจอ — การขยับกล้องจริงยังจำเป็นเพื่อปลุกให้ vector map วาด overlay
 // ที่เพิ่งเพิ่มเข้าไปด้วย (ดู nudgeMapRepaint)
-function frameFeatures(features) {
+function centerOnFeatures(features) {
   const map = appState.map.instance;
   if (!map || !features.length) return;
   const bounds = new google.maps.LatLngBounds();
   features.forEach((f) => bounds.extend({ lat: f.lat, lng: f.lng }));
-  map.fitBounds(bounds, 40);
-  // fitBounds เปลี่ยนกล้องก็จริง แต่ overlay ที่เพิ่งเพิ่มก่อนหน้ายังไม่ถูกวาด ต้อง nudge ซ้ำหลังกล้องนิ่ง
-  google.maps.event.addListenerOnce(map, 'idle', () => {
-    updateBuildingMarkerVisibility();
-    nudgeMapRepaint(map);
-  });
+  map.setCenter(bounds.getCenter());
+  updateBuildingMarkerVisibility();
 }
 
 // ซูมออกไกลๆ ป้ายชิปจะทับกันเป็นพืด ซ่อนไปเลยดีกว่า เหลือแต่รูปทรงอาคาร
@@ -597,7 +600,6 @@ function highlightBuildingMarker(buildingId) {
 
 const BOTTOM_NAV_ITEMS = [
   { id: 'map', icon: '🗺', label: 'แผนที่' },
-  { id: 'report', icon: '🚗', label: 'รายงานที่จอด' },
   { id: 'profile', icon: '👤', label: 'โปรไฟล์' },
 ];
 
@@ -620,7 +622,6 @@ function renderBottomNav(container, activeId) {
       const id = btn.dataset.nav;
       if (id === activeId) return;
       if (id === 'map') renderMapView({});
-      else if (id === 'report') renderParkingReportView();
       else if (id === 'profile') renderProfileView();
     });
   });
@@ -654,14 +655,10 @@ function toggle3D() {
 
 function applyViewMode() {
   const map = appState.map.instance;
-  if (appState.map.is3DMode) {
-    if (map.getZoom() < MIN_3D_ZOOM) map.setZoom(MIN_3D_ZOOM);
-    map.setTilt(47.5);
-    map.setHeading(20);
-  } else {
-    map.setTilt(0);
-    map.setHeading(0);
-  }
+  const preset = CAMERA_PRESETS[appState.map.is3DMode ? '3d' : '2d'];
+  map.setZoom(altitudeToZoom(preset.altitudeMeters));
+  map.setTilt(preset.tilt);
+  map.setHeading(preset.heading);
   nudgeMapRepaint(map);
 }
 
@@ -775,108 +772,6 @@ function handleGpsDenied(target) {
   SheetManager.showGpsWarning(() => selectTarget(target));
   appState.user.isInsideCampus = true;
   runContextRouting(target, CAMPUS_CONSTANTS.DEFAULT_ORIGIN, { isFallbackOrigin: true });
-}
-
-// --- Parking report view (MVP-SPEC §7) ---
-// geolocation -> หาลานจอดใกล้ที่สุดจาก /api/parking/zones -> POST /api/parking/report
-
-async function renderParkingReportView() {
-  const container = getApp();
-
-  const requestLocation = async () => {
-    container.innerHTML = '<p>กำลังขอตำแหน่งของคุณ...</p>';
-    try {
-      const userLocation = await getUserLocation();
-      await loadNearestZoneAndRender(container, userLocation);
-    } catch (err) {
-      renderLocationRetry(container, 'กรุณาอนุญาตการเข้าถึงตำแหน่งเพื่อรายงานสถานะลานจอด', requestLocation);
-    }
-  };
-
-  await requestLocation();
-}
-
-async function loadNearestZoneAndRender(container, userLocation) {
-  container.innerHTML = '<p>กำลังค้นหาลานจอดที่ใกล้ที่สุด...</p>';
-
-  // /api/parking/zones คืนทุกโซนพร้อมพิกัดในคำขอเดียว — เดิมต้องวน /api/buildings แล้วยิง
-  // /api/building ต่ออีกโซนละครั้ง เพียงเพื่อเอา parking_zone.lat/lng มาหาโซนที่ใกล้ที่สุด
-  let zonesData;
-  try {
-    zonesData = await fetchJSON('/api/parking/zones');
-  } catch (err) {
-    renderError('โหลดข้อมูลลานจอดไม่สำเร็จ กรุณาลองใหม่');
-    return;
-  }
-
-  const zones = (zonesData.zones || []).map((entry) => entry.zone).filter(Boolean);
-
-  if (zones.length === 0) {
-    renderError('ยังไม่มีข้อมูลลานจอดในระบบครับ');
-    return;
-  }
-
-  let nearestZone = zones[0];
-  let nearestDistance = Infinity;
-  for (const zone of zones) {
-    const distance = haversineDistanceMeters(userLocation.lat, userLocation.lng, zone.lat, zone.lng);
-    if (distance < nearestDistance) {
-      nearestDistance = distance;
-      nearestZone = zone;
-    }
-  }
-
-  renderParkingReportForm(container, nearestZone, userLocation);
-}
-
-function renderParkingReportForm(container, zone, userLocation) {
-  container.innerHTML = `
-    <div class="card">
-      <h2>${zone.zone_name}</h2>
-      <p class="muted">แตะเพื่อรายงานสถานะปัจจุบัน (ต้องอยู่ใกล้ลานจอดจริง)</p>
-      <div class="status-buttons">
-        <button class="btn btn-status" data-status="GREEN">🟢 ว่าง</button>
-        <button class="btn btn-status" data-status="YELLOW">🟡 ปานกลาง</button>
-        <button class="btn btn-status" data-status="RED">🔴 เต็ม</button>
-      </div>
-      <p id="report-result" class="muted"></p>
-    </div>
-  `;
-
-  container.querySelectorAll('.btn-status').forEach((btn) => {
-    btn.addEventListener('click', () => submitParkingReport(zone.zone_id, btn.dataset.status, userLocation));
-  });
-  renderBottomNav(container, 'report');
-}
-
-async function submitParkingReport(zoneId, status, userLocation) {
-  const resultEl = document.getElementById('report-result');
-  resultEl.textContent = 'กำลังส่งรายงาน...';
-
-  try {
-    const userId = await getUserId();
-    await fetchJSON('/api/parking/report', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        user_id: userId,
-        zone_id: zoneId,
-        status,
-        user_lat: userLocation.lat,
-        user_lng: userLocation.lng,
-      }),
-    });
-    resultEl.textContent = 'รายงานสำเร็จ ขอบคุณครับ';
-  } catch (err) {
-    // MVP-SPEC §6.1: 429 รายงานถี่เกิน, 422 อยู่ไกลเกินไป
-    if (err.status === 429) {
-      resultEl.textContent = 'คุณรายงานถี่เกินไป กรุณารออีกสักครู่';
-    } else if (err.status === 422) {
-      resultEl.textContent = 'คุณอยู่ไกลจากลานจอดนี้เกินไป';
-    } else {
-      resultEl.textContent = 'ส่งรายงานไม่สำเร็จ กรุณาลองใหม่';
-    }
-  }
 }
 
 // --- Profile view (MVP-SPEC §7, docs/adr/0003) ---

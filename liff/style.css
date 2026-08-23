@@ -61,12 +61,6 @@ body {
   background: var(--accent-dark);
 }
 
-.status-buttons {
-  display: flex;
-  gap: 8px;
-  margin: 12px 0;
-}
-
 .btn-status {
   flex: 1;
   background: var(--bg);
