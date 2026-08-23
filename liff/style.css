@@ -121,29 +121,37 @@ body {
   transition: bottom 0.2s ease;
 }
 
+/* ปุ่ม 2D/3D ใช้โทนเดียวกับแผงการ์ดด้านล่าง (ขาวโปร่ง) ไม่ใช่ก้อนดำทึบ จะได้ดูเป็นชุดเดียวกัน */
 .view-toggle-btn {
   align-self: flex-end;
   width: 52px;
   height: 52px;
   border: none;
   border-radius: 18px;
-  background: #1c1c1e;
-  color: #ffffff;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--text);
   font-family: inherit;
   font-size: 0.85rem;
   font-weight: 700;
   cursor: pointer;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.16);
 }
 
 .view-toggle-btn:disabled {
-  opacity: 0.4;
+  opacity: 0.45;
   cursor: default;
 }
 
+/* การ์ดเลเยอร์อยู่ในแผงขาวมนตามดีไซน์ที่ทีมส่งมา ไม่ได้ลอยเดี่ยวๆ บนแผนที่ */
 .layer-row {
   display: flex;
   gap: 8px;
+  padding: 10px;
+  border-radius: 26px;
+  background: #ffffff;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.16);
 }
 
 /* เลเยอร์ที่เปิดอยู่ = สีเต็ม, ปิดอยู่ = จางลง (ไม่ใช่หายไป) จะได้รู้ว่ายังกดเปิดกลับได้
@@ -154,9 +162,9 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 5px;
   min-width: 0;
-  height: 62px;
+  height: 66px;
   padding: 8px 6px;
   border: none;
   border-radius: 18px;
@@ -164,9 +172,8 @@ body {
   color: #ffffff;
   font-family: inherit;
   cursor: pointer;
-  opacity: 0.32;
-  filter: saturate(0.5);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  opacity: 0.3;
+  filter: saturate(0.45);
   transition: opacity 0.15s ease, filter 0.15s ease;
 }
 
