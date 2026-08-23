@@ -218,10 +218,22 @@ const MASTER_GEOJSON_URL = 'data/ru_master.geojson';
 // "อื่นๆ" = ทุกอย่างที่ไม่ใช่อาคารและไม่ใช่ที่จอดรถ (ร้านค้า + จุดสังเกต) ตามที่ทีมกำหนด
 // หมายเหตุ: category ในไฟล์ต้นทางสะกดว่า "orther" (พิมพ์ผิดตั้งแต่ต้นทาง) — ไม่แก้ไฟล์ต้นทาง
 // เพื่อให้ sync กับของทีมได้ตรงๆ แต่รับค่าทั้งสองแบบไว้เผื่อวันหลังมีคนแก้
+// ไอคอนเป็น SVG สีเดียว (ใช้ currentColor) ไม่ใช่อีโมจิ — อีโมจิสีสันเยอะและหน้าตาต่างกันไป
+// ตามระบบปฏิบัติการ ทำให้แถบปุ่มดูไม่เป็นชุดเดียวกัน
+const ICON_SVG = {
+  building: '<path d="M3 21V5h8v4h10v12H3zm2-2h6V7H5v12zm8 0h6v-8h-6v8z"/>',
+  parking: '<path d="M5 11l1.5-4.5A2 2 0 018.4 5h7.2a2 2 0 011.9 1.5L19 11v7a1 1 0 01-1 1h-1a1 1 0 01-1-1v-1H8v1a1 1 0 01-1 1H6a1 1 0 01-1-1v-7zm2.2-1h9.6l-1-3H8.2l-1 3zM7.5 15a1 1 0 100-2 1 1 0 000 2zm9 0a1 1 0 100-2 1 1 0 000 2z"/>',
+  other: '<path d="M12 22s7-6.2 7-12A7 7 0 005 10c0 5.8 7 12 7 12zm0-9.5A2.5 2.5 0 1112 7a2.5 2.5 0 010 5.5z"/>',
+};
+
+function icon(name) {
+  return `<svg viewBox="0 0 24 24" width="19" height="19" fill="currentColor" aria-hidden="true">${ICON_SVG[name]}</svg>`;
+}
+
 const MAP_LAYERS = [
-  { id: 'building', icon: '🏛', label: 'อาคาร', categories: ['building'] },
-  { id: 'parking', icon: '🚗', label: 'ที่จอดรถ', categories: ['parking'] },
-  { id: 'other', icon: '📍', label: 'อื่นๆ', categories: ['shop', 'orther', 'other'] },
+  { id: 'building', label: 'อาคาร', categories: ['building'] },
+  { id: 'parking', label: 'ที่จอดรถ', categories: ['parking'] },
+  { id: 'other', label: 'อื่นๆ', categories: ['shop', 'orther', 'other'] },
 ];
 
 const LAYER_STYLE = {
@@ -235,11 +247,11 @@ const LAYER_STYLE = {
 // ตั้งกล้องด้วย zoom ไม่ใช่ altitude จึงต้องแปลงก่อน ใช้สูตรเทียบมาตรฐานของ Google Earth
 //   altitude = 35,200,000 / 2^zoom   =>   zoom = log2(35,200,000 / altitude)
 // เป็นค่าประมาณ ไม่ได้คิดผลของละติจูด (ที่ 13.75° ต่างราว 3%) ถ้าอยากเป๊ะกว่านี้ต้องวัดจากจอจริง
-// 400 ม. -> zoom ~16.42 (ภาพรวมทั้งแคมปัส) / 165 ม. -> zoom ~17.70 (ใกล้พอเห็นอาคาร 3D)
+// 250 ม. -> zoom ~17.10 / 165 ม. -> zoom ~17.70
 const ZOOM_REFERENCE_ALTITUDE_M = 35200000;
 
 const CAMERA_PRESETS = {
-  '2d': { altitudeMeters: 400, tilt: 0, heading: 0 },
+  '2d': { altitudeMeters: 250, tilt: 0, heading: 0 },
   '3d': { altitudeMeters: 165, tilt: 60, heading: 20 },
 };
 
@@ -328,10 +340,18 @@ async function renderMapView({ presetDestId, presetZoneId } = {}) {
   container.innerHTML = `
     <div class="map-container">
       <div id="map"></div>
+      <div class="map-search">
+        <svg class="map-search-icon" viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
+          <path d="M10 4a6 6 0 104.24 10.24l4.26 4.26 1.5-1.5-4.26-4.26A6 6 0 0010 4zm0 2a4 4 0 110 8 4 4 0 010-8z"/>
+        </svg>
+        <input id="search-input" type="search" autocomplete="off" placeholder="ค้นหาอาคาร ลานจอด ร้านค้า" aria-label="ค้นหาสถานที่" />
+        <button class="map-search-clear" id="search-clear" aria-label="ล้างคำค้น" hidden>&times;</button>
+      </div>
+      <ul class="search-results" id="search-results" hidden></ul>
       <div class="map-controls">
         <div class="control-group" id="layer-chips"></div>
         <div class="control-group">
-          <button class="map-control-btn" id="layer-toggle-btn" aria-label="สลับมุมมอง 3 มิติ">🏢</button>
+          <button class="map-control-btn is-text" id="layer-toggle-btn" aria-label="สลับมุมมอง 2 มิติ/3 มิติ">3D</button>
         </div>
       </div>
       <div id="notice-bar-slot"></div>
@@ -371,6 +391,7 @@ async function renderMapView({ presetDestId, presetZoneId } = {}) {
   await loadParkingZones();
 
   renderLayerChips();
+  renderSearch(features);
   renderLayers();
 
   if (presetDestId) {
@@ -430,6 +451,80 @@ async function loadParkingZones() {
   }
 }
 
+// --- Search (ค้นหาข้ามทุกหมวดในชุดข้อมูลเดียวกับที่วาดบนแผนที่) ---
+
+const SEARCH_MAX_RESULTS = 8;
+const CATEGORY_LABEL = { building: 'อาคาร', parking: 'ที่จอดรถ', shop: 'ร้านค้า', orther: 'สถานที่', other: 'สถานที่' };
+
+// เลือกเป้าหมายจากผลค้นหาต้องใช้ type เดียวกับตอนแตะบนแผนที่ ไม่งั้น runContextRouting จะเลือก
+// โหมดเดินทางผิด (ลานจอด = ขับรถ, ที่เหลือ = เดิน)
+function featureToTarget(feature) {
+  const code = feature.category === 'building' ? buildingCodeFromName(feature.name) : null;
+  const type = feature.category === 'parking' ? 'PARKING' : feature.category === 'building' ? 'BUILDING' : 'PLACE';
+  const zone = feature.category === 'parking' ? appState.parkingZones.find((z) => z.zone_name === feature.name) : null;
+  return {
+    id: zone ? zone.zone_id : code || feature.name,
+    name: feature.name,
+    type,
+    coords: { lat: feature.lat, lng: feature.lng },
+  };
+}
+
+function renderSearch(features) {
+  const input = document.getElementById('search-input');
+  const list = document.getElementById('search-results');
+  const clearBtn = document.getElementById('search-clear');
+  if (!input || !list) return;
+
+  const closeResults = () => {
+    list.hidden = true;
+    list.innerHTML = '';
+  };
+
+  const run = () => {
+    const query = input.value.trim().toLowerCase();
+    clearBtn.hidden = !query;
+    if (!query) return closeResults();
+
+    const matches = features
+      .filter((f) => f.name.toLowerCase().includes(query))
+      .slice(0, SEARCH_MAX_RESULTS);
+
+    if (!matches.length) {
+      list.innerHTML = '<li class="search-empty">ไม่พบสถานที่ที่ค้นหา</li>';
+      list.hidden = false;
+      return;
+    }
+
+    list.innerHTML = matches.map((f, i) => `
+      <li><button class="search-result" data-index="${i}">
+        <span class="search-result-name">${escapeXml(f.name)}</span>
+        <span class="search-result-category">${CATEGORY_LABEL[f.category] || f.category}</span>
+      </button></li>`).join('');
+    list.hidden = false;
+
+    list.querySelectorAll('.search-result').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const feature = matches[Number(btn.dataset.index)];
+        input.value = '';
+        clearBtn.hidden = true;
+        closeResults();
+        input.blur();
+        selectTarget(featureToTarget(feature));
+      });
+    });
+  };
+
+  input.addEventListener('input', run);
+  input.addEventListener('focus', run);
+  clearBtn.addEventListener('click', () => {
+    input.value = '';
+    clearBtn.hidden = true;
+    closeResults();
+    input.focus();
+  });
+}
+
 // --- Layer chips (กดเลือกได้หลายอัน เลเยอร์ที่ไม่ได้เลือกจะถูกซ่อน) ---
 
 function renderLayerChips() {
@@ -439,7 +534,7 @@ function renderLayerChips() {
   slot.innerHTML = MAP_LAYERS.map((layer) => {
     const on = appState.map.activeLayers.has(layer.id);
     return `<button class="map-control-btn${on ? ' active' : ''}" data-layer="${layer.id}"`
-      + ` title="${layer.label}" aria-label="${layer.label}" aria-pressed="${on}">${layer.icon}</button>`;
+      + ` title="${layer.label}" aria-label="${layer.label}" aria-pressed="${on}">${icon(layer.id)}</button>`;
   }).join('');
 
   slot.querySelectorAll('.map-control-btn').forEach((btn) => {
@@ -620,7 +715,7 @@ function toggle3D() {
   if (!btn || btn.disabled || !appState.map.instance) return;
   appState.map.is3DMode = !appState.map.is3DMode;
   applyViewMode();
-  btn.textContent = appState.map.is3DMode ? '🗺' : '🏢';
+  btn.textContent = appState.map.is3DMode ? '2D' : '3D';
   btn.classList.toggle('active', appState.map.is3DMode);
 }
 
@@ -650,7 +745,7 @@ function updateLayerToggleAvailability() {
   if (!allowed && appState.map.is3DMode) {
     appState.map.is3DMode = false;
     applyViewMode();
-    btn.textContent = '🏢';
+    btn.textContent = '3D';
     btn.classList.remove('active');
   }
 }

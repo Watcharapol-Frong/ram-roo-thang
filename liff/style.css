@@ -95,15 +95,16 @@ body {
   inset: 0;
 }
 
-/* ปุ่มควบคุมแผนที่ทั้งหมดอยู่มุมขวาบน เรียงลงมาเป็นแถวเดียว ไอคอนล้วนให้เล็กที่สุด
-   แบ่งเป็นกลุ่ม (เลเยอร์ / มุมมอง) ด้วยระยะห่าง จะได้รู้ว่าปุ่มไหนทำงานคนละเรื่องกัน */
+/* ปุ่มควบคุมอยู่มุมล่างขวา เรียงลงมา ไอคอนสีเดียวล้วน ไม่ใช้อีโมจิ
+   ยกตัวสูงขึ้นตามความสูงการ์ดล่าง (--sheet-height ตั้งค่าจาก SheetManager) จะได้ไม่โดนการ์ดทับ */
 .map-controls {
   position: absolute;
-  top: 12px;
   right: 12px;
+  bottom: calc(var(--sheet-height, 0px) + 16px + env(safe-area-inset-bottom));
   display: flex;
   flex-direction: column;
   gap: 12px;
+  transition: bottom 0.2s ease;
 }
 
 .control-group {
@@ -112,37 +113,152 @@ body {
   gap: 1px;
   border-radius: 14px;
   overflow: hidden;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.14);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.16);
 }
 
 .map-control-btn {
-  width: 42px;
-  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
   border: none;
   border-radius: 0;
   background: #ffffff;
-  color: var(--text);
-  font-size: 1.05rem;
+  color: #1c1c1e;
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
   line-height: 1;
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
 .map-control-btn.active {
-  background: var(--accent);
+  background: #1c1c1e;
+  color: #ffffff;
 }
 
 .map-control-btn:disabled {
-  opacity: 0.45;
+  opacity: 0.4;
   cursor: default;
+}
+
+/* แถบค้นหาด้านบน */
+.map-search {
+  position: absolute;
+  top: calc(12px + env(safe-area-inset-top));
+  left: 12px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  height: 48px;
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: 0 2px 14px rgba(0, 0, 0, 0.14);
+}
+
+.map-search-icon {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+
+.map-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-family: inherit;
+  font-size: 0.95rem;
+  color: var(--text);
+}
+
+.map-search input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.map-search-clear {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 50%;
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.search-results {
+  position: absolute;
+  top: calc(68px + env(safe-area-inset-top));
+  left: 12px;
+  right: 12px;
+  max-height: 46vh;
+  margin: 0;
+  padding: 6px;
+  overflow-y: auto;
+  list-style: none;
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.18);
+}
+
+.search-result {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 11px 12px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.search-result:active {
+  background: var(--bg);
+}
+
+.search-result-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.9rem;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-result-category {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--bg);
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
+.search-empty {
+  padding: 14px 12px;
+  font-size: 0.85rem;
+  color: var(--muted);
+  text-align: center;
 }
 
 /* แถบเตือน GPS — ลอยชิดซ้ายบน ไม่ชนกับปุ่มควบคุมทางขวา */
 .notice-bar {
   position: absolute;
-  top: 12px;
+  top: calc(68px + env(safe-area-inset-top));
   left: 12px;
-  right: 66px;
+  right: 12px;
   display: flex;
   align-items: center;
   gap: 10px;

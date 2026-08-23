@@ -15,6 +15,17 @@
   function hide() {
     const slot = sheetSlot();
     if (slot) slot.innerHTML = '';
+    syncSheetHeight();
+  }
+
+  // ปุ่มควบคุมแผนที่อยู่มุมล่างขวา ต้องขยับหนีขึ้นเมื่อมีการ์ดโผล่มา ไม่งั้นโดนการ์ดทับ —
+  // ความสูงการ์ดไม่คงที่ (บางแบบมีข้อความ บางแบบไม่มี) จึงวัดจริงแล้วส่งเป็น CSS variable ให้ CSS
+  // เอาไปคำนวณเอง แทนการ hardcode ระยะไว้
+  function syncSheetHeight() {
+    const container = document.querySelector('.map-container');
+    if (!container) return;
+    const card = sheetSlot() && sheetSlot().firstElementChild;
+    container.style.setProperty('--sheet-height', `${card ? card.offsetHeight : 0}px`);
   }
 
   // ใช้ตอน on-campus (WALKING/DRIVING ภายในแคมปัส) — มีระยะทาง/เวลาจาก RouteCalculator แล้ว
@@ -30,6 +41,7 @@
       </div>
     `;
     document.getElementById('sheet-action-btn').addEventListener('click', onAction);
+    syncSheetHeight();
   }
 
   // Scenario: อยู่นอก ม.รามฯ — ไม่คำนวณระยะเดิน/ขับข้ามเมือง ให้เปิด Google Maps ภายนอกแทน
@@ -51,6 +63,7 @@
       </div>
     `;
     document.getElementById('sheet-action-btn').addEventListener('click', onOpenGoogleMaps);
+    syncSheetHeight();
   }
 
   // ใช้ตอนหาเส้นทางไม่ได้เลย (Directions API คืน error) — ตอบตรงๆ ไม่เดา ไม่วาดเส้นผิด
@@ -66,6 +79,7 @@
       </div>
     `;
     document.getElementById('sheet-action-btn').addEventListener('click', onFocus);
+    syncSheetHeight();
   }
 
   function showGpsWarning(onRetry) {
