@@ -57,10 +57,12 @@ const appState = {
     lineUserId: null,
   },
   target: null, // { id, name, type: 'BUILDING'|'PARKING'|'MY_CAR'|'COMMUNITY', coords: {lat,lng} }
+  parkingZones: [], // โหลดจาก /api/parking/zones — ใช้ทั้งทาสีเลเยอร์และหาลานจอดใกล้จุดหมาย
   map: {
     instance: null,
     is3DMode: false,
-    activeTab: 'nav',
+    // เปิดครบทุกเลเยอร์ไว้ก่อน ผู้ใช้ค่อยกดปิดที่ไม่สนใจทิ้งเอง
+    activeLayers: new Set(['building', 'parking', 'other']),
   },
 };
 
@@ -218,12 +220,92 @@ function formatExamAt(isoString) {
 
 // --- Map view: One-Box Context-Driven Navigation (Module_2_Technical_Specification.md §1-4) ---
 
+// แผนที่รวมทุกอย่างจาก data/ru_master.geojson (93 จุด) ไว้ในหน้าเดียว แล้วให้ผู้ใช้กรองเอาเองด้วย
+// ชิปเลือกเลเยอร์ด้านบน — โหลดเป็นไฟล์ static จาก LIFF ตรงๆ ไม่ผ่าน KV เพราะเป็นข้อมูลนิ่งล้วนๆ
+// (สถานะลานจอดที่เปลี่ยนตามเวลายังดึงจาก /api/parking/zones แล้วมาทาสีทับทีหลัง)
+const MASTER_GEOJSON_URL = 'data/ru_master.geojson';
+
+// "อื่นๆ" = ทุกอย่างที่ไม่ใช่อาคารและไม่ใช่ที่จอดรถ (ร้านค้า + จุดสังเกต) ตามที่ทีมกำหนด
+// หมายเหตุ: category ในไฟล์ต้นทางสะกดว่า "orther" (พิมพ์ผิดตั้งแต่ต้นทาง) — ไม่แก้ไฟล์ต้นทาง
+// เพื่อให้ sync กับของทีมได้ตรงๆ แต่รับค่าทั้งสองแบบไว้เผื่อวันหลังมีคนแก้
+const MAP_LAYERS = [
+  { id: 'building', label: '🏛 อาคาร', categories: ['building'] },
+  { id: 'parking', label: '🚗 ที่จอดรถ', categories: ['parking'] },
+  { id: 'other', label: '📍 อื่นๆ', categories: ['shop', 'orther', 'other'] },
+];
+
+const LAYER_STYLE = {
+  building: { stroke: '#5b8def', fill: '#5b8def', fillOpacity: 0.25 },
+  parking: { fillOpacity: 0.38 },
+  shop: '#f39c12',
+  landmark: '#9b59b6',
+};
+
+const BUILDING_MARKER_MIN_ZOOM = 17;
+const MIN_3D_ZOOM = 18;
+
+let masterFeatures = null;
+const layerOverlays = { building: [], parking: [], other: [] };
+const buildingMarkers = [];
+
+function escapeXml(text) {
+  return String(text).replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' }[c]));
+}
+
+// ชื่ออาคารในไฟล์ต้นทางขึ้นต้นด้วยรหัสเสมอ แต่คั่นไม่เหมือนกัน — "KLB (อาคาร...)", "LWB: คณะ...",
+// "ECB 2 (...)", "GB 4: ..." จึงดึงเฉพาะรหัสตัวหน้ามาทำป้ายชิป ถ้าไม่เข้ารูป (เช่น "ราม ไชยา,
+// ซุ้มนักศึกษา") ก็ไม่ต้องมีชิป ปล่อยให้เห็นแค่รูปทรงอาคารพอ
+function buildingCodeFromName(name) {
+  const match = name.match(/^([A-Z]{2,4})\s?(\d)?\b/);
+  if (!match) return null;
+  return match[1] + (match[2] || '');
+}
+
+function polygonCentroid(points) {
+  const lat = points.reduce((sum, p) => sum + p.lat, 0) / points.length;
+  const lng = points.reduce((sum, p) => sum + p.lng, 0) / points.length;
+  return { lat, lng };
+}
+
+// GeoJSON เก็บพิกัดเป็น [lng, lat] สลับกับที่ Google Maps ใช้ และปิดวงด้วยจุดซ้ำจุดแรก
+// ซึ่ง google.maps.Polygon ปิดให้เองอยู่แล้ว
+function toMapFeature(raw) {
+  const props = raw.properties || {};
+  const category = props.category;
+  const name = (props.name || '').replace(/\s+/g, ' ').trim();
+  const geometry = raw.geometry || {};
+  if (!category || !name) return null;
+
+  if (geometry.type === 'Polygon') {
+    const ring = (geometry.coordinates[0] || []).map(([lng, lat]) => ({ lat, lng }));
+    if (ring.length < 3) return null;
+    const first = ring[0];
+    const last = ring[ring.length - 1];
+    if (first.lat === last.lat && first.lng === last.lng) ring.pop();
+    return { category, name, polygon: ring, ...polygonCentroid(ring) };
+  }
+  if (geometry.type === 'Point') {
+    const [lng, lat] = geometry.coordinates;
+    return { category, name, polygon: null, lat, lng };
+  }
+  return null;
+}
+
+async function loadMasterFeatures() {
+  if (masterFeatures) return masterFeatures;
+  const res = await fetch(MASTER_GEOJSON_URL);
+  if (!res.ok) throw new Error('โหลดข้อมูลแผนที่ไม่สำเร็จ');
+  const geo = await res.json();
+  masterFeatures = (geo.features || []).map(toMapFeature).filter(Boolean);
+  return masterFeatures;
+}
+
 function isWithinCampusBounds({ lat, lng }) {
   const g = CAMPUS_CONSTANTS.GEOFENCE;
   return lat >= g.minLat && lat <= g.maxLat && lng >= g.minLng && lng <= g.maxLng;
 }
 
-async function renderMapView({ presetDestId, presetZoneId, activeTab = 'nav' }) {
+async function renderMapView({ presetDestId, presetZoneId } = {}) {
   const container = getApp();
 
   // เฉพาะ view นี้เท่านั้นที่ต้องมี Google Maps — ถ้าโหลดไม่ขึ้นให้เหลือทางไป view อื่นที่ยังใช้ได้
@@ -238,22 +320,26 @@ async function renderMapView({ presetDestId, presetZoneId, activeTab = 'nav' }) 
   container.innerHTML = `
     <div class="map-container">
       <div id="map"></div>
+      <div class="map-top-bar">
+        <div class="layer-chips" id="layer-chips"></div>
+        <button class="layer-toggle-btn" id="layer-toggle-btn">🏢 3D</button>
+      </div>
       <div id="notice-bar-slot"></div>
-      <button class="layer-toggle-btn" id="layer-toggle-btn">🏢 เปิดมุมมอง 3D</button>
       <div id="action-sheet-slot"></div>
     </div>
   `;
-  renderModeBar(container, activeTab);
+  renderBottomNav(container, 'map');
   document.getElementById('layer-toggle-btn').addEventListener('click', toggle3D);
 
   buildingMarkers.length = 0;
-  shopMarkers.length = 0;
+  Object.keys(layerOverlays).forEach((k) => { layerOverlays[k] = []; });
+
   appState.map.instance = new google.maps.Map(document.getElementById('map'), {
     center: CAMPUS_CONSTANTS.INITIAL_VIEW.center,
     zoom: CAMPUS_CONSTANTS.INITIAL_VIEW.zoom,
     mapId: GOOGLE_MAPS_MAP_ID,
     disableDefaultUI: true,
-    zoomControl: true,
+    zoomControl: false,
     clickableIcons: false,
   });
   RouteCalculator.init(appState.map.instance);
@@ -261,57 +347,201 @@ async function renderMapView({ presetDestId, presetZoneId, activeTab = 'nav' }) 
   appState.map.instance.addListener('zoom_changed', updateBuildingMarkerVisibility);
   updateLayerToggleAvailability();
 
-  let buildingsData;
+  let features;
   try {
-    buildingsData = await fetchJSON('/api/buildings');
+    features = await loadMasterFeatures();
   } catch (err) {
-    renderError('โหลดข้อมูลอาคารไม่สำเร็จ กรุณาลองใหม่');
-    return;
-  }
-  const buildings = buildingsData.buildings || [];
-
-  // แท็บร้านค้าโชว์เฉพาะร้าน ไม่ต้องมีชิปอาคาร 35 ตัวกับพื้นที่ลานจอดมาแย่งพื้นที่จอ
-  if (activeTab === 'shop') {
-    const shops = await placeShopMarkers();
-    frameFeatures(shops.length ? shops : buildings);
+    console.error(err);
+    renderError('โหลดข้อมูลแผนที่ไม่สำเร็จ กรุณาลองใหม่');
     return;
   }
 
-  placeBuildingMarkers(buildings);
-  await placeParkingMarkers();
-  if (!presetDestId && !presetZoneId) frameCampus(buildings);
+  // สถานะลานจอดสดๆ มาแยกจาก geojson — จับคู่กับ polygon ด้วยชื่อโซน (ตรงกันทุกโซนอยู่แล้ว)
+  await loadParkingZones();
+
+  renderLayerChips();
+  renderLayers();
 
   if (presetDestId) {
-    const building = buildings.find((b) => b.building_id === presetDestId);
-    if (!building) {
+    const target = await resolvePresetBuilding(presetDestId, features);
+    if (!target) {
       renderError('ไม่พบข้อมูลอาคารนี้ครับ กรุณาลองใหม่จากเมนูแชท');
       return;
     }
-    await selectTarget({ id: building.building_id, name: building.name_th, type: 'BUILDING', coords: { lat: building.lat, lng: building.lng } });
+    await selectTarget(target);
   } else if (presetZoneId) {
-    let zoneData;
-    try {
-      zoneData = await fetchJSON(`/api/parking/zone?zone_id=${encodeURIComponent(presetZoneId)}`);
-    } catch (err) {
+    const zone = appState.parkingZones.find((z) => z.zone_id === presetZoneId);
+    if (!zone) {
       renderError('ไม่พบข้อมูลลานจอดนี้ครับ กรุณาลองใหม่จากเมนูแชท');
       return;
     }
-    await selectTarget({ id: zoneData.zone.zone_id, name: zoneData.zone.zone_name, type: 'PARKING', coords: { lat: zoneData.zone.lat, lng: zoneData.zone.lng } });
+    await selectTarget({ id: zone.zone_id, name: zone.zone_name, type: 'PARKING', coords: { lat: zone.lat, lng: zone.lng } });
+  } else {
+    frameFeatures(features);
   }
 }
 
-// หมุดอาคารเป็น "ป้ายชิป" เล็กๆ ที่มีรหัสอาคารอยู่ข้างใน แทนหมุดสีแดงมาตรฐานของ Google —
-// อาคาร 35 หลังในพื้นที่ ~1 ตร.กม. ถ้าใช้หมุดมาตรฐานจะบังกันจนมองไม่เห็นตัวแผนที่เลย
-//
-// ใช้ google.maps.Marker ตัวเดิม ไม่ใช่ AdvancedMarkerElement ถึงแม้จะมี mapId แล้วก็ตาม —
-// ลองแล้ว AdvancedMarkerElement ไม่ถูก mount ลง DOM เลยสักตัว (content.isConnected เป็น false
-// ทั้ง 35 ตัว ไม่มี error ให้จับ) ส่วน Marker ตัวเดิมวาดได้ปกติ และ Google ประกาศชัดว่ายังไม่มี
-// กำหนดเลิกรองรับ ถ้าจะย้ายไป AdvancedMarkerElement ในอนาคตต้องไล่เช็ค config ของ Map ID ก่อน
-const BUILDING_MARKER_MIN_ZOOM = 16;
-const buildingMarkers = [];
+// deep link จาก Flex Message ส่งมาเป็น building_id ของฐานข้อมูลบอท (มี alias/ข้อมูลบริการผูกอยู่)
+// ไม่ใช่ชื่อใน geojson จึงต้องถาม /api/building ก่อน แล้วค่อยหา polygon ที่ตรงรหัสมาไฮไลต์
+async function resolvePresetBuilding(buildingId, features) {
+  let data;
+  try {
+    data = await fetchJSON(`/api/building?building_id=${encodeURIComponent(buildingId)}`);
+  } catch (err) {
+    console.error('โหลดข้อมูลอาคารไม่สำเร็จ', err);
+    return null;
+  }
+  const building = data.building;
+  if (!building) return null;
+  const match = features.find((f) => f.category === 'building' && buildingCodeFromName(f.name) === building.building_id);
+  const coords = match ? { lat: match.lat, lng: match.lng } : { lat: building.lat, lng: building.lng };
+  return { id: building.building_id, name: building.name_th, type: 'BUILDING', coords };
+}
 
-function escapeXml(text) {
-  return String(text).replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' }[c]));
+async function loadParkingZones() {
+  try {
+    const data = await fetchJSON('/api/parking/zones');
+    appState.parkingZones = (data.zones || []).map(({ zone, parking_status: status }) => ({
+      ...zone,
+      status: (status && status.status) || zone.baseline_status,
+    }));
+  } catch (err) {
+    console.error('โหลดข้อมูลลานจอดไม่สำเร็จ', err);
+    appState.parkingZones = [];
+  }
+}
+
+// --- Layer chips (กดเลือกได้หลายอัน เลเยอร์ที่ไม่ได้เลือกจะถูกซ่อน) ---
+
+function renderLayerChips() {
+  const slot = document.getElementById('layer-chips');
+  if (!slot) return;
+  slot.innerHTML = MAP_LAYERS.map((layer) => {
+    const on = appState.map.activeLayers.has(layer.id);
+    return `<button class="layer-chip${on ? ' active' : ''}" data-layer="${layer.id}">${layer.label}</button>`;
+  }).join('');
+
+  slot.querySelectorAll('.layer-chip').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.layer;
+      const active = appState.map.activeLayers;
+      // กันปิดครบทุกเลเยอร์จนแผนที่ว่างเปล่าไม่เหลืออะไรให้กดต่อ
+      if (active.has(id) && active.size === 1) return;
+      if (active.has(id)) active.delete(id); else active.add(id);
+      renderLayerChips();
+      renderLayers();
+    });
+  });
+}
+
+function clearLayerOverlays() {
+  Object.keys(layerOverlays).forEach((id) => {
+    layerOverlays[id].forEach((o) => o.setMap(null));
+    layerOverlays[id] = [];
+  });
+  buildingMarkers.length = 0;
+}
+
+function renderLayers() {
+  const map = appState.map.instance;
+  if (!map || !masterFeatures) return;
+  clearLayerOverlays();
+
+  MAP_LAYERS.forEach((layer) => {
+    if (!appState.map.activeLayers.has(layer.id)) return;
+    masterFeatures
+      .filter((f) => layer.categories.includes(f.category))
+      .forEach((feature) => addFeatureOverlay(layer.id, feature));
+  });
+
+  updateBuildingMarkerVisibility();
+  highlightBuildingMarker(appState.target && appState.target.type === 'BUILDING' ? appState.target.id : null);
+  nudgeMapRepaint(map);
+}
+
+function addFeatureOverlay(layerId, feature) {
+  if (layerId === 'building') return addBuildingOverlay(feature);
+  if (layerId === 'parking') return addParkingOverlay(feature);
+  return addPointOverlay(feature);
+}
+
+function addBuildingOverlay(feature) {
+  const map = appState.map.instance;
+  const code = buildingCodeFromName(feature.name);
+  const target = { id: code || feature.name, name: feature.name, type: 'BUILDING', coords: { lat: feature.lat, lng: feature.lng } };
+
+  const shape = new google.maps.Polygon({
+    map,
+    paths: feature.polygon,
+    strokeColor: LAYER_STYLE.building.stroke,
+    strokeOpacity: 0.9,
+    strokeWeight: 1.5,
+    fillColor: LAYER_STYLE.building.fill,
+    fillOpacity: LAYER_STYLE.building.fillOpacity,
+    clickable: true,
+  });
+  shape.addListener('click', () => selectTarget(target));
+  layerOverlays.building.push(shape);
+
+  if (!code) return;
+  const marker = new google.maps.Marker({
+    position: { lat: feature.lat, lng: feature.lng },
+    map,
+    title: feature.name,
+    icon: buildingMarkerIcon(code, false),
+  });
+  marker.buildingId = code;
+  marker.addListener('click', () => selectTarget(target));
+  layerOverlays.building.push(marker);
+  buildingMarkers.push(marker);
+}
+
+function addParkingOverlay(feature) {
+  const map = appState.map.instance;
+  const zone = appState.parkingZones.find((z) => z.zone_name === feature.name);
+  const status = zone ? zone.status : null;
+  const color = PARKING_STATUS_COLOR[status] || '#95a5a6';
+
+  const shape = new google.maps.Polygon({
+    map,
+    paths: feature.polygon,
+    strokeColor: color,
+    strokeOpacity: 0.95,
+    strokeWeight: 2,
+    fillColor: color,
+    fillOpacity: LAYER_STYLE.parking.fillOpacity,
+    clickable: true,
+  });
+  shape.addListener('click', () => {
+    selectTarget({
+      id: zone ? zone.zone_id : feature.name,
+      name: feature.name,
+      type: 'PARKING',
+      coords: { lat: feature.lat, lng: feature.lng },
+    });
+  });
+  layerOverlays.parking.push(shape);
+}
+
+function addPointOverlay(feature) {
+  const isShop = feature.category === 'shop';
+  const marker = new google.maps.Marker({
+    position: { lat: feature.lat, lng: feature.lng },
+    map: appState.map.instance,
+    title: feature.name,
+    icon: {
+      path: google.maps.SymbolPath.CIRCLE,
+      scale: 6,
+      fillColor: isShop ? LAYER_STYLE.shop : LAYER_STYLE.landmark,
+      fillOpacity: 1,
+      strokeColor: '#ffffff',
+      strokeWeight: 2,
+    },
+  });
+  marker.addListener('click', () => {
+    selectTarget({ id: feature.name, name: feature.name, type: isShop ? 'SHOP' : 'PLACE', coords: { lat: feature.lat, lng: feature.lng } });
+  });
+  layerOverlays.other.push(marker);
 }
 
 function buildingMarkerIcon(code, isSelected) {
@@ -330,48 +560,23 @@ function buildingMarkerIcon(code, isSelected) {
   };
 }
 
-function placeBuildingMarkers(buildings) {
-  buildings.forEach((b) => {
-    const marker = new google.maps.Marker({
-      position: { lat: b.lat, lng: b.lng },
-      map: appState.map.instance,
-      title: b.name_th,
-      icon: buildingMarkerIcon(b.building_id, false),
-    });
-    marker.buildingId = b.building_id;
-    marker.addListener('click', () => {
-      selectTarget({ id: b.building_id, name: b.name_th, type: 'BUILDING', coords: { lat: b.lat, lng: b.lng } });
-    });
-    buildingMarkers.push(marker);
-  });
-  updateBuildingMarkerVisibility();
-}
-
-// จัดกล้องให้เห็นอาคารทุกหลังพอดีจอ แทนการ hardcode center/zoom ไว้ตายตัว (ของเดิมทำให้อาคาร
-// ริมขอบอย่าง KLB ตกนอกจอตั้งแต่เปิดหน้ามา)
-//
-// การขยับกล้อง "จริงๆ" ตรงนี้ยังจำเป็นอีกอย่าง: vector map ของ Google ไม่วาดหมุดที่เพิ่งเพิ่มเข้าไป
-// หลังจากแผนที่นิ่งแล้ว จนกว่ากล้องจะขยับ — หมุดจะหายทั้งแผนที่แบบไม่มี error (เจอตอนเทสจริง
-// ลองแล้วทั้ง trigger 'resize' และ panBy(0,0) ไม่ช่วย ต้องเป็นการขยับกล้องจริงเท่านั้น)
-function frameCampus(buildings) {
-  frameFeatures(buildings);
-}
-
+// จัดกล้องให้เห็นทุกอย่างพอดีจอ — การขยับกล้องจริงยังจำเป็นเพื่อปลุกให้ vector map วาด overlay
+// ที่เพิ่งเพิ่มเข้าไปด้วย (ดู nudgeMapRepaint)
 function frameFeatures(features) {
   const map = appState.map.instance;
   if (!map || !features.length) return;
   const bounds = new google.maps.LatLngBounds();
   features.forEach((f) => bounds.extend({ lat: f.lat, lng: f.lng }));
   map.fitBounds(bounds, 40);
+  // fitBounds เปลี่ยนกล้องก็จริง แต่ overlay ที่เพิ่งเพิ่มก่อนหน้ายังไม่ถูกวาด ต้อง nudge ซ้ำหลังกล้องนิ่ง
   google.maps.event.addListenerOnce(map, 'idle', () => {
-    // fitBounds อาจซูมออกจนต่ำกว่าเกณฑ์ที่ป้ายชิปจะโชว์ (จอแคบ) — ดันกลับขึ้นมาให้เห็นหมุดเสมอ
-    if (map.getZoom() < BUILDING_MARKER_MIN_ZOOM) map.setZoom(BUILDING_MARKER_MIN_ZOOM);
+    updateBuildingMarkerVisibility();
+    nudgeMapRepaint(map);
   });
 }
 
-// ซูมออกไกลๆ ป้ายชิปจะทับกันเป็นพืด ซ่อนไปเลยดีกว่า เหลือแต่หมุดลานจอดที่มีไม่กี่จุด
-// getZoom() คืน undefined ได้ถ้าแผนที่ยังตั้งตัวไม่เสร็จ — ต้อง default เป็น "โชว์" ไม่งั้น
-// undefined >= 16 เป็น false แล้วหมุดหายหมดทั้งแผนที่แบบเงียบๆ
+// ซูมออกไกลๆ ป้ายชิปจะทับกันเป็นพืด ซ่อนไปเลยดีกว่า เหลือแต่รูปทรงอาคาร
+// getZoom() คืน undefined ได้ถ้าแผนที่ยังตั้งตัวไม่เสร็จ — default เป็น "โชว์" ไม่งั้นหมุดหายหมดเงียบๆ
 function updateBuildingMarkerVisibility() {
   const map = appState.map.instance;
   if (!map) return;
@@ -388,117 +593,41 @@ function highlightBuildingMarker(buildingId) {
   });
 }
 
-// ลานจอดวาดเป็น "พื้นที่" ไม่ใช่หมุดจุดเดียว — สีพื้นที่คือสถานะความหนาแน่นปัจจุบัน (เขียว/เหลือง/แดง)
-// ตาม §1 ดึงทุกโซนจาก /api/parking/zones ครั้งเดียว
-//
-// โซนไหนมี polygon (พิกัดขอบจริง) ก็วาดตามรูปจริง ส่วนโซนที่ยังไม่มีข้อมูลขอบเขตให้วาดเป็นวงกลม
-// รัศมี 25 ม. แทนไปก่อน (เทียบเท่าพื้นที่ลานจอดจริงที่วัดได้จาก OSM คือ ~57x38 ม.) — เป็นค่าประมาณ
-// ไม่ใช่ขอบเขตจริง พอทีมวัดขอบลานจอดจริงมาใส่ field polygon ใน baseline-dataset.json ได้เลย
-// ไม่ต้องแก้โค้ดตรงนี้
-const PARKING_FALLBACK_RADIUS_METERS = 25;
+// --- Bottom navigation (แผนที่ / รายงานที่จอด / โปรไฟล์) ---
 
-async function placeParkingMarkers() {
-  let zonesData;
-  try {
-    zonesData = await fetchJSON('/api/parking/zones');
-  } catch (err) {
-    console.error('โหลดข้อมูลลานจอดไม่สำเร็จ', err);
-    return;
-  }
+const BOTTOM_NAV_ITEMS = [
+  { id: 'map', icon: '🗺', label: 'แผนที่' },
+  { id: 'report', icon: '🚗', label: 'รายงานที่จอด' },
+  { id: 'profile', icon: '👤', label: 'โปรไฟล์' },
+];
 
-  (zonesData.zones || []).forEach(({ zone, parking_status: parkingStatus }) => {
-    const status = (parkingStatus && parkingStatus.status) || zone.baseline_status;
-    const color = PARKING_STATUS_COLOR[status] || '#999999';
-    const style = {
-      map: appState.map.instance,
-      strokeColor: color,
-      strokeOpacity: 0.9,
-      strokeWeight: 2,
-      fillColor: color,
-      fillOpacity: 0.35,
-      clickable: true,
-    };
-
-    const area = Array.isArray(zone.polygon) && zone.polygon.length >= 3
-      ? new google.maps.Polygon({ ...style, paths: zone.polygon })
-      : new google.maps.Circle({ ...style, center: { lat: zone.lat, lng: zone.lng }, radius: PARKING_FALLBACK_RADIUS_METERS });
-
-    area.addListener('click', () => {
-      selectTarget({ id: zone.zone_id, name: zone.zone_name, type: 'PARKING', coords: { lat: zone.lat, lng: zone.lng } });
-    });
-  });
-}
-
-// หมุดร้านค้า/ซุ้ม — ร้านกระจุกตัวหนาแน่นแถวอาคารนพมาศ ใช้จุดเล็กๆ ไม่ใส่ชื่อบนแผนที่
-// (ชื่อร้านยาวกว่ารหัสอาคารมาก ถ้าโชว์ชื่อทั้ง 25 ร้านจะทับกันจนอ่านไม่ออก) แตะแล้วชื่อขึ้นในการ์ดล่าง
-const SHOP_MARKER_COLOR = '#f39c12';
-const shopMarkers = [];
-
-function shopMarkerIcon() {
-  return {
-    path: google.maps.SymbolPath.CIRCLE,
-    scale: 7,
-    fillColor: SHOP_MARKER_COLOR,
-    fillOpacity: 1,
-    strokeColor: '#ffffff',
-    strokeWeight: 2,
-  };
-}
-
-async function placeShopMarkers() {
-  let shopsData;
-  try {
-    shopsData = await fetchJSON('/api/shops');
-  } catch (err) {
-    console.error('โหลดข้อมูลร้านค้าไม่สำเร็จ', err);
-    return [];
-  }
-
-  const shops = shopsData.shops || [];
-  shops.forEach((shop) => {
-    const marker = new google.maps.Marker({
-      position: { lat: shop.lat, lng: shop.lng },
-      map: appState.map.instance,
-      title: shop.name,
-      icon: shopMarkerIcon(),
-    });
-    marker.addListener('click', () => {
-      selectTarget({ id: shop.shop_id, name: shop.name, type: 'SHOP', coords: { lat: shop.lat, lng: shop.lng } });
-    });
-    shopMarkers.push(marker);
-  });
-  return shops;
-}
-
-// Bottom Mode Selector Bar — แปะท้ายทุกหน้าในกลุ่มแผนที่/ที่จอดรถ "ร้านค้า/ซุ้ม" ยังไม่มี POI
-// submission/moderation backend (docs/adr/0004, MVP-SPEC §9 Out of Scope) จึงมีแค่ tab โชว์ empty
-// state เฉยๆ ไม่ได้ทำระบบเบื้องหลังเพิ่ม
-function renderModeBar(container, activeMode) {
+function renderBottomNav(container, activeId) {
   const wrapper = document.createElement('div');
   wrapper.innerHTML = `
-    <div class="mode-bar">
-      <button class="mode-bar-item${activeMode === 'nav' ? ' active' : ''}" data-mode="nav">🗺 นำทาง</button>
-      <button class="mode-bar-item${activeMode === 'parking' ? ' active' : ''}" data-mode="parking">🚗 ที่จอดรถ</button>
-      <button class="mode-bar-item${activeMode === 'shop' ? ' active' : ''}" data-mode="shop">🍜 ร้านค้า/ซุ้ม</button>
-    </div>
+    <nav class="bottom-nav">
+      ${BOTTOM_NAV_ITEMS.map((item) => `
+        <button class="bottom-nav-item${item.id === activeId ? ' active' : ''}" data-nav="${item.id}">
+          <span class="bottom-nav-icon">${item.icon}</span>
+          <span class="bottom-nav-label">${item.label}</span>
+        </button>`).join('')}
+    </nav>
   `;
-  const bar = wrapper.firstElementChild;
-  container.appendChild(bar);
+  const nav = wrapper.firstElementChild;
+  container.appendChild(nav);
 
-  bar.querySelectorAll('.mode-bar-item').forEach((btn) => {
+  nav.querySelectorAll('.bottom-nav-item').forEach((btn) => {
     btn.addEventListener('click', () => {
-      const mode = btn.dataset.mode;
-      if (mode === activeMode) return;
-      appState.map.activeTab = mode;
-      if (mode === 'parking') renderParkingReportView();
-      else if (mode === 'shop') renderMapView({ activeTab: 'shop' });
-      else if (mode === 'nav') renderMapView({});
+      const id = btn.dataset.nav;
+      if (id === activeId) return;
+      if (id === 'map') renderMapView({});
+      else if (id === 'report') renderParkingReportView();
+      else if (id === 'profile') renderProfileView();
     });
   });
 }
 
-// Maps ล่ม (เน็ตสะดุด / key เกิน quota / referrer ไม่ผ่าน) — ยังต้องกดไปหน้าที่จอดรถได้
-// เพราะการรายงานลานจอดไม่ได้ใช้ Google Maps เลย จึงคง mode bar ไว้เสมอ
+// Maps ล่ม (เน็ตสะดุด / key เกิน quota / referrer ไม่ผ่าน) — ยังต้องกดไปหน้าอื่นได้
+// เพราะการรายงานลานจอดกับตารางสอบไม่ได้ใช้ Google Maps เลย
 function renderMapUnavailable() {
   const container = getApp();
   container.innerHTML = `
@@ -509,7 +638,7 @@ function renderMapUnavailable() {
     </div>
   `;
   document.getElementById('maps-retry-btn').addEventListener('click', () => window.location.reload());
-  renderModeBar(container, activeTab);
+  renderBottomNav(container, 'map');
 }
 
 // เปิด 3D ได้เฉพาะตอนศูนย์กลางแผนที่อยู่ในรั้ว ม.รามฯ เท่านั้น (AC-05) — ใช้อาคาร 3D ของ Google เอง
@@ -519,11 +648,9 @@ function toggle3D() {
   if (!btn || btn.disabled || !appState.map.instance) return;
   appState.map.is3DMode = !appState.map.is3DMode;
   applyViewMode();
-  btn.textContent = appState.map.is3DMode ? '🗺 กลับสู่ 2D' : '🏢 เปิดมุมมอง 3D';
+  btn.textContent = appState.map.is3DMode ? '🗺 2D' : '🏢 3D';
+  btn.classList.toggle('active', appState.map.is3DMode);
 }
-
-// อาคาร 3D ของ Google โผล่เฉพาะตอนซูมใกล้พอ (~18 ขึ้นไป) ถ้าเอียงกล้องตอนซูมออกจะได้แค่พื้นเอียงเปล่าๆ
-const MIN_3D_ZOOM = 18;
 
 function applyViewMode() {
   const map = appState.map.instance;
@@ -539,7 +666,7 @@ function applyViewMode() {
 }
 
 // vector map ของ Google ไม่วาดเฟรมใหม่ให้เอง หลังเปลี่ยนสถานะกล้องด้วยโค้ด (setTilt/setHeading/
-// setZoom) หรือเพิ่งเพิ่มหมุดเข้าไป — จอจะค้างภาพเดิมหรือว่างเปล่าจนกว่าผู้ใช้จะไปแตะแผนที่เอง
+// setZoom) หรือเพิ่งเพิ่ม overlay เข้าไป — จอจะค้างภาพเดิมหรือว่างเปล่าจนกว่าผู้ใช้จะไปแตะแผนที่เอง
 // ขยับ 1 พิกเซลเพื่อบังคับให้วาดใหม่ (ตาเปล่ามองไม่เห็น) ลองแล้วทั้ง trigger 'resize' และ
 // panBy(0,0) ไม่ได้ผล ต้องเป็นการขยับที่ระยะไม่ใช่ 0 เท่านั้น
 function nudgeMapRepaint(map) {
@@ -555,12 +682,13 @@ function updateLayerToggleAvailability() {
   if (!allowed && appState.map.is3DMode) {
     appState.map.is3DMode = false;
     applyViewMode();
-    btn.textContent = '🏢 เปิดมุมมอง 3D';
+    btn.textContent = '🏢 3D';
+    btn.classList.remove('active');
   }
 }
 
-// ผู้ใช้แตะเลือกอาคาร/ลานจอดจากแผนที่ (หรือถูกเลือกให้อัตโนมัติจาก dest_id/zone_id) — จุดเริ่มต้นของ
-// Context Routing Matrix (§3) ทั้งหมด
+// ผู้ใช้แตะเลือกอาคาร/ลานจอด/ร้านค้าจากแผนที่ (หรือถูกเลือกให้อัตโนมัติจาก dest_id/zone_id) —
+// จุดเริ่มต้นของ Context Routing Matrix (§3) ทั้งหมด
 async function selectTarget(target) {
   appState.target = target;
   SheetManager.hide();
@@ -586,13 +714,36 @@ async function selectTarget(target) {
   }
 }
 
-// Context Routing Matrix (Module_2_Technical_Specification.md §3) — ตัดสินโหมดนำทางจาก
-// isInsideCampus + target.type เท่านั้น ตามตารางในสเปกเป๊ะๆ
+// อยู่นอกแคมปัส: ไม่ส่งไปจุดนัดพบกลางแล้ว แต่ส่งไป "ลานจอดที่ใกล้จุดหมายที่สุด" — คนขับรถมาสอบ
+// ที่ ECB ต้องการรู้ว่าจอดตรงไหนถึงเดินเข้าใกล้ห้องสอบที่สุด ไม่ใช่ให้ไปกองรวมกันที่ประตูหน้า
+function nearestParkingZone(coords) {
+  let best = null;
+  let bestDistance = Infinity;
+  appState.parkingZones.forEach((zone) => {
+    const distance = haversineDistanceMeters(coords.lat, coords.lng, zone.lat, zone.lng);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = zone;
+    }
+  });
+  return best;
+}
+
+function googleDirectionsUrl({ lat, lng }) {
+  return `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`;
+}
+
+// Context Routing Matrix (Module_2_Technical_Specification.md §3)
 async function runContextRouting(target, originLocation, opts) {
   if (!appState.user.isInsideCampus) {
+    const zone = nearestParkingZone(target.coords);
+    const destination = zone ? { lat: zone.lat, lng: zone.lng } : CAMPUS_CONSTANTS.DEFAULT_ORIGIN;
+    if (zone) appState.map.instance.panTo(destination);
     SheetManager.showOffCampusSheet({
       title: target.name,
-      onOpenGoogleMaps: () => window.open(CAMPUS_CONSTANTS.DEFAULT_ORIGIN.googleMapsUrl, '_blank'),
+      parkingName: zone ? zone.zone_name : null,
+      parkingStatus: zone ? PARKING_STATUS_LABEL[zone.status] || null : null,
+      onOpenGoogleMaps: () => window.open(googleDirectionsUrl(destination), '_blank'),
     });
     return;
   }
@@ -618,8 +769,8 @@ async function runContextRouting(target, originLocation, opts) {
   }
 }
 
-// GPS Denied Fallback (Module_2_Technical_Specification.md §3 แถว Fallback, AC-04) — โชว์แถบเตือน
-// พร้อมกับแผนที่ (ไม่ใช่แทนที่กัน) แล้วคำนวณเส้นทางจาก DEFAULT_ORIGIN ให้อัตโนมัติ ไม่ crash
+// GPS Denied Fallback (§3 แถว Fallback, AC-04) — พฤติกรรมเดิมไม่เปลี่ยน: โชว์แถบเตือนพร้อมกับแผนที่
+// (ไม่ใช่แทนที่กัน) แล้วคำนวณเส้นทางจาก DEFAULT_ORIGIN ให้อัตโนมัติ ไม่ crash
 function handleGpsDenied(target) {
   SheetManager.showGpsWarning(() => selectTarget(target));
   appState.user.isInsideCampus = true;
@@ -695,7 +846,7 @@ function renderParkingReportForm(container, zone, userLocation) {
   container.querySelectorAll('.btn-status').forEach((btn) => {
     btn.addEventListener('click', () => submitParkingReport(zone.zone_id, btn.dataset.status, userLocation));
   });
-  renderModeBar(container, 'parking');
+  renderBottomNav(container, 'report');
 }
 
 async function submitParkingReport(zoneId, status, userLocation) {
@@ -739,6 +890,8 @@ function renderProfileView() {
   } else {
     renderConsentGate(container);
   }
+  // แถบล่างต้องอยู่ทุกหน้า ไม่งั้นเข้าหน้าโปรไฟล์แล้วกลับไปแผนที่ไม่ได้
+  renderBottomNav(container, 'profile');
 }
 
 function renderConsentGate(container) {

@@ -32,13 +32,19 @@
   }
 
   // Scenario: อยู่นอก ม.รามฯ — ไม่คำนวณระยะเดิน/ขับข้ามเมือง ให้เปิด Google Maps ภายนอกแทน
-  function showOffCampusSheet({ title, onOpenGoogleMaps }) {
+  // ปลายทางคือ "ลานจอดที่ใกล้จุดหมายที่สุด" ไม่ใช่ประตูหน้า — บอกชื่อลานกับสถานะไปด้วยเลย
+  // ผู้ใช้จะได้รู้ตั้งแต่ยังไม่ออกรถว่าจะไปจอดตรงไหนและตอนนี้เต็มหรือยัง
+  function showOffCampusSheet({ title, parkingName, parkingStatus, onOpenGoogleMaps }) {
     const slot = sheetSlot();
     if (!slot) return;
+    const destination = parkingName
+      ? `<p class="muted">📍 คุณอยู่นอกพื้นที่ ม.รามฯ — จะนำทางไปที่ <strong>${parkingName}</strong>` +
+        `${parkingStatus ? ` (ตอนนี้${parkingStatus})` : ''} ซึ่งเป็นลานจอดที่ใกล้จุดหมายที่สุด</p>`
+      : '<p class="muted">📍 คุณอยู่นอกพื้นที่ ม.รามฯ แนะนำเดินทางด้วยรถยนต์หรือขนส่งสาธารณะมายังจุดนัดพบหลัก</p>';
     slot.innerHTML = `
       <div class="nav-info-card">
         <h2>${title}</h2>
-        <p class="muted">📍 คุณอยู่นอกพื้นที่ ม.รามฯ แนะนำเดินทางด้วยรถยนต์หรือขนส่งสาธารณะมายังจุดนัดพบหลัก</p>
+        ${destination}
         <button class="btn btn-primary" id="sheet-action-btn">🚗 นำทางด้วย Google Maps</button>
       </div>
     `;
