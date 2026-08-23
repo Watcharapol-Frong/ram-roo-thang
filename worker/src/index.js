@@ -5,6 +5,7 @@ import { handleParkingReport, handleParkingStatus, handleParkingZone, handlePark
 import { handleGetBuilding, handleListBuildings } from './building.js';
 import { handleListShops } from './shop.js';
 import { handlePostSchedule, handleGetSchedule, handleDeleteSchedule } from './schedule.js';
+import { handleGetUser, handleFeedbackAward, handleSaveCarAward } from './user.js';
 
 // LIFF (liff/) เป็น static site คนละ origin กับ worker นี้เสมอ — ต้องมี CORS ให้ /api/* ถึงจะเรียก
 // fetch() จากฝั่ง browser ได้จริง (ไม่มีมาก่อนหน้านี้ ทำให้ทุก endpoint ใต้ /api/ เรียกจาก LIFF ไม่ได้เลย
@@ -68,6 +69,16 @@ async function route(request, env, ctx) {
   }
   if (method === 'GET' && pathname === '/api/buildings') {
     return handleListBuildings(request, env);
+  }
+
+  if (method === 'GET' && pathname === '/api/user') {
+    return handleGetUser(request, env);
+  }
+  if (method === 'POST' && pathname === '/api/user/feedback') {
+    return handleFeedbackAward(request, env);
+  }
+  if (method === 'POST' && pathname === '/api/user/save-car') {
+    return handleSaveCarAward(request, env);
   }
 
   if (pathname === '/api/schedule') {

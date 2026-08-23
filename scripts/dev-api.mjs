@@ -47,11 +47,25 @@ for (const z of dataset.parking_zones) baseline[`parking_zone:${z.zone_id}`] = J
 for (const s of dataset.services) baseline[`service:${s.service_id}`] = JSON.stringify(s);
 for (const sh of dataset.shops || []) baseline[`shop:${sh.shop_id}`] = JSON.stringify(sh);
 
+const initialSchedules = {
+  'schedule:DEV_USER:demo-1': JSON.stringify({ schedule_id: 'demo-1', course_code: 'RAM1101' }),
+  'schedule:DEV_USER:demo-2': JSON.stringify({ schedule_id: 'demo-2', course_code: 'MGT1001' }),
+  'schedule:DEV_USER:demo-3': JSON.stringify({ schedule_id: 'demo-3', course_code: 'LAW1001' }),
+  'schedule:DEV_USER:demo-4': JSON.stringify({ schedule_id: 'demo-4', course_code: 'ECO1003' }),
+  'schedule:DEV_USER:demo-5': JSON.stringify({ schedule_id: 'demo-5', course_code: 'COS1101' }),
+  'schedule:DEV_USER:demo-6': JSON.stringify({ schedule_id: 'demo-6', course_code: 'THA1001' }),
+  'schedule:DEV_USER:demo-7': JSON.stringify({ schedule_id: 'demo-7', course_code: 'ACC1101' }),
+  'schedule:DEV_USER:demo-8': JSON.stringify({ schedule_id: 'demo-8', course_code: 'POL1100' }),
+  'schedule:DEV_USER:demo-9': JSON.stringify({ schedule_id: 'demo-9', course_code: 'RAM1000' }),
+  'schedule:DEV_USER:demo-10': JSON.stringify({ schedule_id: 'demo-10', course_code: 'ENG1001' }),
+};
+
 const env = {
   BASELINE_DATA: createKV(baseline),
   PARKING_REPORTS: createKV(),
   RATE_LIMIT: createKV(),
-  STUDENT_SCHEDULES: createKV(),
+  STUDENT_SCHEDULES: createKV(initialSchedules),
+  USER_PROFILES: createKV(),
   CHAT_HISTORY_RAM: createKV(),
   LIFF_URL: `http://localhost:8123/?dev=1&api=http://localhost:${port}`,
 };

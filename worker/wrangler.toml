@@ -27,3 +27,7 @@ id = "2de6b2c154d6455d84aa133a0a61e708"
 [[kv_namespaces]]
 binding = "STUDENT_SCHEDULES"
 id = "819201b7251a4a48a73c0079f04ca005"
+
+[[kv_namespaces]]
+binding = "USER_PROFILES"
+id = "16c0bc10538845ce91ae7db025c02831"

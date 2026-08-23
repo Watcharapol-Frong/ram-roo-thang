@@ -899,12 +899,38 @@ function renderDaysLeft(days) {
   return `<span class="schedule-days-left normal">เหลืออีก ${days} วัน</span>`;
 }
 
+// --- ระบบเหรียญ ---
+// ยอดเหรียญอยู่ฝั่ง server ทั้งหมด (worker/src/user.js) ฝั่งนี้แค่ดึงมาแสดงกับสั่งให้รางวัล
+// ห้ามคำนวณยอดเองในนี้เด็ดขาด เดิมเป็น `120 + (localStorage มี flag ไหม ? 30 : 0)` ซึ่งแก้ได้
+// จาก DevTools และหายเกลี้ยงเมื่อผู้ใช้ล้างข้อมูลเบราว์เซอร์
+
+async function fetchUserRecord() {
+  const userId = await getUserId();
+  const data = await fetchJSON(`/api/user?user_id=${encodeURIComponent(userId)}`);
+  return data.user;
+}
+
+// ให้เหรียญค่าบันทึกตำแหน่งรถ (วันละครั้ง) — ไม่บล็อกการบันทึกรถ ถ้าเน็ตล่มก็แค่ไม่ได้เหรียญ
+async function awardSaveCarCoins() {
+  try {
+    const userId = await getUserId();
+    const res = await fetchJSON('/api/user/save-car', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: userId }),
+    });
+    if (res.awarded > 0) SheetManager.showNotice(`ได้รับ ${res.awarded} เหรียญ (รวม ${res.coins} เหรียญ)`);
+  } catch (err) {
+    console.error('ให้เหรียญค่าบันทึกรถไม่สำเร็จ', err);
+  }
+}
+
 // --- สร้าง HTML ของ Profile header แบบ Flat Minimal (เหมือนตัวอย่าง: รูปซ้าย ชื่อขวา ไร้ Card) ---
 // profile = { userId, displayName, pictureUrl, coins } | null
 function renderProfileHeaderHTML(profile) {
   const name = (profile && profile.displayName) ? escapeXml(profile.displayName) : 'นักพัฒนา (Dev)';
-  const bonus = localStorage.getItem('ram-roo-thang:feedback-done') === 'true' ? 30 : 0;
-  const coins = 120 + bonus;
+  // ยอดจริงจาก server — null เมื่อโหลดไม่สำเร็จ แสดง — ไปก่อน ดีกว่าโชว์ 0 ให้เข้าใจผิดว่าเหรียญหาย
+  const coins = (profile && typeof profile.coins === 'number') ? profile.coins : null;
 
   // รูปโปรไฟล์: ถ้ามี pictureUrl ใช้ <img>, ไม่มีใช้ตัวอักษรแรกของชื่อ
   const firstChar = (profile && profile.displayName)
@@ -926,15 +952,14 @@ function renderProfileHeaderHTML(profile) {
             </svg>
           </div>
         </div>
-        <div class="profile-flat-sub">${coins} เหรียญ</div>
+        <div class="profile-flat-sub">${coins === null ? '—' : coins} เหรียญ</div>
       </div>
     </div>
   `;
 }
 
 // --- สร้าง HTML แถบแบบประเมิน (ใต้ Profile ไร้ Card, Pure Typography) ---
-function renderFeedbackTeaserHTML() {
-  const isDone = localStorage.getItem('ram-roo-thang:feedback-done') === 'true';
+function renderFeedbackTeaserHTML(isDone) {
   if (isDone) {
     return `
       <div class="feedback-flat-banner is-done">
@@ -1336,12 +1361,29 @@ async function renderFeedbackView() {
     } catch (_) {}
 
     localStorage.setItem('ram-roo-thang:feedback-done', 'true');
+
+    // เหรียญให้ฝั่ง server และให้ครั้งเดียวต่อบัญชี — เดิมนับจาก flag ใน localStorage อย่างเดียว
+    // ล้างข้อมูลเบราว์เซอร์แล้วกดรับใหม่ได้ไม่จำกัด
+    let awarded = 0;
+    try {
+      const res = await fetchJSON('/api/user/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: payload.userId }),
+      });
+      awarded = res.awarded || 0;
+    } catch (err) {
+      console.error('ให้เหรียญค่าแบบประเมินไม่สำเร็จ', err);
+    }
+
     // ถ้ายังไม่ได้ตั้ง endpoint ก็ไม่ใช่ความผิดผู้ใช้ ไม่ต้องขู่ — แต่ถ้าตั้งไว้แล้วส่งไม่ผ่าน
     // ต้องบอกตามจริง ไม่งั้นทั้งคนตอบและเราเข้าใจว่าเก็บได้แล้วทั้งที่ข้อมูลไม่ถึงไหน
     if (endpointUrl && !syncedToSheet) {
       showToast('บันทึกในเครื่องแล้ว แต่ส่งเข้าระบบไม่สำเร็จ');
+    } else if (awarded > 0) {
+      showToast(`ส่งแบบประเมินสำเร็จ! ได้รับ ${awarded} เหรียญ`);
     } else {
-      showToast('ส่งแบบประเมินสำเร็จ! ได้รับ 30 เหรียญ');
+      showToast('ส่งแบบประเมินสำเร็จ!');
     }
     renderProfileView();
   });
@@ -1454,14 +1496,21 @@ async function renderFullProfile(container) {
   container.innerHTML = '<p style="text-align:center;padding:40px 0;color:var(--muted)">กำลังโหลด...</p>';
 
   let profile = null;
-  try {
-    profile = await getUserProfile();
-  } catch (_) { /* แสดง header fallback */ }
+  let userRecord = null;
+  // โหลดขนานกัน — profile มาจาก LINE SDK ส่วนเหรียญมาจาก worker คนละแหล่งไม่ต้องรอกัน
+  // และพังแยกกันได้: ดึงเหรียญไม่ได้ก็ยังเห็นชื่อ ดึงชื่อไม่ได้ก็ยังเห็นเหรียญ
+  const [profileResult, userResult] = await Promise.allSettled([getUserProfile(), fetchUserRecord()]);
+  if (profileResult.status === 'fulfilled') profile = profileResult.value;
+  else console.error('ดึงโปรไฟล์ LINE ไม่สำเร็จ', profileResult.reason);
+  if (userResult.status === 'fulfilled') userRecord = userResult.value;
+  else console.error('ดึงข้อมูลผู้ใช้/เหรียญไม่สำเร็จ', userResult.reason);
+  if (profile && userRecord) profile.coins = userRecord.coins;
+  else if (userRecord) profile = { coins: userRecord.coins };
 
   container.innerHTML = `
     <div class="profile-flat-container">
       ${renderProfileHeaderHTML(profile)}
-      ${renderFeedbackTeaserHTML()}
+      ${renderFeedbackTeaserHTML(Boolean(userRecord && userRecord.awards && userRecord.awards.feedback_at))}
       <div id="profile-schedule-slot"></div>
     </div>
     ${renderBottomNavHTML('profile')}
@@ -2259,6 +2308,7 @@ function saveCar(location, zoneName, approximate) {
   appState.car = car;
   updateCarPin();
   updateCarButtonAvailability();
+  awardSaveCarCoins();   // ไม่ await — ตำแหน่งรถบันทึกในเครื่องเสร็จแล้ว เหรียญตามมาทีหลังได้
   return car;
 }
 
@@ -2445,12 +2495,14 @@ async function submitParkingReport(here, location, status) {
   }
   try {
     const userId = await getUserId();
-    await fetchJSON('/api/parking/report', {
+    const res = await fetchJSON('/api/parking/report', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: userId, zone_id: zoneId, status, user_lat: location.lat, user_lng: location.lng }),
     });
-    SheetManager.showNotice('ขอบคุณครับ รายงานสภาพที่จอดเรียบร้อย');
+    SheetManager.showNotice(res.awarded > 0
+      ? `ขอบคุณครับ ได้รับ ${res.awarded} เหรียญ (รวม ${res.coins} เหรียญ)`
+      : 'ขอบคุณครับ รายงานสภาพที่จอดเรียบร้อย');
     await loadParkingZones();
     renderLayers();
   } catch (err) {

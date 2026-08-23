@@ -11,6 +11,7 @@ import {
   getLastReportedAt,
   setLastReportedAt,
 } from './data.js';
+import { awardParkingReport } from './user.js';
 
 const RATE_LIMIT_MINUTES = 30;
 const GEOFENCE_RADIUS_METERS = 150;
@@ -75,7 +76,16 @@ export async function handleParkingReport(request, env) {
   );
   await setLastReportedAt(env, user_id, reportedAt);
 
-  return jsonResponse({ status: 'SUCCESS' });
+  // 4. ให้เหรียญ — อยู่หลัง geofence + rate limit จึงกดรัวๆ เพื่อฟาร์มเหรียญไม่ได้
+  //    ถ้าตรงนี้พังไม่ควรทำให้รายงานที่บันทึกไปแล้วกลายเป็นล้มเหลว แค่ไม่ได้เหรียญรอบนี้
+  let reward = { coins: null, awarded: 0 };
+  try {
+    reward = await awardParkingReport(env, user_id);
+  } catch (e) {
+    console.error('awardParkingReport error', e);
+  }
+
+  return jsonResponse({ status: 'SUCCESS', coins: reward.coins, awarded: reward.awarded });
 }
 
 export async function handleParkingStatus(request, env) {
