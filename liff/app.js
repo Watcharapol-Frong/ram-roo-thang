@@ -86,7 +86,8 @@ const MAPS_LOAD_TIMEOUT_MS = 10000;
 setTimeout(() => mapsBoot.reject(new Error('Google Maps โหลดไม่ทันเวลา')), MAPS_LOAD_TIMEOUT_MS);
 
 if (DEV_MODE) {
-  window.liff = { getProfile: async () => ({ userId: 'DEV_USER' }) };
+  // pictureUrl: null → แสดง avatar ตัวอักษรแทนรูป (ทดสอบ fallback path ได้ทันที)
+  window.liff = { getProfile: async () => ({ userId: 'DEV_USER', displayName: 'นักพัฒนา (Dev)', pictureUrl: null }) };
   liffBoot.resolve();
 } else {
   // ครอบ try/catch เพราะถ้า sdk.js (static.line-scdn.net) โหลดไม่ขึ้น ตัวแปร liff จะไม่มีอยู่จริง
@@ -187,6 +188,27 @@ async function getUserId() {
   return cachedUserId;
 }
 
+// getUserProfile — ดึง profile เต็ม (userId + displayName + pictureUrl) สำหรับแสดงผลใน LIFF UI เท่านั้น
+// ไม่ส่งค่า displayName/pictureUrl ไป backend และไม่เก็บ localStorage (CONTEXT.md "PII")
+// เรียกซ้ำได้ปลอดภัย — cache ไว้ใน memory ตลอด session
+let cachedProfile = null;
+async function getUserProfile() {
+  if (cachedProfile) return cachedProfile;
+  await liffBoot.promise;
+  const raw = await liff.getProfile();
+  cachedProfile = {
+    userId: raw.userId,
+    displayName: raw.displayName || null,
+    pictureUrl: raw.pictureUrl || null,
+  };
+  // sync กับ cachedUserId เผื่อ getUserId() ยังไม่เคยถูกเรียก
+  if (!cachedUserId) {
+    cachedUserId = raw.userId;
+    appState.user.lineUserId = cachedUserId;
+  }
+  return cachedProfile;
+}
+
 // Haversine — คู่กับ worker/src/utils.js (ฝั่ง client ใช้หาลานจอดที่ใกล้ที่สุดเท่านั้น
 // การตัดสิน geofence จริงยังทำที่ backend เสมอ ตาม MVP-SPEC §6.1)
 function haversineDistanceMeters(lat1, lng1, lat2, lng2) {
@@ -247,13 +269,56 @@ const LAYER_STYLE = {
 // ตั้งกล้องด้วย zoom ไม่ใช่ altitude จึงต้องแปลงก่อน ใช้สูตรเทียบมาตรฐานของ Google Earth
 //   altitude = 35,200,000 / 2^zoom   =>   zoom = log2(35,200,000 / altitude)
 // เป็นค่าประมาณ ไม่ได้คิดผลของละติจูด (ที่ 13.75° ต่างราว 3%) ถ้าอยากเป๊ะกว่านี้ต้องวัดจากจอจริง
-// 250 ม. -> zoom ~17.10 / 165 ม. -> zoom ~17.70
+// 2D เป็น raster ซึ่งรองรับเฉพาะ zoom จำนวนเต็ม ตั้ง 250 ม. ไปก็โดนปัดเป็น zoom 17 (=268 ม.)
+// อยู่ดี จึงใส่ 268 ไปตรงๆ ให้ค่าที่เขียนไว้ตรงกับที่เห็นจริง (zoom 17 พอดี)
+// 3D เป็น vector รองรับ zoom ทศนิยม 165 ม. -> zoom 17.70 ได้เป๊ะ
 const ZOOM_REFERENCE_ALTITUDE_M = 35200000;
 
+// ป้าย POI ของ Google ซ่อนได้จากโค้ดเฉพาะแผนที่แบบ raster (ห้ามมี mapId) เท่านั้น —
+// ถ้ามี mapId Google จะไม่รับ styles และบังคับให้ไปตั้งในคอนโซลแทน แต่ style ในคอนโซล
+// ก็ทำให้ตึก 3D หายทุกครั้งที่ลอง จึงแยกเป็นสองโหมดคนละชนิดแผนที่ไปเลย:
+//   2D = raster ไม่มี mapId -> ใส่ styles ซ่อนป้ายได้จากในโค้ด แต่ไม่มีตึก 3D (ซึ่งโหมด 2D ไม่ต้องใช้)
+//   3D = vector มี mapId (ต้องไม่ผูก style ในคอนโซล) -> ได้ตึก 3D แต่ป้าย Google จะโผล่มาด้วย
+// mapId เปลี่ยนหลังสร้างแผนที่ไม่ได้ (ทดสอบแล้ว setOptions({mapId}) ถูกเพิกเฉย) การสลับโหมด
+// จึงต้องสร้าง map instance ใหม่ทั้งก้อนแล้ววาดทุกอย่างกลับ ดู rebuildMap()
+const MINIMAL_MAP_STYLES = [
+  { featureType: 'poi', stylers: [{ visibility: 'off' }] },
+  { featureType: 'transit', stylers: [{ visibility: 'off' }] },
+  { featureType: 'administrative', elementType: 'labels', stylers: [{ visibility: 'off' }] },
+  { featureType: 'road', elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
+];
+
 const CAMERA_PRESETS = {
-  '2d': { altitudeMeters: 250, tilt: 0, heading: 0 },
-  '3d': { altitudeMeters: 165, tilt: 60, heading: 20 },
+  '2d': { altitudeMeters: 268, tilt: 0, heading: 0, mapId: null },
+  '3d': { altitudeMeters: 165, tilt: 60, heading: 20, mapId: GOOGLE_MAPS_MAP_ID },
 };
+
+function currentMode() {
+  return appState.map.is3DMode ? '3d' : '2d';
+}
+
+function createMapInstance(center) {
+  const preset = CAMERA_PRESETS[currentMode()];
+  const options = {
+    center,
+    zoom: altitudeToZoom(preset.altitudeMeters),
+    tilt: preset.tilt,
+    heading: preset.heading,
+    disableDefaultUI: true,
+    zoomControl: false,
+    clickableIcons: false,
+  };
+  // ใส่ได้อย่างใดอย่างหนึ่งเท่านั้น ใส่พร้อมกัน Google จะทิ้ง styles แล้วเตือนในคอนโซล
+  if (preset.mapId) options.mapId = preset.mapId;
+  else options.styles = MINIMAL_MAP_STYLES;
+
+  const map = new google.maps.Map(document.getElementById('map'), options);
+  appState.map.instance = map;
+  RouteCalculator.init(map);
+  map.addListener('center_changed', updateLayerToggleAvailability);
+  map.addListener('zoom_changed', updateBuildingMarkerVisibility);
+  return map;
+}
 
 function altitudeToZoom(altitudeMeters) {
   return Math.log2(ZOOM_REFERENCE_ALTITUDE_M / altitudeMeters);
@@ -365,19 +430,8 @@ async function renderMapView({ presetDestId, presetZoneId } = {}) {
   userPin = null;
   Object.keys(layerOverlays).forEach((k) => { layerOverlays[k] = []; });
 
-  appState.map.instance = new google.maps.Map(document.getElementById('map'), {
-    center: CAMPUS_CONSTANTS.INITIAL_VIEW.center,
-    zoom: altitudeToZoom(CAMERA_PRESETS['2d'].altitudeMeters),
-    tilt: CAMERA_PRESETS['2d'].tilt,
-    heading: CAMERA_PRESETS['2d'].heading,
-    mapId: GOOGLE_MAPS_MAP_ID,
-    disableDefaultUI: true,
-    zoomControl: false,
-    clickableIcons: false,
-  });
-  RouteCalculator.init(appState.map.instance);
+  createMapInstance(CAMPUS_CONSTANTS.INITIAL_VIEW.center);
   SheetManager.setOnClose(clearTarget);
-  appState.map.instance.addListener('center_changed', updateLayerToggleAvailability);
   appState.map.instance.addListener('zoom_changed', updateBuildingMarkerVisibility);
   updateLayerToggleAvailability();
 
@@ -421,7 +475,6 @@ async function renderMapView({ presetDestId, presetZoneId } = {}) {
   // แล้วโดนปัดกลับเป็น 16 หมด) ต้องรอ 'tilesloaded' ถึงจะยึดค่าทศนิยมได้จริง
   // สั่งทันทีหนึ่งครั้งด้วยเผื่อ tile โหลดเสร็จไปก่อนแล้ว
   applyViewMode();
-  google.maps.event.addListenerOnce(appState.map.instance, 'tilesloaded', applyViewMode);
 }
 
 // deep link จาก Flex Message ส่งมาเป็น building_id ของฐานข้อมูลบอท (มี alias/ข้อมูลบริการผูกอยู่)
@@ -679,6 +732,262 @@ function centerOnFeatures(features) {
   updateBuildingMarkerVisibility();
 }
 
+// --- Profile view (MVP-SPEC §7, docs/adr/0003) ---
+// ?mode=profile → LINE profile header → consent gate (localStorage) → ฟอร์มบันทึกวิชาสอบ + ลิสต์/ลบ
+
+// --- helper: คำนวณวันที่เหลือถึงสอบ ---
+function daysUntilExam(isoString) {
+  if (!isoString) return null;
+  const exam = new Date(isoString);
+  if (Number.isNaN(exam.getTime())) return null;
+  return Math.ceil((exam - Date.now()) / (1000 * 60 * 60 * 24));
+}
+
+// --- helper: badge "เหลืออีก X วัน" ---
+function renderDaysLeft(days) {
+  if (days === null) return '';
+  if (days < 0)  return '<span class="schedule-days-left past">สอบไปแล้ว</span>';
+  if (days === 0) return '<span class="schedule-days-left urgent">วันนี้!</span>';
+  if (days <= 3) return `<span class="schedule-days-left urgent">เหลืออีก ${days} วัน</span>`;
+  if (days <= 7) return `<span class="schedule-days-left soon">เหลืออีก ${days} วัน</span>`;
+  return `<span class="schedule-days-left normal">เหลืออีก ${days} วัน</span>`;
+}
+
+// --- สร้าง HTML ของ Profile header card ---
+// profile = { userId, displayName, pictureUrl } | null
+function renderProfileHeaderHTML(profile) {
+  const name = (profile && profile.displayName) ? escapeXml(profile.displayName) : '—';
+  // แสดง userId 8 ตัวแรก ตัดส่วนที่เหลือเป็น "..." (ไม่เปิดเผย ID เต็มบนหน้าจอ)
+  const uid = (profile && profile.userId)
+    ? escapeXml(profile.userId.slice(0, 8) + (profile.userId.length > 8 ? '…' : ''))
+    : '';
+
+  // รูปโปรไฟล์: ถ้ามี pictureUrl ใช้ <img>, ไม่มีใช้ตัวอักษรแรกของชื่อ
+  const firstChar = (profile && profile.displayName)
+    ? escapeXml(profile.displayName.charAt(0).toUpperCase())
+    : '?';
+  const avatarHTML = (profile && profile.pictureUrl)
+    ? `<img class="profile-avatar" src="${escapeXml(profile.pictureUrl)}" alt="รูปโปรไฟล์ LINE" />`
+    : `<div class="profile-avatar-placeholder">${firstChar}</div>`;
+
+  // SVG arc: circumference ≈ 364 px (r=58), dasharray 215 = ~60% ของวง
+  // rotate(-145) วางจุดเริ่มต้นที่ประมาณ 11 นาฬิกา ไปตามเข็มถึงประมาณ 5 นาฬิกา (เหมือน mockup)
+  return `
+    <div class="card profile-header">
+      <div class="profile-avatar-ring">
+        <svg class="ring-svg" viewBox="0 0 126 126" fill="none" aria-hidden="true">
+          <circle cx="63" cy="63" r="58"
+            stroke="#06c755"
+            stroke-width="5"
+            stroke-linecap="round"
+            stroke-dasharray="215 149"
+            transform="rotate(-145 63 63)"
+          />
+        </svg>
+        ${avatarHTML}
+        <div class="profile-badge-wrap">
+          <span class="profile-badge">LINE</span>
+        </div>
+      </div>
+      <h2 class="profile-name">${name}</h2>
+      ${uid ? `<p class="profile-sub">ID: ${uid}</p>` : ''}
+    </div>
+  `;
+}
+
+// renderProfileView — entry point สำหรับ ?mode=profile
+// โหลด LINE profile ก่อน (สำหรับ header) แล้วค่อยตรวจ consent gate
+async function renderProfileView() {
+  const container = getApp();
+  container.innerHTML = '<p style="text-align:center;padding:40px 0;color:var(--muted)">กำลังโหลด...</p>';
+
+  // ดึง LINE profile สำหรับ header — fail silently ถ้า LIFF ใช้ไม่ได้
+  let profile = null;
+  try {
+    profile = await getUserProfile();
+  } catch (_) { /* แสดง header แบบไม่มีข้อมูล (ยังแสดงส่วนอื่นได้ตามปกติ) */ }
+
+  // วาง profile header + slot สำหรับ schedule section
+  container.innerHTML = `
+    ${renderProfileHeaderHTML(profile)}
+    <div id="profile-schedule-slot"></div>
+  `;
+
+  const slot = document.getElementById('profile-schedule-slot');
+  const hasConsent = localStorage.getItem(CONSENT_STORAGE_KEY) === 'true';
+  if (hasConsent) {
+    renderScheduleView(slot);
+  } else {
+    renderConsentGate(slot);
+  }
+}
+
+// renderConsentGate — UI acknowledgment เฉยๆ ไม่ใช่ PDPA flow เพราะไม่มี PII (CONTEXT.md)
+function renderConsentGate(container) {
+  container.innerHTML = `
+    <div class="card schedule-section">
+      <h2>บันทึกวิชาสอบ</h2>
+      <p>ฟีเจอร์นี้เก็บแค่ <strong>รหัสวิชา อาคาร และเวลาสอบ</strong> ผูกกับบัญชี LINE ของคุณเท่านั้น
+         ไม่เก็บชื่อหรือเบอร์โทร</p>
+      <button class="btn btn-primary" id="consent-accept-btn">เข้าใจแล้ว ใช้งานต่อ</button>
+    </div>
+  `;
+  document.getElementById('consent-accept-btn').addEventListener('click', () => {
+    localStorage.setItem(CONSENT_STORAGE_KEY, 'true');
+    renderScheduleView(container);
+  });
+}
+
+async function renderScheduleView(container) {
+  container.innerHTML = '<p style="text-align:center;padding:20px 0;color:var(--muted)">กำลังโหลด...</p>';
+
+  let userId;
+  try {
+    userId = await getUserId();
+  } catch (err) {
+    container.innerHTML = '<div class="card"><p class="muted">โหลดข้อมูลผู้ใช้ไม่สำเร็จ กรุณาเปิดใหม่จากแชท</p></div>';
+    return;
+  }
+
+  let buildingsData;
+  try {
+    buildingsData = await fetchJSON('/api/buildings');
+  } catch (err) {
+    buildingsData = { buildings: [] };
+  }
+
+  renderScheduleForm(container, userId, buildingsData.buildings || []);
+  await refreshScheduleList(userId);
+}
+
+function renderScheduleForm(container, userId, buildings) {
+  const options = buildings
+    .map((b) => `<option value="${escapeXml(b.building_id)}">${escapeXml(b.name_th)}</option>`)
+    .join('');
+
+  // min datetime = ตอนนี้ (ห้ามเลือกวันที่ผ่านมา)
+  const now = new Date();
+  now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+  const minDatetime = now.toISOString().slice(0, 16);
+
+  container.innerHTML = `
+    <div class="card schedule-section">
+      <h2>บันทึกวิชาสอบ</h2>
+      <form id="schedule-form">
+        <label>รหัสวิชา
+          <input type="text" name="course_code" placeholder="เช่น LAW1001" required />
+        </label>
+        <label>อาคารสอบ
+          <select name="building_id" required>
+            <option value="" disabled selected>เลือกอาคาร</option>
+            ${options}
+          </select>
+        </label>
+        <label>วันเวลาสอบ
+          <input type="datetime-local" name="exam_at" min="${minDatetime}" required />
+        </label>
+        <button type="submit" class="btn btn-primary">บันทึก</button>
+        <p id="schedule-form-result" class="schedule-form-result" aria-live="polite"></p>
+      </form>
+    </div>
+    <div class="card">
+      <h2>วิชาที่บันทึกไว้</h2>
+      <ul id="schedule-list" class="schedule-list">
+        <li class="schedule-empty">กำลังโหลด...</li>
+      </ul>
+    </div>
+  `;
+
+  document.getElementById('schedule-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const formData = new FormData(e.target);
+    const resultEl = document.getElementById('schedule-form-result');
+    const submitBtn = e.target.querySelector('[type="submit"]');
+
+    resultEl.textContent = 'กำลังบันทึก...';
+    resultEl.className = 'schedule-form-result';
+    submitBtn.disabled = true;
+
+    try {
+      await fetchJSON('/api/schedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: userId,
+          course_code: formData.get('course_code'),
+          building_id: formData.get('building_id'),
+          exam_at: new Date(formData.get('exam_at')).toISOString(),
+        }),
+      });
+      resultEl.textContent = '✓ บันทึกสำเร็จ';
+      resultEl.className = 'schedule-form-result success';
+      e.target.reset();
+      await refreshScheduleList(userId);
+    } catch (err) {
+      resultEl.textContent = '✕ บันทึกไม่สำเร็จ กรุณาลองใหม่';
+      resultEl.className = 'schedule-form-result error';
+    } finally {
+      submitBtn.disabled = false;
+    }
+  });
+}
+
+async function refreshScheduleList(userId) {
+  const listEl = document.getElementById('schedule-list');
+  if (!listEl) return;
+
+  let data;
+  try {
+    data = await fetchJSON(`/api/schedule?user_id=${encodeURIComponent(userId)}`);
+  } catch (err) {
+    listEl.innerHTML = '<li class="schedule-empty">โหลดรายการไม่สำเร็จ</li>';
+    return;
+  }
+
+  // เรียงตามวันสอบจากใกล้สุด → ไกลสุด
+  const schedules = (data.schedules || []).sort(
+    (a, b) => new Date(a.exam_at) - new Date(b.exam_at)
+  );
+
+  if (schedules.length === 0) {
+    listEl.innerHTML = '<li class="schedule-empty">ยังไม่มีวิชาที่บันทึกไว้</li>';
+    return;
+  }
+
+  listEl.innerHTML = schedules.map((s) => {
+    const days = daysUntilExam(s.exam_at);
+    return `
+      <li class="schedule-item">
+        <div class="schedule-item-info">
+          <div class="schedule-item-code">${escapeXml(s.course_code)}</div>
+          <div class="schedule-item-detail">
+            ${escapeXml(s.building_name || s.building_id)} — ${formatExamAt(s.exam_at)}
+          </div>
+          ${renderDaysLeft(days)}
+        </div>
+        <button class="btn-delete" data-schedule-id="${escapeXml(s.schedule_id)}">ลบ</button>
+      </li>
+    `;
+  }).join('');
+
+  listEl.querySelectorAll('.btn-delete').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      // ยืนยันก่อนลบ — ป้องกันกดผิด
+      if (!confirm('ต้องการลบวิชานี้ออกจากรายการ?')) return;
+      btn.disabled = true;
+      try {
+        await fetchJSON(
+          `/api/schedule?user_id=${encodeURIComponent(userId)}&schedule_id=${encodeURIComponent(btn.dataset.scheduleId)}`,
+          { method: 'DELETE' }
+        );
+        await refreshScheduleList(userId);
+      } catch (err) {
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
 // ซูมออกไกลๆ ป้ายชิปจะทับกันเป็นพืด ซ่อนไปเลยดีกว่า เหลือแต่รูปทรงอาคาร
 // getZoom() คืน undefined ได้ถ้าแผนที่ยังตั้งตัวไม่เสร็จ — default เป็น "โชว์" ไม่งั้นหมุดหายหมดเงียบๆ
 function updateBuildingMarkerVisibility() {
@@ -716,19 +1025,50 @@ function renderMapUnavailable() {
 function toggle3D() {
   const btn = document.getElementById('layer-toggle-btn');
   if (!btn || btn.disabled || !appState.map.instance) return;
-  appState.map.is3DMode = !appState.map.is3DMode;
-  applyViewMode();
-  btn.textContent = appState.map.is3DMode ? '2D' : '3D';
-  btn.classList.toggle('active', appState.map.is3DMode);
+  setViewMode(!appState.map.is3DMode);
 }
 
+function setViewMode(is3D) {
+  if (appState.map.is3DMode === is3D) return;
+  appState.map.is3DMode = is3D;
+  const btn = document.getElementById('layer-toggle-btn');
+  if (btn) btn.textContent = is3D ? '2D' : '3D';
+  rebuildMap();
+}
+
+// สลับโหมดต้องสร้าง map instance ใหม่ (mapId เปลี่ยนทีหลังไม่ได้) overlay ทุกตัวผูกกับแผนที่เดิม
+// ทั้งหมดจึงต้องทิ้งแล้ววาดใหม่ — ถ้ามีจุดหมายค้างอยู่ก็เลือกซ้ำให้ เพื่อให้เส้นทาง/หมุด/การ์ดกลับมา
+// เหมือนก่อนกดสลับ ผู้ใช้จะเห็นแค่แผนที่กระพริบแวบเดียว
+function rebuildMap() {
+  const previous = appState.map.instance;
+  const center = previous.getCenter();
+  const target = appState.target;
+
+  buildingMarkers.length = 0;
+  Object.keys(layerOverlays).forEach((k) => { layerOverlays[k] = []; });
+  targetPin = null;
+  userPin = null;
+  SheetManager.hide();
+
+  createMapInstance({ lat: center.lat(), lng: center.lng() });
+  renderLayers();
+  if (appState.user.location) updateUserPin(appState.user.location);
+  if (target) selectTarget(target);
+  applyViewMode();
+}
+
+// Google ปัด zoom ทศนิยมทิ้งระหว่างที่ยังโหลด tile อยู่ ต้องรอ tilesloaded ถึงจะยึดค่าได้จริง
 function applyViewMode() {
   const map = appState.map.instance;
-  const preset = CAMERA_PRESETS[appState.map.is3DMode ? '3d' : '2d'];
-  map.setZoom(altitudeToZoom(preset.altitudeMeters));
-  map.setTilt(preset.tilt);
-  map.setHeading(preset.heading);
-  nudgeMapRepaint(map);
+  const preset = CAMERA_PRESETS[currentMode()];
+  const apply = () => {
+    map.setZoom(altitudeToZoom(preset.altitudeMeters));
+    map.setTilt(preset.tilt);
+    map.setHeading(preset.heading);
+    nudgeMapRepaint(map);
+  };
+  apply();
+  google.maps.event.addListenerOnce(map, 'tilesloaded', apply);
 }
 
 // vector map ของ Google ไม่วาดเฟรมใหม่ให้เอง หลังเปลี่ยนสถานะกล้องด้วยโค้ด (setTilt/setHeading/
@@ -745,12 +1085,9 @@ function updateLayerToggleAvailability() {
   const center = appState.map.instance.getCenter();
   const allowed = isWithinCampusBounds({ lat: center.lat(), lng: center.lng() });
   btn.disabled = !allowed;
-  if (!allowed && appState.map.is3DMode) {
-    appState.map.is3DMode = false;
-    applyViewMode();
-    btn.textContent = '3D';
-    btn.classList.remove('active');
-  }
+  // ออกนอกรั้วแล้วบังคับกลับ 2D — setViewMode เช็คเองว่าโหมดเปลี่ยนจริงไหม ไม่งั้น listener
+  // center_changed ที่ยิงตอน rebuild จะวนสร้างแผนที่ซ้ำไม่รู้จบ
+  if (!allowed && appState.map.is3DMode) setViewMode(false);
 }
 
 // --- หมุดจุดหมาย + หมุดตำแหน่งผู้ใช้ ---
@@ -914,161 +1251,6 @@ function handleGpsDenied(target) {
   runContextRouting(target, CAMPUS_CONSTANTS.DEFAULT_ORIGIN, { isFallbackOrigin: true });
 }
 
-// --- Profile view (MVP-SPEC §7, docs/adr/0003) ---
-// ?mode=profile -> consent gate (localStorage) -> ฟอร์มบันทึกวิชาสอบ + ลิสต์/ลบ
-
-function renderProfileView() {
-  const container = getApp();
-  const hasConsent = localStorage.getItem(CONSENT_STORAGE_KEY) === 'true';
-  if (hasConsent) {
-    renderScheduleView(container);
-  } else {
-    renderConsentGate(container);
-  }
-}
-
-function renderConsentGate(container) {
-  // UI acknowledgment เฉยๆ ไม่ใช่ PDPA consent flow ตามกฎหมาย เพราะไม่มี PII ให้ขอความยินยอม
-  // (CONTEXT.md "Consent Gate (Lightweight)")
-  container.innerHTML = `
-    <div class="card">
-      <h2>บันทึกวิชาสอบ</h2>
-      <p>ฟีเจอร์นี้เก็บแค่ รหัสวิชา อาคาร และเวลาสอบ ผูกกับบัญชี LINE ของคุณเท่านั้น ไม่เก็บชื่อหรือเบอร์โทร</p>
-      <button class="btn btn-primary" id="consent-accept-btn">เข้าใจแล้ว ใช้งานต่อ</button>
-    </div>
-  `;
-  document.getElementById('consent-accept-btn').addEventListener('click', () => {
-    localStorage.setItem(CONSENT_STORAGE_KEY, 'true');
-    renderScheduleView(container);
-  });
-}
-
-async function renderScheduleView(container) {
-  container.innerHTML = '<p>กำลังโหลด...</p>';
-
-  let userId;
-  try {
-    userId = await getUserId();
-  } catch (err) {
-    renderError('โหลดข้อมูลผู้ใช้ไม่สำเร็จ กรุณาเปิดใหม่จากแชท');
-    return;
-  }
-
-  let buildingsData;
-  try {
-    buildingsData = await fetchJSON('/api/buildings');
-  } catch (err) {
-    buildingsData = { buildings: [] };
-  }
-
-  renderScheduleForm(container, userId, buildingsData.buildings || []);
-  await refreshScheduleList(userId);
-}
-
-function renderScheduleForm(container, userId, buildings) {
-  const options = buildings.map((b) => `<option value="${b.building_id}">${b.name_th}</option>`).join('');
-
-  container.innerHTML = `
-    <div class="card">
-      <h2>บันทึกวิชาสอบ</h2>
-      <form id="schedule-form">
-        <label>รหัสวิชา
-          <input type="text" name="course_code" required />
-        </label>
-        <label>อาคารสอบ
-          <select name="building_id" required>
-            <option value="" disabled selected>เลือกอาคาร</option>
-            ${options}
-          </select>
-        </label>
-        <label>วันเวลาสอบ
-          <input type="datetime-local" name="exam_at" required />
-        </label>
-        <button type="submit" class="btn btn-primary">บันทึก</button>
-      </form>
-      <p id="schedule-form-result" class="muted"></p>
-    </div>
-    <div class="card">
-      <h2>วิชาที่บันทึกไว้</h2>
-      <ul id="schedule-list"><li class="muted">กำลังโหลด...</li></ul>
-    </div>
-  `;
-
-  document.getElementById('schedule-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const formData = new FormData(e.target);
-    const resultEl = document.getElementById('schedule-form-result');
-    resultEl.textContent = 'กำลังบันทึก...';
-
-    try {
-      await fetchJSON('/api/schedule', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: userId,
-          course_code: formData.get('course_code'),
-          building_id: formData.get('building_id'),
-          exam_at: new Date(formData.get('exam_at')).toISOString(),
-        }),
-      });
-      resultEl.textContent = 'บันทึกสำเร็จ';
-      e.target.reset();
-      await refreshScheduleList(userId);
-    } catch (err) {
-      resultEl.textContent = 'บันทึกไม่สำเร็จ กรุณาลองใหม่';
-    }
-  });
-}
-
-async function refreshScheduleList(userId) {
-  const listEl = document.getElementById('schedule-list');
-  if (!listEl) return;
-
-  let data;
-  try {
-    data = await fetchJSON(`/api/schedule?user_id=${encodeURIComponent(userId)}`);
-  } catch (err) {
-    listEl.innerHTML = '<li class="muted">โหลดรายการไม่สำเร็จ</li>';
-    return;
-  }
-
-  const schedules = data.schedules || [];
-  if (schedules.length === 0) {
-    listEl.innerHTML = '<li class="muted">ยังไม่มีรายการที่บันทึกไว้</li>';
-    return;
-  }
-
-  listEl.innerHTML = schedules
-    .map(
-      (s) => `
-        <li>
-          <div>
-            <strong>${s.course_code}</strong>
-            <div class="muted">${s.building_name || s.building_id} — ${formatExamAt(s.exam_at)}</div>
-          </div>
-          <button class="btn btn-delete" data-schedule-id="${s.schedule_id}">ลบ</button>
-        </li>
-      `
-    )
-    .join('');
-
-  listEl.querySelectorAll('.btn-delete').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      btn.disabled = true;
-      try {
-        await fetchJSON(
-          `/api/schedule?user_id=${encodeURIComponent(userId)}&schedule_id=${encodeURIComponent(
-            btn.dataset.scheduleId
-          )}`,
-          { method: 'DELETE' }
-        );
-        await refreshScheduleList(userId);
-      } catch (err) {
-        btn.disabled = false;
-      }
-    });
-  });
-}
 
 // โหลด Google Maps JS API script แบบ dynamic (ไม่ผูกไว้ตรงๆ ใน index.html) เพื่อให้ GOOGLE_MAPS_API_KEY
 // มี source of truth เดียวอยู่ในไฟล์นี้ — เรียก initApp() (นิยามไว้ด้านบน) เป็น callback เมื่อโหลดเสร็จ
