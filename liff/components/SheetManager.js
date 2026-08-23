@@ -61,6 +61,30 @@
     syncSheetHeight();
   }
 
+  // Scenario: ไม่ได้สิทธิ์ GPS — ไม่รู้ว่าผู้ใช้อยู่ไหน จึงไม่ควรมีปุ่ม "เริ่มเดินทาง" เพราะการนำทาง
+  // แบบเลี้ยวซ้ายเลี้ยวขวาจากจุดที่เดาเอาเองอันตรายกว่าไม่มีให้เลย — เปลี่ยนเป็นชวนเปิดตำแหน่งแทน
+  // ซึ่งเป็นสิ่งเดียวที่ทำแล้วสถานการณ์ดีขึ้นจริง ส่วนระยะทางยังบอกไว้เป็นข้อมูลอ้างอิงคร่าวๆ
+  function showGpsDeniedSheet({ title, distanceText, durationText, onEnableLocation }) {
+    const slot = sheetSlot();
+    if (!slot) return;
+    slot.innerHTML = `
+      <div class="nav-info-card">
+        <div class="sheet-handle"></div>
+        <button class="sheet-close" id="sheet-close-btn" aria-label="ยกเลิกจุดหมาย">&times;</button>
+        <h2>${title}</h2>
+        <div class="nav-stats">
+          <span><small>ระยะเวลา</small>${durationText}</span>
+          <span><small>ระยะทาง</small>${distanceText}</span>
+        </div>
+        <p class="muted sheet-hint">ตัวเลขนี้วัดจากประตูหน้ามหาวิทยาลัย เปิดตำแหน่งเพื่อดูเส้นทางจากจุดที่คุณยืนอยู่จริง</p>
+        <button class="btn btn-primary" id="sheet-action-btn">เปิดตำแหน่ง</button>
+      </div>
+    `;
+    document.getElementById('sheet-action-btn').addEventListener('click', onEnableLocation);
+    bindClose();
+    syncSheetHeight();
+  }
+
   // Scenario: อยู่นอก ม.รามฯ — ไม่คำนวณระยะเดิน/ขับข้ามเมือง ให้เปิด Google Maps ภายนอกแทน
   // ปลายทางคือ "ลานจอดที่ใกล้จุดหมายที่สุด" ไม่ใช่ประตูหน้า — บอกชื่อลานกับสถานะไปด้วยเลย
   // ผู้ใช้จะได้รู้ตั้งแต่ยังไม่ออกรถว่าจะไปจอดตรงไหนและตอนนี้เต็มหรือยัง
@@ -165,6 +189,7 @@
     hide,
     setOnClose,
     showRouteSheet,
+    showGpsDeniedSheet,
     showNavigationSheet,
     updateNavigationStats,
     showOffCampusSheet,

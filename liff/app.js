@@ -128,6 +128,18 @@ function main() {
     renderProfileView();
     return;
   }
+  if (mode === 'shop') {
+    renderShopView();
+    return;
+  }
+  if (mode === 'settings') {
+    renderSettingsView();
+    return;
+  }
+  if (mode === 'feedback') {
+    renderFeedbackView();
+    return;
+  }
 
   // Flex Message Integration (Module_2_Technical_Specification.md §6)
   // dest_id&mode=nav -> เลือกอาคารให้ทันที, zone_id&mode=parking -> เลือกลานจอดให้ทันที
@@ -547,6 +559,7 @@ function renderSearch(features) {
   const closeResults = () => {
     list.hidden = true;
     list.innerHTML = '';
+    document.body.classList.remove('is-searching');
   };
 
   const run = () => {
@@ -557,6 +570,10 @@ function renderSearch(features) {
     const matches = features
       .filter((f) => f.name.toLowerCase().includes(query))
       .slice(0, SEARCH_MAX_RESULTS);
+
+    // ผลค้นหากับแถบแจ้งเตือนอยู่ใต้ช่องค้นหาตำแหน่งเดียวกัน ถ้าโผล่พร้อมกันแถบแจ้งเตือนจะทับ
+    // จนกดผลค้นหาไม่ได้ — ระหว่างค้นหาให้ซ่อนแถบแจ้งเตือนไปก่อน
+    document.body.classList.add('is-searching');
 
     if (!matches.length) {
       list.innerHTML = '<li class="search-empty">ไม่พบสถานที่ที่ค้นหา</li>';
@@ -765,44 +782,311 @@ function renderDaysLeft(days) {
   return `<span class="schedule-days-left normal">เหลืออีก ${days} วัน</span>`;
 }
 
-// --- สร้าง HTML ของ Profile header card ---
+// --- สร้าง HTML ของ Profile header card (Compact & Horizontal: รูปซ้าย ชื่อขวา) ---
 // profile = { userId, displayName, pictureUrl, coins } | null
 function renderProfileHeaderHTML(profile) {
-  const name = (profile && profile.displayName) ? escapeXml(profile.displayName) : '—';
-  const coins = (profile && profile.coins !== undefined) ? profile.coins : 120; // คะแนนสะสมจากการช่วยรายงานที่จอดรถ
+  const name = (profile && profile.displayName) ? escapeXml(profile.displayName) : 'นักพัฒนา (Dev)';
+  const bonus = localStorage.getItem('ram-roo-thang:feedback-done') === 'true' ? 30 : 0;
+  const coins = 120 + bonus;
 
   // รูปโปรไฟล์: ถ้ามี pictureUrl ใช้ <img>, ไม่มีใช้ตัวอักษรแรกของชื่อ
   const firstChar = (profile && profile.displayName)
     ? escapeXml(profile.displayName.charAt(0).toUpperCase())
-    : '?';
+    : 'น';
   const avatarHTML = (profile && profile.pictureUrl)
-    ? `<img class="profile-avatar" src="${escapeXml(profile.pictureUrl)}" alt="รูปโปรไฟล์ LINE" />`
-    : `<div class="profile-avatar-placeholder">${firstChar}</div>`;
+    ? `<img class="profile-avatar-compact" src="${escapeXml(profile.pictureUrl)}" alt="รูปโปรไฟล์ LINE" />`
+    : `<div class="profile-avatar-placeholder-compact">${firstChar}</div>`;
 
   return `
-    <div class="card profile-header">
-      <div class="profile-avatar-ring">
-        ${avatarHTML}
-      </div>
-      <h2 class="profile-name">${name}</h2>
-      <div class="profile-coin-wrap">
-        <div class="profile-coin-pill" title="คะแนนสะสมจากการมีส่วนร่วมบอกข้อมูลที่จอดรถ">
-          <svg class="coin-svg" viewBox="0 0 24 24" width="18" height="18" fill="none">
+    <div class="card profile-header-compact">
+      ${avatarHTML}
+      <div class="profile-info-compact">
+        <h2 class="profile-name-compact">${name}</h2>
+        <div class="profile-coin-text" title="คะแนนสะสมจากการมีส่วนร่วมบอกข้อมูลที่จอดรถ">
+          <svg class="coin-svg" viewBox="0 0 24 24" width="15" height="15" fill="none">
             <circle cx="12" cy="12" r="10" fill="#f59e0b"/>
             <circle cx="12" cy="12" r="8" stroke="#fde68a" stroke-width="1.2" fill="#fbbf24"/>
             <text x="12" y="16" font-size="11" font-weight="bold" fill="#78350f" text-anchor="middle" font-family="sans-serif">R</text>
           </svg>
-          <span class="coin-count">${coins}</span>
-          <span class="coin-unit">Coins</span>
+          <span>${coins} Coins</span>
         </div>
       </div>
     </div>
   `;
 }
 
+// --- สร้าง HTML การ์ดเชิญชวนทำแบบประเมิน (ใต้ Profile) ---
+function renderFeedbackTeaserHTML() {
+  const isDone = localStorage.getItem('ram-roo-thang:feedback-done') === 'true';
+  if (isDone) {
+    return `
+      <div class="card feedback-teaser-card is-done">
+        <div class="feedback-teaser-left">
+          <div class="feedback-icon-box done">✓</div>
+          <div class="feedback-teaser-info">
+            <div class="feedback-teaser-title">ส่งแบบประเมินเรียบร้อยแล้ว</div>
+            <div class="feedback-teaser-sub">ขอบคุณสำหรับข้อเสนอแนะในการพัฒนา (+30 Coins)</div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="card feedback-teaser-card" id="btn-open-feedback">
+      <div class="feedback-teaser-left">
+        <div class="feedback-icon-box">💬</div>
+        <div class="feedback-teaser-info">
+          <div class="feedback-teaser-title">แบบประเมินพัฒนาระบบ <span class="badge-reward-coin">+30 Coins</span></div>
+          <div class="feedback-teaser-sub">ร่วมแสดงความคิดเห็นเพื่อช่วยพัฒนาระบบ (ทำได้ 1 ครั้ง)</div>
+        </div>
+      </div>
+      <div class="feedback-teaser-arrow">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="9 18 15 12 9 6"></polyline>
+        </svg>
+      </div>
+    </div>
+  `;
+}
+
+// --- Floating Bottom Navigation Bar ---
+function renderBottomNavHTML(activeTab) {
+  return `
+    <nav class="bottom-nav-bar" aria-label="แถบนำทางหลัก">
+
+      <button type="button" class="nav-tab-item ${activeTab === 'profile' ? 'active' : ''}" data-tab="profile">
+        <div class="nav-tab-icon">
+          <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+            <line x1="16" y1="2" x2="16" y2="6"></line>
+            <line x1="8" y1="2" x2="8" y2="6"></line>
+            <line x1="3" y1="10" x2="21" y2="10"></line>
+          </svg>
+        </div>
+        <span>ตารางสอบ</span>
+      </button>
+
+      <button type="button" class="nav-tab-item ${activeTab === 'shop' ? 'active' : ''}" data-tab="shop">
+        <div class="nav-tab-icon">
+          <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path>
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <path d="M16 10a4 4 0 0 1-8 0"></path>
+          </svg>
+        </div>
+        <span>Shop</span>
+      </button>
+
+      <button type="button" class="nav-tab-item ${activeTab === 'settings' ? 'active' : ''}" data-tab="settings">
+        <div class="nav-tab-icon">
+          <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+        </div>
+        <span>ตั้งค่า</span>
+      </button>
+    </nav>
+  `;
+}
+
+function bindBottomNavEvents() {
+  document.querySelectorAll('.nav-tab-item').forEach((tab) => {
+    tab.addEventListener('click', () => {
+      const target = tab.dataset.tab;
+      if (target === 'profile') {
+        renderProfileView();
+      } else if (target === 'shop') {
+        renderShopView();
+      } else if (target === 'settings') {
+        renderSettingsView();
+      }
+    });
+  });
+}
+
+// renderFeedbackView — หน้ากรอกแบบประเมินความคิดเห็น (จำกัด 1 ครั้งต่อผู้ใช้)
+function renderFeedbackView() {
+  const container = getApp();
+  const isDone = localStorage.getItem('ram-roo-thang:feedback-done') === 'true';
+
+  if (isDone) {
+    container.innerHTML = `
+      <div class="feedback-header-bar">
+        <button type="button" class="btn-back-feedback" id="btn-feedback-back">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="15 18 9 12 15 6"></polyline>
+          </svg>
+          <span>ย้อนกลับ</span>
+        </button>
+      </div>
+      <div class="card" style="text-align: center; padding: 32px 16px;">
+        <div style="font-size: 2.5rem; margin-bottom: 12px;">🎉</div>
+        <h2 style="font-size:1.15rem;">คุณได้ส่งแบบประเมินแล้ว</h2>
+        <p class="muted" style="margin-top: 6px; font-size:0.85rem;">ระบบจำกัดการตอบแบบประเมิน 1 ครั้งต่อผู้ใช้ ขอบคุณสำหรับข้อมูลที่มีประโยชน์ครับ</p>
+        <button type="button" class="btn btn-primary" id="btn-feedback-done-back" style="margin-top: 20px;">กลับหน้าโปรไฟล์</button>
+      </div>
+      ${renderBottomNavHTML('profile')}
+    `;
+    document.getElementById('btn-feedback-back').addEventListener('click', () => renderProfileView());
+    document.getElementById('btn-feedback-done-back').addEventListener('click', () => renderProfileView());
+    bindBottomNavEvents();
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="feedback-header-bar">
+      <button type="button" class="btn-back-feedback" id="btn-feedback-back">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="15 18 9 12 15 6"></polyline>
+        </svg>
+        <span>ย้อนกลับ</span>
+      </button>
+    </div>
+
+    <div class="card">
+      <h2 style="font-size: 1.15rem;">แบบประเมินพัฒนาระบบ <span class="badge-reward-coin">+30 Coins</span></h2>
+      <p class="muted" style="margin-bottom: 16px; font-size: 0.82rem;">ความคิดเห็นของท่านมีคุณค่าอย่างยิ่งในการช่วยพัฒนา "รามรู้ทาง" ให้ดียิ่งขึ้น</p>
+
+      <form id="feedback-form">
+        <label style="font-weight: 700; font-size: 0.88rem; display: block; margin-bottom: 6px;">
+          1. ความพึงพอใจโดยรวมในการใช้งาน
+        </label>
+        <div class="feedback-rating-group">
+          <label class="rating-pill-label">
+            <input type="radio" name="rating" value="5" checked />
+            <div>😍 ดีเยี่ยม</div>
+          </label>
+          <label class="rating-pill-label">
+            <input type="radio" name="rating" value="4" />
+            <div>😊 ดีมาก</div>
+          </label>
+          <label class="rating-pill-label">
+            <input type="radio" name="rating" value="3" />
+            <div>😐 ปานกลาง</div>
+          </label>
+          <label class="rating-pill-label">
+            <input type="radio" name="rating" value="2" />
+            <div>🙁 ปรับปรุง</div>
+          </label>
+        </div>
+
+        <label style="font-weight: 700; font-size: 0.88rem; display: block; margin-bottom: 6px;">
+          2. ฟีเจอร์ที่อยากให้มีเพิ่มเติม
+        </label>
+        <textarea class="feedback-textarea" name="suggestions" placeholder="เช่น อยากให้มีตารางเดินรถสองแถวรอบ ม. หรือแจ้งเตือนวิชาสอบล่วงหน้า..."></textarea>
+
+        <label style="font-weight: 700; font-size: 0.88rem; display: block; margin-bottom: 6px;">
+          3. ปัญหาหรือข้อเสนอแนะที่พบ
+        </label>
+        <textarea class="feedback-textarea" name="problems" placeholder="เช่น แผนที่โหลดช้าในบางจุด, รหัสวิชาบางตัวค้นไม่เจอ..."></textarea>
+
+        <button type="submit" class="btn btn-primary" id="btn-submit-feedback">ส่งแบบประเมิน (รับ +30 Coins)</button>
+      </form>
+    </div>
+
+    ${renderBottomNavHTML('profile')}
+  `;
+
+  document.getElementById('btn-feedback-back').addEventListener('click', () => renderProfileView());
+  bindBottomNavEvents();
+
+  document.getElementById('feedback-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const btn = document.getElementById('btn-submit-feedback');
+    btn.disabled = true;
+    btn.textContent = 'กำลังส่ง...';
+
+    setTimeout(() => {
+      localStorage.setItem('ram-roo-thang:feedback-done', 'true');
+      showToast('🎉 ส่งแบบประเมินสำเร็จ! ได้รับ +30 Coins');
+      renderProfileView();
+    }, 500);
+  });
+}
+
+// renderShopView — หน้าร้านค้า & สิทธิพิเศษ
+function renderShopView() {
+  const container = getApp();
+  const bonus = localStorage.getItem('ram-roo-thang:feedback-done') === 'true' ? 30 : 0;
+  const coins = 120 + bonus;
+
+  container.innerHTML = `
+    <div class="card" style="padding: 16px;">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <div>
+          <h2 style="margin:0; font-size: 1.15rem;">ร้านค้า & สิทธิพิเศษ</h2>
+          <p class="muted" style="margin:2px 0 0; font-size:0.8rem;">แลกของรางวัลด้วยคะแนนสะสม RAM Coins</p>
+        </div>
+        <div class="profile-coin-text">
+          <svg class="coin-svg" viewBox="0 0 24 24" width="15" height="15" fill="none">
+            <circle cx="12" cy="12" r="10" fill="#f59e0b"/>
+            <circle cx="12" cy="12" r="8" stroke="#fde68a" stroke-width="1.2" fill="#fbbf24"/>
+            <text x="12" y="16" font-size="11" font-weight="bold" fill="#78350f" text-anchor="middle" font-family="sans-serif">R</text>
+          </svg>
+          <span>${coins} Coins</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 style="font-size: 0.95rem; margin-bottom: 12px;">สิทธิพิเศษสำหรับนักศึกษา <span class="badge-beta">Coming Soon</span></h2>
+      <div style="display:flex; flex-direction:column; gap:10px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:12px; background:var(--bg); border-radius:10px;">
+          <div>
+            <div style="font-weight:700; font-size:0.9rem;">☕ คูปองส่วนลดเครื่องดื่ม 10 บาท</div>
+            <div class="muted" style="font-size:0.75rem;">ร้านกาแฟและคาเฟ่รอบมหาวิทยาลัย</div>
+          </div>
+          <button class="btn-nav-exam" style="background:#fef3c7; color:#92400e;" disabled>50 Coins</button>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:12px; background:var(--bg); border-radius:10px;">
+          <div>
+            <div style="font-weight:700; font-size:0.9rem;">🎁 สติกเกอร์รามรู้ทาง Limited</div>
+            <div class="muted" style="font-size:0.75rem;">รับได้ที่จุดประชาสัมพันธ์ สวป.</div>
+          </div>
+          <button class="btn-nav-exam" style="background:#fef3c7; color:#92400e;" disabled>100 Coins</button>
+        </div>
+      </div>
+    </div>
+
+    ${renderBottomNavHTML('shop')}
+  `;
+
+  bindBottomNavEvents();
+}
+
+// renderSettingsView — หน้าการตั้งค่า
+function renderSettingsView() {
+  const container = getApp();
+  container.innerHTML = `
+    <div class="card">
+      <h2>การตั้งค่า <span class="badge-beta">Beta</span></h2>
+      <div style="display:flex; flex-direction:column; gap:12px; margin-top: 14px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:12px; background:var(--bg); border-radius:10px;">
+          <div>
+            <div style="font-weight:700; font-size:0.9rem;">ข้อตกลงและนโยบายความเป็นส่วนตัว</div>
+            <div class="muted" style="font-size:0.76rem;">ระบบไม่จัดเก็บข้อมูลส่วนบุคคล (No-PII)</div>
+          </div>
+          <span style="font-size:0.8rem; color:var(--muted);">✓ ยินยอมแล้ว</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:12px; background:var(--bg); border-radius:10px;">
+          <div>
+            <div style="font-weight:700; font-size:0.9rem;">เวอร์ชันระบบ</div>
+            <div class="muted" style="font-size:0.76rem;">รามรู้ทาง v1.0 (Beta Test)</div>
+          </div>
+          <span class="badge-beta" style="margin:0;">v1.0</span>
+        </div>
+      </div>
+    </div>
+
+    ${renderBottomNavHTML('settings')}
+  `;
+
+  bindBottomNavEvents();
+}
+
 // renderProfileView — entry point สำหรับ ?mode=profile
-// ตรวจสอบ consent ก่อน: ถ้ายังไม่เคยยินยอม แสดงหน้า consent gate ให้ติ๊กยินยอมก่อน
-// ถ้าเคยยินยอมแล้ว แสดงหน้า Profile เต็มรูปแบบทันที
 function renderProfileView() {
   const container = getApp();
   const hasConsent = localStorage.getItem(CONSENT_STORAGE_KEY) === 'true';
@@ -846,20 +1130,29 @@ function renderConsentGate(container) {
   });
 }
 
-// renderFullProfile — แสดงหน้าโปรไฟล์ (Header รูปโปรไฟล์/ชื่อ + ฟอร์มบันทึกและรายการวิชา)
+// renderFullProfile — แสดงหน้าโปรไฟล์ (Header รูปโปรไฟล์/ชื่อ + การ์ดแบบประเมิน + ตารางสอบ + Bottom Nav)
 async function renderFullProfile(container) {
   container.innerHTML = '<p style="text-align:center;padding:40px 0;color:var(--muted)">กำลังโหลด...</p>';
 
-  // ดึง LINE profile สำหรับ header — fail silently ถ้า LIFF ใช้ไม่ได้
   let profile = null;
   try {
     profile = await getUserProfile();
-  } catch (_) { /* แสดง header แบบไม่มีข้อมูล fallback */ }
+  } catch (_) { /* แสดง header fallback */ }
 
   container.innerHTML = `
     ${renderProfileHeaderHTML(profile)}
+    ${renderFeedbackTeaserHTML()}
     <div id="profile-schedule-slot"></div>
+    ${renderBottomNavHTML('profile')}
   `;
+
+  // ผูก Event เปิดหน้าแบบประเมิน
+  const feedbackBtn = document.getElementById('btn-open-feedback');
+  if (feedbackBtn) {
+    feedbackBtn.addEventListener('click', () => renderFeedbackView());
+  }
+
+  bindBottomNavEvents();
 
   const slot = document.getElementById('profile-schedule-slot');
   renderScheduleView(slot);
@@ -899,15 +1192,20 @@ async function renderScheduleView(container) {
   await refreshScheduleList(userId);
 }
 
-// ข้อมูลจำลองตารางสอบและห้องสอบสำหรับวิชา ม.รามคำแหง (Demo dataset)
+// ข้อมูลตารางสอบและห้องสอบ ภาค 1/2569 ม.รามคำแหง
 const COURSE_EXAM_DATA = {
-  'LAW1001': { building_id: 'VKB', room: 'VKB 401', date_th: '15 ต.ค. 69', time_th: '09:30 - 12:00', building_name: 'อาคารเวียงคำ' },
-  'ENG1001': { building_id: 'KLB', room: 'KLB 201', date_th: '18 ต.ค. 69', time_th: '13:30 - 16:00', building_name: 'อาคารกงไกรลาศ' },
-  'RAM1000': { building_id: 'SBB', room: 'SBB 301', date_th: '20 ต.ค. 69', time_th: '09:30 - 12:00', building_name: 'อาคารศิลาบาตร' },
-  'POL1100': { building_id: 'VPB', room: 'VPB 502', date_th: '22 ต.ค. 69', time_th: '09:30 - 12:00', building_name: 'อาคารเวียงผา' },
-  'THA1003': { building_id: 'HUB', room: 'HUB 102', date_th: '24 ต.ค. 69', time_th: '13:30 - 16:00', building_name: 'คณะมนุษยศาสตร์' },
-  'HIS1003': { building_id: 'KLB', room: 'KLB 305', date_th: '26 ต.ค. 69', time_th: '09:30 - 12:00', building_name: 'อาคารกงไกรลาศ' },
-  'MTH1001': { building_id: 'SCL', room: 'SCL 204', date_th: '28 ต.ค. 69', time_th: '09:30 - 12:00', building_name: 'อาคารปฏิบัติการวิทย์' },
+  'RAM1101': { building_id: 'VPB', room: 'VPB 301', date_th: '15 ต.ค. 69', time_th: '09:30 - 12:00', building_name: 'อาคารเวียงผา' },
+  'MGT1001': { building_id: 'TCB', room: 'TCB 401', date_th: '14 ต.ค. 69', time_th: '13:30 - 16:00', building_name: 'อาคารสุโขทัย' },
+  'LAW1001': { building_id: 'VKB', room: 'VKB 401', date_th: '19 ต.ค. 69', time_th: '09:30 - 12:00', building_name: 'อาคารเวียงคำ' },
+  'ECO1003': { building_id: 'ECB', room: 'ECB 201', date_th: '21 ต.ค. 69', time_th: '09:30 - 12:00', building_name: 'อาคารเศรษฐศาสตร์' },
+  'COS1101': { building_id: 'SCL', room: 'SCL 302', date_th: '25 ต.ค. 69', time_th: '13:30 - 16:00', building_name: 'อาคารปฏิบัติการวิทย์' },
+  'THA1001': { building_id: 'SBB', room: 'SBB 201', date_th: '25 ต.ค. 69', time_th: '09:30 - 12:00', building_name: 'อาคารศิลาบาตร' },
+  'ACC1101': { building_id: 'VKB', room: 'VKB 501', date_th: '26 ต.ค. 69', time_th: '09:30 - 12:00', building_name: 'อาคารเวียงคำ' },
+  'POL1100': { building_id: 'VPB', room: 'VPB 401', date_th: '27 ต.ค. 69', time_th: '13:30 - 16:00', building_name: 'อาคารเวียงผา' },
+  'RAM1000': { building_id: 'SBB', room: 'SBB 301', date_th: '27 ต.ค. 69', time_th: '09:30 - 12:00', building_name: 'อาคารศิลาบาตร' },
+  'ENG1001': { building_id: 'KLB', room: 'KLB 201', date_th: '28 ต.ค. 69', time_th: '13:30 - 16:00', building_name: 'อาคารกงไกรลาศ' },
+  'HIS1003': { building_id: 'KLB', room: 'KLB 305', date_th: '18 ต.ค. 69', time_th: '13:30 - 16:00', building_name: 'อาคารกงไกรลาศ' },
+  'MTH1003': { building_id: 'SCL', room: 'SCL 204', date_th: '21 ต.ค. 69', time_th: '09:30 - 12:00', building_name: 'อาคารปฏิบัติการวิทย์' },
 };
 
 function getCourseExamInfo(courseCode) {
@@ -1046,12 +1344,19 @@ async function refreshScheduleList(userId) {
 
   let schedules = data.schedules || [];
 
-  // ใน DEV_MODE ใส่ข้อมูลตัวอย่าง 3 วิชาให้อัตโนมัติในครั้งแรก เพื่อให้เห็นผลลัพธ์ทันที
+  // ใน DEV_MODE ใส่ข้อมูลตัวอย่าง 10 วิชาให้อัตโนมัติในครั้งแรก เพื่อดูผลลัพธ์ UI
   if (DEV_MODE && schedules.length === 0 && !sessionStorage.getItem('dev_cleared')) {
     schedules = [
-      { schedule_id: 'demo-1', course_code: 'LAW1001' },
-      { schedule_id: 'demo-2', course_code: 'ENG1001' },
-      { schedule_id: 'demo-3', course_code: 'RAM1000' },
+      { schedule_id: 'demo-1', course_code: 'RAM1101' },
+      { schedule_id: 'demo-2', course_code: 'MGT1001' },
+      { schedule_id: 'demo-3', course_code: 'LAW1001' },
+      { schedule_id: 'demo-4', course_code: 'ECO1003' },
+      { schedule_id: 'demo-5', course_code: 'COS1101' },
+      { schedule_id: 'demo-6', course_code: 'THA1001' },
+      { schedule_id: 'demo-7', course_code: 'ACC1101' },
+      { schedule_id: 'demo-8', course_code: 'POL1100' },
+      { schedule_id: 'demo-9', course_code: 'RAM1000' },
+      { schedule_id: 'demo-10', course_code: 'ENG1001' },
     ];
   }
 
@@ -1428,6 +1733,7 @@ function googleDirectionsUrl({ lat, lng }) {
 // ยกเลิกจุดหมาย — กลับไปสถานะที่ยังไม่ได้เลือกอะไร (ปุ่มกากบาทบนการ์ด)
 function clearTarget() {
   NavigationController.stop();
+  stopCampusArrivalWatch();
   appState.target = null;
   SheetManager.hide();
   RouteCalculator.clearRoute();
@@ -1662,12 +1968,47 @@ function startNavigation(target, route) {
   });
 }
 
+// --- ส่งต่อจากนอกมหาลัยเข้าในมหาลัยแบบไร้รอยต่อ ---
+
+// ตอนอยู่นอกมหาลัยเราแค่ส่งไป Google Maps ให้ขับรถมา แต่พอขับถึงแล้วผู้ใช้ต้องมากดเลือกจุดหมาย
+// ใหม่เองซึ่งสะดุด — เฝ้าตำแหน่งไว้เบาๆ พอเข้าเขตมหาลัยก็สลับเป็นนำทางเดินเท้าจากจุดที่ยืนอยู่จริงให้เลย
+// ใช้ enableHighAccuracy: false เพราะแค่ต้องรู้ว่า "เข้าเขตหรือยัง" ไม่ต้องละเอียดระดับเมตร จะได้ไม่กินแบต
+const ARRIVAL_WATCH_OPTIONS = { enableHighAccuracy: false, maximumAge: 15000, timeout: 30000 };
+let arrivalWatchId = null;
+
+function startCampusArrivalWatch(target) {
+  stopCampusArrivalWatch();
+  if (DEV_MODE || !navigator.geolocation) return;
+  arrivalWatchId = navigator.geolocation.watchPosition(
+    (pos) => {
+      const location = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      appState.user.location = location;
+      if (!isWithinCampusBounds(location)) return;
+      stopCampusArrivalWatch();
+      appState.user.isInsideCampus = true;
+      updateUserPin(location);
+      SheetManager.showNotice('ถึง ม.รามฯ แล้ว เปลี่ยนเป็นนำทางเดินเท้าให้อัตโนมัติ');
+      runContextRouting(target, location);
+    },
+    () => {},
+    ARRIVAL_WATCH_OPTIONS
+  );
+}
+
+function stopCampusArrivalWatch() {
+  if (arrivalWatchId !== null) {
+    navigator.geolocation.clearWatch(arrivalWatchId);
+    arrivalWatchId = null;
+  }
+}
+
 // Context Routing Matrix (Module_2_Technical_Specification.md §3)
 async function runContextRouting(target, originLocation, opts) {
   if (!appState.user.isInsideCampus) {
     const zone = nearestParkingZone(target.coords);
     const destination = zone ? { lat: zone.lat, lng: zone.lng } : CAMPUS_CONSTANTS.DEFAULT_ORIGIN;
     if (zone) appState.map.instance.panTo(destination);
+    startCampusArrivalWatch(target);
     SheetManager.showOffCampusSheet({
       title: shortPlaceName(target.name),
       // ตัดคำว่า "ที่จอดรถ" นำหน้าออก เพราะประโยครอบๆ บอกอยู่แล้วว่ากำลังพูดถึงที่จอดรถ
@@ -1678,6 +2019,7 @@ async function runContextRouting(target, originLocation, opts) {
     return;
   }
 
+  stopCampusArrivalWatch();
   const travelMode = target.type === 'PARKING' ? 'DRIVING' : 'WALKING';
   try {
     const route = await RouteCalculator.calculateRoute(originLocation, target.coords, travelMode);
@@ -1701,11 +2043,38 @@ async function runContextRouting(target, originLocation, opts) {
 
 // GPS Denied Fallback (§3 แถว Fallback, AC-04) — พฤติกรรมเดิมไม่เปลี่ยน: โชว์แถบเตือนพร้อมกับแผนที่
 // (ไม่ใช่แทนที่กัน) แล้วคำนวณเส้นทางจาก DEFAULT_ORIGIN ให้อัตโนมัติ ไม่ crash
-function handleGpsDenied(target) {
-  SheetManager.showGpsWarning(() => selectTarget(target));
-  appState.user.isInsideCampus = true;
+async function handleGpsDenied(target) {
+  // ยังวาดเส้นทางจากประตูหน้าให้เห็นภาพว่าตึกอยู่ทางไหน แต่ไม่เปิดโหมดนำทาง เพราะไม่รู้ว่าอยู่ไหนจริง
   updateUserPin(CAMPUS_CONSTANTS.DEFAULT_ORIGIN);
-  runContextRouting(target, CAMPUS_CONSTANTS.DEFAULT_ORIGIN, { isFallbackOrigin: true });
+  try {
+    const route = await RouteCalculator.calculateRoute(CAMPUS_CONSTANTS.DEFAULT_ORIGIN, target.coords, 'WALKING');
+    SheetManager.showGpsDeniedSheet({
+      title: shortPlaceName(target.name),
+      distanceText: formatDistance(route.distanceMeters),
+      durationText: `${route.durationMinutes} นาที`,
+      onEnableLocation: () => retryLocation(target),
+    });
+  } catch (err) {
+    SheetManager.showRouteErrorSheet({
+      title: shortPlaceName(target.name),
+      onFocus: () => appState.map.instance.panTo(target.coords),
+    });
+  }
+}
+
+// กด "เปิดตำแหน่ง" — ขอสิทธิ์ใหม่ ถ้าได้ก็เข้าสู่ flow ปกติทันที ถ้ายังไม่ได้ก็บอกให้รู้ว่ายังไม่ได้
+// (เบราว์เซอร์บางตัวจำการปฏิเสธไว้ ต้องไปแก้ในตั้งค่าเอง กดปุ่มซ้ำเฉยๆ จะไม่มีอะไรเกิดขึ้น)
+async function retryLocation(target) {
+  try {
+    const location = await getUserLocation();
+    appState.user.location = location;
+    appState.user.isGpsAllowed = true;
+    appState.user.isInsideCampus = isWithinCampusBounds(location);
+    updateUserPin(location);
+    await runContextRouting(target, location);
+  } catch (err) {
+    SheetManager.showNotice('ยังเปิดตำแหน่งไม่ได้ ลองอนุญาตตำแหน่งในตั้งค่าของเบราว์เซอร์ดูครับ');
+  }
 }
 
 

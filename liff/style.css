@@ -226,8 +226,10 @@ body {
   cursor: pointer;
 }
 
+/* ต้องอยู่เหนือแถบแจ้งเตือนที่ใช้ตำแหน่งเดียวกัน ไม่งั้นกดผลค้นหาไม่ได้ */
 .search-results {
   position: absolute;
+  z-index: 2;
   top: calc(68px + env(safe-area-inset-top));
   left: 12px;
   right: 12px;
@@ -289,6 +291,7 @@ body {
 /* แถบเตือน GPS — ลอยชิดซ้ายบน ไม่ชนกับปุ่มควบคุมทางขวา */
 .notice-bar {
   position: absolute;
+  z-index: 1;
   top: calc(68px + env(safe-area-inset-top));
   left: 12px;
   right: 12px;
@@ -462,94 +465,295 @@ body {
   flex-shrink: 0;
 }
 
-/* --- Profile header card --- */
-.profile-header {
-  text-align: center;
-  padding: 20px 16px 20px;
-  overflow: visible;
+/* --- Profile Header (Compact & Horizontal: Avatar Left, Info Right) --- */
+.profile-header-compact {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  background: #ffffff;
 }
 
-/* Container — ขนาดพอดีกับ avatar (ไม่มี arc แล้ว) */
-.profile-avatar-ring {
-  position: relative;
-  width: 110px;
-  height: 110px;
-  margin: 8px auto 20px;
-}
-
-/* SVG arc — ขยายออกรอบนอก container ด้วย negative offset */
-/* viewBox 126×126, r=58 → scale 148/126 ≈ 1.175 → arc radius ~68px บนหน้าจอ */
-/* avatar radius ~55px → gap ≈ 10px ระหว่าง avatar กับ arc */
-.ring-svg {
-  position: absolute;
-  top: -9px;
-  left: -9px;
-  width: 148px;
-  height: 148px;
-  pointer-events: none;
-  z-index: 1;
-}
-
-/* avatar ขนาดพอดีกับ container */
-.profile-avatar {
-  width: 110px;
-  height: 110px;
+.profile-avatar-compact {
+  width: 52px;
+  height: 52px;
   border-radius: 50%;
   object-fit: cover;
-  display: block;
-  border: 3px solid #ffffff;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12);
+  border: 2px solid #ffffff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+  flex-shrink: 0;
 }
 
-/* Fallback เมื่อไม่มีรูปโปรไฟล์ LINE */
-.profile-avatar-placeholder {
-  width: 110px;
-  height: 110px;
+.profile-avatar-placeholder-compact {
+  width: 52px;
+  height: 52px;
   border-radius: 50%;
   background: var(--accent);
+  color: #ffffff;
+  font-size: 1.3rem;
+  font-weight: 700;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 2.4rem;
-  font-weight: 700;
-  color: #ffffff;
-  border: 3px solid #ffffff;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 2px 6px rgba(6, 199, 85, 0.25);
+  flex-shrink: 0;
 }
 
-/* badge "LINE" — ลอยอยู่ด้านล่างรูป ไม่ทับชื่อ (margin-bottom บน ring รองรับแล้ว) */
-.profile-badge-wrap {
-  position: absolute;
-  bottom: -16px;
-  left: 50%;
-  transform: translateX(-50%);
-  white-space: nowrap;
-  z-index: 2;
+.profile-info-compact {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
-.profile-badge {
-  display: inline-block;
-  padding: 5px 18px;
-  border-radius: 999px;
-  background: var(--accent);
-  color: #ffffff;
-  font-size: 0.78rem;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  box-shadow: 0 2px 8px rgba(6, 199, 85, 0.45);
-}
-
-.profile-name {
-  margin: 0 0 4px;      /* ring มี margin-bottom: 44px รองรับแล้ว ไม่ต้องเพิ่ม margin-top */
-  font-size: 1.3rem;
+.profile-name-compact {
+  font-size: 1.05rem;
   font-weight: 700;
   color: var(--text);
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.profile-sub {
-  margin: 0;
-  font-size: 0.82rem;
+.profile-coin-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: #b45309;
+}
+
+.coin-svg {
+  display: block;
+  flex-shrink: 0;
+}
+
+/* --- Feedback Teaser Card (ใต้ Profile) --- */
+.feedback-teaser-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  background: #ffffff;
+  border: 1.5px solid #e2e8f0;
+  cursor: pointer;
+  transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+
+.feedback-teaser-card:active {
+  transform: scale(0.98);
+  border-color: var(--accent);
+}
+
+.feedback-teaser-card.is-done {
+  cursor: default;
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+
+.feedback-teaser-card.is-done:active {
+  transform: none;
+}
+
+.feedback-teaser-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
+}
+
+.feedback-icon-box {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: #eff6ff;
+  color: #2563eb;
+  font-size: 1.2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.feedback-icon-box.done {
+  background: #e8f5e9;
+  color: #2e7d32;
+  font-weight: 800;
+}
+
+.feedback-teaser-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.feedback-teaser-title {
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.badge-reward-coin {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  background: #fef3c7;
+  color: #b45309;
+  font-size: 0.68rem;
+  font-weight: 800;
+  border-radius: 6px;
+}
+
+.feedback-teaser-sub {
+  font-size: 0.76rem;
   color: var(--muted);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.feedback-teaser-arrow {
+  color: #94a3b8;
+  flex-shrink: 0;
+}
+
+/* --- Feedback Form Sub-view --- */
+.feedback-header-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.btn-back-feedback {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.feedback-rating-group {
+  display: flex;
+  gap: 8px;
+  margin: 10px 0 16px;
+  overflow-x: auto;
+}
+
+.rating-pill-label {
+  flex: 1;
+  min-width: 60px;
+  text-align: center;
+  padding: 10px 6px;
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.rating-pill-label input {
+  display: none;
+}
+
+.rating-pill-label:has(input:checked) {
+  border-color: var(--accent);
+  background: #e8f5e9;
+  color: #1b5e20;
+}
+
+.feedback-textarea {
+  width: 100%;
+  min-height: 80px;
+  padding: 10px 12px;
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  font-family: inherit;
+  font-size: 0.88rem;
+  color: var(--text);
+  outline: none;
+  resize: vertical;
+  margin-bottom: 14px;
+}
+
+.feedback-textarea:focus {
+  border-color: var(--accent);
+}
+
+/* --- Bottom Floating Navigation Bar (พื้นหลังขาวอมเทา Frosted Glass) --- */
+body {
+  padding-bottom: 84px; /* เว้นที่ให้ bottom nav bar ไม่ทับเนื้อหา */
+}
+
+.bottom-nav-bar {
+  position: fixed;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: calc(100% - 32px);
+  max-width: 420px;
+  background: rgba(246, 248, 250, 0.94);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(226, 232, 240, 0.85);
+  border-radius: 999px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  padding: 6px 8px;
+  z-index: 9998;
+}
+
+.nav-tab-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  flex: 1;
+  padding: 7px 4px;
+  border-radius: 999px;
+  text-decoration: none;
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 700;
+  transition: all 0.15s ease;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+}
+
+.nav-tab-item.active {
+  background: #1e293b;
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(30, 41, 59, 0.25);
+}
+
+.nav-tab-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.nav-tab-icon svg {
+  display: block;
 }
 
 /* --- Schedule Section: Minimal Single Card --- */
@@ -625,106 +829,185 @@ body {
   cursor: not-allowed;
 }
 
-/* --- Registered Courses: Interactive Chips --- */
+/* --- Registered Courses: Minimal Swipeable List --- */
 .schedule-header-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 14px;
+  margin-bottom: 12px;
 }
 
 .schedule-header-row h2 {
   margin: 0;
-  font-size: 1.1rem;
+  font-size: 1.05rem;
 }
 
 .course-count-badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 24px;
-  height: 24px;
-  padding: 0 8px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 7px;
   border-radius: 999px;
   background: #e8f5e9;
   color: #2e7d32;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   font-weight: 700;
 }
 
-.course-chips-container {
+.exam-list-container {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  min-height: 48px;
-  align-items: center;
+  flex-direction: column;
+  margin-top: 4px;
 }
 
-.course-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 8px 6px 14px;
-  border-radius: 999px;
+.exam-swipe-wrapper {
+  position: relative;
+  overflow: hidden;
+  border-bottom: 1px solid #f0f2f5;
   background: #ffffff;
-  border: 1.5px solid #d0ebd6;
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.04);
-  animation: chipIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-  transition: opacity 0.2s, transform 0.2s, background 0.15s;
+  transition: opacity 0.2s, max-height 0.25s ease-out;
 }
 
-.course-chip.is-deleting {
+.exam-swipe-wrapper:last-child {
+  border-bottom: none;
+}
+
+.exam-swipe-wrapper.is-deleting {
   opacity: 0;
-  transform: scale(0.7);
+  transform: scale(0.95);
 }
 
-@keyframes chipIn {
-  from {
-    opacity: 0;
-    transform: scale(0.7) translateY(4px);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1) translateY(0);
-  }
-}
-
-.course-chip-code {
-  font-size: 0.95rem;
-  font-weight: 700;
-  color: #1e3a29;
-  letter-spacing: 0.04em;
-}
-
-.course-chip-del {
+/* ปุ่มลบวงกลมสีแดงที่ซ่อนอยู่ด้านหลัง (Slide to reveal) */
+.exam-behind-actions {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 64px;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
-  border: none;
-  border-radius: 50%;
-  background: #f0f3f1;
-  color: #718096;
-  font-size: 14px;
-  line-height: 1;
-  cursor: pointer;
-  transition: all 0.15s ease;
+  background: #fff5f5;
+  z-index: 1;
 }
 
-.course-chip-del:hover,
-.course-chip-del:active {
-  background: #fee2e2;
-  color: #dc2626;
-  transform: scale(1.1);
+.btn-del-circle {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #ef4444;
+  color: #ffffff;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(239, 68, 68, 0.35);
+  transition: transform 0.15s;
+}
+
+.btn-del-circle:active {
+  transform: scale(0.9);
+  background: #dc2626;
+}
+
+/* เนื้อหาแถวด้านหน้า (เลื่อนเปิด-ปิดด้วย swipe) */
+.exam-item-content {
+  position: relative;
+  z-index: 2;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  padding: 11px 2px;
+  gap: 10px;
+  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+  touch-action: pan-y;
+}
+
+.exam-item-content.is-swiped {
+  transform: translateX(-64px);
+}
+
+.exam-col-code {
+  font-weight: 800;
+  font-size: 0.98rem;
+  color: #1a202c;
+  min-width: 68px;
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+
+.exam-col-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.exam-datetime {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #2d3748;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.exam-time-dot {
+  color: #cbd5e1;
+  margin: 0 3px;
+  font-weight: normal;
+}
+
+.exam-location {
+  font-size: 0.76rem;
+  color: #718096;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.exam-col-action {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+/* ปุ่มนำทางวงกลมสีเขียวเขียนว่า 'Go' */
+.btn-go-circle {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #ffffff;
+  border: none;
+  font-size: 0.88rem;
+  font-weight: 800;
+  font-family: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(6, 199, 85, 0.35);
+  transition: transform 0.15s, background-color 0.15s;
+  letter-spacing: 0.02em;
+}
+
+.btn-go-circle:active {
+  transform: scale(0.92);
+  background: var(--accent-dark);
 }
 
 .schedule-empty {
   width: 100%;
   text-align: center;
-  padding: 16px 0;
+  padding: 20px 0;
   color: #a0a6b1;
-  font-size: 0.9rem;
+  font-size: 0.88rem;
 }
 
 /* --- Floating Toast Notification --- */
@@ -844,4 +1127,16 @@ body.is-navigating .search-results {
 .view-toggle-btn.active {
   background: #1c1c1e;
   color: #ffffff;
+}
+
+/* ระหว่างพิมพ์ค้นหา ซ่อนแถบแจ้งเตือนไว้ก่อน กันบังรายการผลลัพธ์จนกดไม่ได้ */
+body.is-searching .notice-bar {
+  display: none;
+}
+
+/* คำอธิบายเพิ่มเติมในการ์ด (เช่น บอกว่าตัวเลขวัดจากประตูหน้า) */
+.nav-info-card .sheet-hint {
+  margin: -6px 0 14px;
+  font-size: 0.8rem;
+  line-height: 1.45;
 }
