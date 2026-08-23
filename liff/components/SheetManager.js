@@ -49,7 +49,10 @@
         <div class="sheet-handle"></div>
         <button class="sheet-close" id="sheet-close-btn" aria-label="ยกเลิกจุดหมาย">&times;</button>
         <h2>${title}</h2>
-        <div class="nav-stats"><span>📏 ${distanceText}</span><span>⏱ ${durationText}</span></div>
+        <div class="nav-stats">
+          <span><small>ระยะเวลา</small>${durationText}</span>
+          <span><small>ระยะทาง</small>${distanceText}</span>
+        </div>
         <button class="btn btn-primary" id="sheet-action-btn">${actionLabel}</button>
       </div>
     `;
@@ -74,7 +77,7 @@
         <button class="sheet-close" id="sheet-close-btn" aria-label="ยกเลิกจุดหมาย">&times;</button>
         <h2>${title}</h2>
         ${destination}
-        <button class="btn btn-primary" id="sheet-action-btn">🚗 นำทางด้วย Google Maps</button>
+        <button class="btn btn-primary" id="sheet-action-btn">นำทางด้วย Google Maps</button>
       </div>
     `;
     document.getElementById('sheet-action-btn').addEventListener('click', onOpenGoogleMaps);
@@ -92,7 +95,7 @@
         <button class="sheet-close" id="sheet-close-btn" aria-label="ยกเลิกจุดหมาย">&times;</button>
         <h2>${title}</h2>
         <p class="muted">ไม่พบเส้นทางสำหรับตำแหน่งนี้ครับ</p>
-        <button class="btn btn-primary" id="sheet-action-btn">🧭 ไปที่ตำแหน่งอาคาร</button>
+        <button class="btn btn-primary" id="sheet-action-btn">ไปที่ตำแหน่งอาคาร</button>
       </div>
     `;
     document.getElementById('sheet-action-btn').addEventListener('click', onFocus);

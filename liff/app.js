@@ -245,11 +245,11 @@ const MASTER_GEOJSON_URL = 'data/ru_master.geojson';
 const ICON_SVG = {
   building: '<path d="M3 21V5h8v4h10v12H3zm2-2h6V7H5v12zm8 0h6v-8h-6v8z"/>',
   parking: '<path d="M5 11l1.5-4.5A2 2 0 018.4 5h7.2a2 2 0 011.9 1.5L19 11v7a1 1 0 01-1 1h-1a1 1 0 01-1-1v-1H8v1a1 1 0 01-1 1H6a1 1 0 01-1-1v-7zm2.2-1h9.6l-1-3H8.2l-1 3zM7.5 15a1 1 0 100-2 1 1 0 000 2zm9 0a1 1 0 100-2 1 1 0 000 2z"/>',
-  other: '<path d="M12 22s7-6.2 7-12A7 7 0 005 10c0 5.8 7 12 7 12zm0-9.5A2.5 2.5 0 1112 7a2.5 2.5 0 010 5.5z"/>',
+  other: '<path d="M20 4H4v2h16V4zm1 10v-2l-1-5H4l-1 5v2h1v6h10v-6h4v6h2v-6h1zm-9 4H6v-4h6v4z"/>',
 };
 
 function icon(name) {
-  return `<svg viewBox="0 0 24 24" width="19" height="19" fill="currentColor" aria-hidden="true">${ICON_SVG[name]}</svg>`;
+  return `<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">${ICON_SVG[name]}</svg>`;
 }
 
 const MAP_LAYERS = [
@@ -830,26 +830,13 @@ async function renderScheduleView(container) {
     return;
   }
 
-  let buildingsData;
-  try {
-    buildingsData = await fetchJSON('/api/buildings');
-  } catch (err) {
-    buildingsData = { buildings: [] };
-  }
-
-  renderScheduleForm(container, userId, buildingsData.buildings || []);
+  renderScheduleForm(container, userId);
   await refreshScheduleList(userId);
 }
 
-function renderScheduleForm(container, userId, buildings) {
-  const options = buildings
-    .map((b) => `<option value="${escapeXml(b.building_id)}">${escapeXml(b.name_th)}</option>`)
-    .join('');
-
-  // min datetime = ตอนนี้ (ห้ามเลือกวันที่ผ่านมา)
-  const now = new Date();
-  now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
-  const minDatetime = now.toISOString().slice(0, 16);
+function renderScheduleForm(container, userId) {
+  // min datetime = ตอนนี้ (ไม่ใช้แล้ว — เก็บไว้เผื่อวันหลังเปิดใหม่)
+  // ฟอร์มตอนนี้รับแค่รหัสวิชา ส่วนอาคาร/เวลาสอบมีข้อมูลอยู่ในระบบแล้ว
 
   container.innerHTML = `
     <div class="card schedule-section">
@@ -857,15 +844,6 @@ function renderScheduleForm(container, userId, buildings) {
       <form id="schedule-form">
         <label>รหัสวิชา
           <input type="text" name="course_code" placeholder="เช่น LAW1001" required />
-        </label>
-        <label>อาคารสอบ
-          <select name="building_id" required>
-            <option value="" disabled selected>เลือกอาคาร</option>
-            ${options}
-          </select>
-        </label>
-        <label>วันเวลาสอบ
-          <input type="datetime-local" name="exam_at" min="${minDatetime}" required />
         </label>
         <button type="submit" class="btn btn-primary">บันทึก</button>
         <p id="schedule-form-result" class="schedule-form-result" aria-live="polite"></p>
@@ -896,8 +874,6 @@ function renderScheduleForm(container, userId, buildings) {
         body: JSON.stringify({
           user_id: userId,
           course_code: formData.get('course_code'),
-          building_id: formData.get('building_id'),
-          exam_at: new Date(formData.get('exam_at')).toISOString(),
         }),
       });
       resultEl.textContent = '✓ บันทึกสำเร็จ';
@@ -925,31 +901,21 @@ async function refreshScheduleList(userId) {
     return;
   }
 
-  // เรียงตามวันสอบจากใกล้สุด → ไกลสุด
-  const schedules = (data.schedules || []).sort(
-    (a, b) => new Date(a.exam_at) - new Date(b.exam_at)
-  );
+  const schedules = data.schedules || [];
 
   if (schedules.length === 0) {
     listEl.innerHTML = '<li class="schedule-empty">ยังไม่มีวิชาที่บันทึกไว้</li>';
     return;
   }
 
-  listEl.innerHTML = schedules.map((s) => {
-    const days = daysUntilExam(s.exam_at);
-    return `
-      <li class="schedule-item">
-        <div class="schedule-item-info">
-          <div class="schedule-item-code">${escapeXml(s.course_code)}</div>
-          <div class="schedule-item-detail">
-            ${escapeXml(s.building_name || s.building_id)} — ${formatExamAt(s.exam_at)}
-          </div>
-          ${renderDaysLeft(days)}
-        </div>
-        <button class="btn-delete" data-schedule-id="${escapeXml(s.schedule_id)}">ลบ</button>
-      </li>
-    `;
-  }).join('');
+  listEl.innerHTML = schedules.map((s) => `
+    <li class="schedule-item">
+      <div class="schedule-item-info">
+        <div class="schedule-item-code">${escapeXml(s.course_code)}</div>
+      </div>
+      <button class="btn-delete" data-schedule-id="${escapeXml(s.schedule_id)}">ลบ</button>
+    </li>
+  `).join('');
 
   listEl.querySelectorAll('.btn-delete').forEach((btn) => {
     btn.addEventListener('click', async () => {
@@ -1203,6 +1169,43 @@ function clearTarget() {
   nudgeMapRepaint(appState.map.instance);
 }
 
+// ชื่อในชุดข้อมูลยาวมากเพราะรวมทุกอย่างไว้ในบรรทัดเดียว เช่น
+//   "OPB: สำนักงานอธิการบดี (Office of the President), AAB: อาคารสำนักบริการทางวิชาการ (...)"
+// เอามาขึ้นหัวการ์ดตรงๆ แล้วรกตา ตัดเหลือเฉพาะชื่อไทยหลัก — ตัดรหัสอาคารนำหน้า (มีในป้ายชิป
+// บนแผนที่อยู่แล้ว) ตัดวงเล็บภาษาอังกฤษท้ายชื่อ และตัดชื่อตัวที่สองหลังคอมม่าออก
+// เก็บชื่อเต็มไว้ใน target.name เหมือนเดิม ใช้ตอนค้นหา/tooltip จะได้ยังเจอด้วยรหัสหรือชื่ออังกฤษ
+function shortPlaceName(name) {
+  let short = splitOutsideParens(name)[0].trim();
+  short = short.replace(/^[A-Z][A-Z0-9\s,().]*:\s*/, '');       // "LWB 2: ...", "DS (DS 1, DS 2): ..."
+  short = short.replace(/^[A-Z]{2,4}\s?\d?\s*(?=\()/, '');       // "LIB (สำนักหอสมุดกลาง)"
+  short = short.replace(/^\((.+)\)$/, '$1');                    // เหลือแต่วงเล็บครอบทั้งชื่อ -> ถอดออก
+  short = short.replace(/\s*\(([^()]*)\)\s*$/, (full, inner) => (/[A-Za-z]/.test(inner) && !/[\u0E00-\u0E7F]/.test(inner) ? '' : full));
+  return short.trim() || name;
+}
+
+// แยกที่คอมม่าเฉพาะตัวที่อยู่นอกวงเล็บ ไม่งั้น "DS (DS 1, DS 2): ..." จะโดนตัดกลางวงเล็บ
+function splitOutsideParens(text) {
+  const parts = [];
+  let depth = 0;
+  let current = '';
+  for (const ch of text) {
+    if (ch === '(') depth += 1;
+    else if (ch === ')') depth = Math.max(0, depth - 1);
+    if (ch === ',' && depth === 0) {
+      parts.push(current);
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  parts.push(current);
+  return parts;
+}
+
+function formatDistance(meters) {
+  return `${Math.round(meters)} m`;
+}
+
 // Context Routing Matrix (Module_2_Technical_Specification.md §3)
 async function runContextRouting(target, originLocation, opts) {
   if (!appState.user.isInsideCampus) {
@@ -1210,7 +1213,7 @@ async function runContextRouting(target, originLocation, opts) {
     const destination = zone ? { lat: zone.lat, lng: zone.lng } : CAMPUS_CONSTANTS.DEFAULT_ORIGIN;
     if (zone) appState.map.instance.panTo(destination);
     SheetManager.showOffCampusSheet({
-      title: target.name,
+      title: shortPlaceName(target.name),
       parkingName: zone ? zone.zone_name : null,
       parkingStatus: zone ? PARKING_STATUS_LABEL[zone.status] || null : null,
       onOpenGoogleMaps: () => window.open(googleDirectionsUrl(destination), '_blank'),
@@ -1221,19 +1224,19 @@ async function runContextRouting(target, originLocation, opts) {
   const travelMode = target.type === 'PARKING' ? 'DRIVING' : 'WALKING';
   try {
     const route = await RouteCalculator.calculateRoute(originLocation, target.coords, travelMode);
-    const originNote = opts && opts.isFallbackOrigin ? ' (ประมาณจากประตูหน้า ม.รามฯ)' : '';
+    const originNote = opts && opts.isFallbackOrigin ? ' (ประมาณจากประตูหน้า)' : '';
     SheetManager.showRouteSheet({
-      title: target.name,
-      distanceText: route.distanceText,
-      durationText: `${route.durationText}${originNote}`,
-      actionLabel: travelMode === 'WALKING' ? '🚶 เริ่มนำทางเดินเท้า' : '🚗 เริ่มนำทางขับรถ',
+      title: shortPlaceName(target.name),
+      distanceText: formatDistance(route.distanceMeters),
+      durationText: `${route.durationMinutes} นาที${originNote}`,
+      actionLabel: 'เริ่มเดินทาง',
       onAction: () => appState.map.instance.panTo(target.coords),
     });
   } catch (err) {
     console.error('คำนวณเส้นทางไม่สำเร็จ', err);
     RouteCalculator.clearRoute();
     SheetManager.showRouteErrorSheet({
-      title: target.name,
+      title: shortPlaceName(target.name),
       onFocus: () => appState.map.instance.panTo(target.coords),
     });
   }
