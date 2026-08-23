@@ -67,6 +67,7 @@ const appState = {
   target: null, // { id, name, type: 'BUILDING'|'PARKING'|'MY_CAR'|'COMMUNITY', coords: {lat,lng} }
   parkingZones: [],
   car: null,
+  parking: { offeredZoneId: null, dismissedZoneId: null },
   navigation: { path: [] }, // โหลดจาก /api/parking/zones — ใช้ทั้งทาสีเลเยอร์และหาลานจอดใกล้จุดหมาย
   map: {
     instance: null,
@@ -459,6 +460,7 @@ async function renderMapView({ presetDestId, presetZoneId } = {}) {
   updateMyLocationAvailability();
   appState.car = loadSavedCar();
   updateCarButtonAvailability();
+  startPresenceWatch();
 
   buildingMarkers.length = 0;
   targetPin = null;
@@ -973,26 +975,30 @@ function bindBottomNavEvents() {
   });
 }
 
-// renderFeedbackView — หน้ากรอกแบบประเมินความคิดเห็น (จำกัด 1 ครั้งต่อผู้ใช้)
-function renderFeedbackView() {
+// renderFeedbackView — หน้ากรอกแบบประเมินความคิดเห็น Beta Test (จำกัด 1 ครั้งต่อผู้ใช้ บันทึกลง Sheet)
+async function renderFeedbackView() {
   const container = getApp();
   const isDone = localStorage.getItem('ram-roo-thang:feedback-done') === 'true';
 
   if (isDone) {
     container.innerHTML = `
-      <div class="feedback-header-bar">
-        <button type="button" class="btn-back-feedback" id="btn-feedback-back">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="15 18 9 12 15 6"></polyline>
-          </svg>
-          <span>ย้อนกลับ</span>
-        </button>
-      </div>
-      <div class="card" style="text-align: center; padding: 32px 16px;">
-        <div style="font-size: 2.5rem; margin-bottom: 12px;">🎉</div>
-        <h2 style="font-size:1.15rem;">คุณได้ส่งแบบประเมินแล้ว</h2>
-        <p class="muted" style="margin-top: 6px; font-size:0.85rem;">ระบบจำกัดการตอบแบบประเมิน 1 ครั้งต่อผู้ใช้ ขอบคุณสำหรับข้อมูลที่มีประโยชน์ครับ</p>
-        <button type="button" class="btn btn-primary" id="btn-feedback-done-back" style="margin-top: 20px;">กลับหน้าโปรไฟล์</button>
+      <div class="profile-flat-container">
+        <div class="feedback-header-bar">
+          <button type="button" class="btn-back-feedback" id="btn-feedback-back">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="15 18 9 12 15 6"></polyline>
+            </svg>
+            <span>ย้อนกลับ</span>
+          </button>
+        </div>
+        <div class="survey-section-card" style="text-align: center; padding: 40px 16px;">
+          <h2 style="font-size:1.2rem; color:#0f172a; margin-bottom:8px;">คุณได้ส่งแบบประเมินแล้ว</h2>
+          <p class="muted" style="font-size:0.88rem; line-height:1.5; margin:0 0 20px;">
+            ระบบบันทึกความคิดเห็นของคุณเรียบร้อยแล้ว และจำกัดการประเมิน 1 ครั้งต่อบัญชีผู้ใช้<br>
+            ขอขอบคุณที่ร่วมเป็นส่วนหนึ่งในการพัฒนา "รามรู้ทาง" ครับ
+          </p>
+          <button type="button" class="btn btn-primary" id="btn-feedback-done-back" style="padding:10px 24px; font-weight:700; border-radius:12px;">กลับหน้าโปรไฟล์</button>
+        </div>
       </div>
       ${renderBottomNavHTML('profile')}
     `;
@@ -1002,54 +1008,220 @@ function renderFeedbackView() {
     return;
   }
 
+  let profile = null;
+  try {
+    profile = await getUserProfile();
+  } catch (_) { /* fallback */ }
+
+  const detectedOS = /iPhone|iPad|iPod/i.test(navigator.userAgent)
+    ? 'iOS'
+    : /Android/i.test(navigator.userAgent)
+      ? 'Android'
+      : 'Desktop/Other';
+
   container.innerHTML = `
-    <div class="feedback-header-bar">
-      <button type="button" class="btn-back-feedback" id="btn-feedback-back">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="15 18 9 12 15 6"></polyline>
-        </svg>
-        <span>ย้อนกลับ</span>
-      </button>
-    </div>
+    <div class="profile-flat-container">
+      <div class="feedback-header-bar">
+        <button type="button" class="btn-back-feedback" id="btn-feedback-back">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="15 18 9 12 15 6"></polyline>
+          </svg>
+          <span>ย้อนกลับ</span>
+        </button>
+        <span class="badge-reward-coin">+30 เหรียญ</span>
+      </div>
 
-    <div class="card">
-      <h2 style="font-size: 1.15rem;">แบบประเมินพัฒนาระบบ <span class="badge-reward-coin">+30 เหรียญ</span></h2>
-      <p class="muted" style="margin-bottom: 16px; font-size: 0.82rem;">ความคิดเห็นของท่านมีคุณค่าอย่างยิ่งในการช่วยพัฒนา "รามรู้ทาง" ให้ดียิ่งขึ้น</p>
+      <div style="margin-bottom: 14px; padding: 0 4px;">
+        <h1 style="font-size: 1.3rem; font-weight: 900; color: #0f172a; margin: 0 0 4px;">แบบประเมินระบบ Beta Test</h1>
+        <p class="muted" style="font-size: 0.82rem; margin: 0; line-height: 1.4;">
+          ความคิดเห็นของท่านมีคุณค่าอย่างยิ่งในการปรับปรุงและพัฒนา "รามรู้ทาง" ให้สมบูรณ์แบบก่อนเปิดใช้งานจริง
+        </p>
+      </div>
 
-      <form id="feedback-form">
-        <label style="font-weight: 700; font-size: 0.88rem; display: block; margin-bottom: 6px;">
-          1. ความพึงพอใจโดยรวมในการใช้งาน
-        </label>
-        <div class="feedback-rating-group">
-          <label class="rating-pill-label">
-            <input type="radio" name="rating" value="5" checked />
-            <div>ดีเยี่ยม</div>
-          </label>
-          <label class="rating-pill-label">
-            <input type="radio" name="rating" value="4" />
-            <div>ดีมาก</div>
-          </label>
-          <label class="rating-pill-label">
-            <input type="radio" name="rating" value="3" />
-            <div>ปานกลาง</div>
-          </label>
-          <label class="rating-pill-label">
-            <input type="radio" name="rating" value="2" />
-            <div>ปรับปรุง</div>
-          </label>
+      <form id="beta-survey-form">
+        <!-- ส่วนที่ 1: ความพึงพอใจและประสบการณ์ใช้งาน -->
+        <div class="survey-section-card">
+          <div class="survey-section-header">
+            <span class="survey-section-num">1</span>
+            <h3 class="survey-section-title">ความพึงพอใจและประสบการณ์ใช้งาน</h3>
+          </div>
+
+          <label class="survey-q-label">1. ความพึงพอใจโดยรวมในการใช้งาน (Overall Satisfaction)</label>
+          <div class="rating-num-group">
+            <label class="rating-num-btn"><input type="radio" name="q1_overall_sat" value="1" />1</label>
+            <label class="rating-num-btn"><input type="radio" name="q1_overall_sat" value="2" />2</label>
+            <label class="rating-num-btn"><input type="radio" name="q1_overall_sat" value="3" />3</label>
+            <label class="rating-num-btn"><input type="radio" name="q1_overall_sat" value="4" />4</label>
+            <label class="rating-num-btn"><input type="radio" name="q1_overall_sat" value="5" checked />5</label>
+          </div>
+          <div class="rating-legend-row">
+            <span>1 = ควรปรับปรุง</span>
+            <span>5 = พึงพอใจมากที่สุด</span>
+          </div>
+
+          <label class="survey-q-label">2. ความง่ายและความลื่นไหลในการใช้งาน (Ease of Use)</label>
+          <div class="rating-num-group">
+            <label class="rating-num-btn"><input type="radio" name="q2_ease_of_use" value="1" />1</label>
+            <label class="rating-num-btn"><input type="radio" name="q2_ease_of_use" value="2" />2</label>
+            <label class="rating-num-btn"><input type="radio" name="q2_ease_of_use" value="3" />3</label>
+            <label class="rating-num-btn"><input type="radio" name="q2_ease_of_use" value="4" />4</label>
+            <label class="rating-num-btn"><input type="radio" name="q2_ease_of_use" value="5" checked />5</label>
+          </div>
+          <div class="rating-legend-row">
+            <span>1 = ใช้งานยาก</span>
+            <span>5 = ใช้งานง่ายมาก</span>
+          </div>
+
+          <label class="survey-q-label">3. ความเร็วในการเปิดและโหลดข้อมูล (Speed & Performance)</label>
+          <div class="rating-num-group">
+            <label class="rating-num-btn"><input type="radio" name="q3_speed_perf" value="1" />1</label>
+            <label class="rating-num-btn"><input type="radio" name="q3_speed_perf" value="2" />2</label>
+            <label class="rating-num-btn"><input type="radio" name="q3_speed_perf" value="3" />3</label>
+            <label class="rating-num-btn"><input type="radio" name="q3_speed_perf" value="4" />4</label>
+            <label class="rating-num-btn"><input type="radio" name="q3_speed_perf" value="5" checked />5</label>
+          </div>
+          <div class="rating-legend-row">
+            <span>1 = ช้า/ค้างบ่อย</span>
+            <span>5 = รวดเร็วทันใจ</span>
+          </div>
         </div>
 
-        <label style="font-weight: 700; font-size: 0.88rem; display: block; margin-bottom: 6px;">
-          2. ฟีเจอร์ที่อยากให้มีเพิ่มเติม
-        </label>
-        <textarea class="feedback-textarea" name="suggestions" placeholder="เช่น อยากให้มีตารางเดินรถสองแถวรอบ ม. หรือแจ้งเตือนวิชาสอบล่วงหน้า..."></textarea>
+        <!-- ส่วนที่ 2: ประเมินรายฟีเจอร์หลัก -->
+        <div class="survey-section-card">
+          <div class="survey-section-header">
+            <span class="survey-section-num">2</span>
+            <h3 class="survey-section-title">การประเมินรายฟีเจอร์หลัก</h3>
+          </div>
 
-        <label style="font-weight: 700; font-size: 0.88rem; display: block; margin-bottom: 6px;">
-          3. ปัญหาหรือข้อเสนอแนะที่พบ
-        </label>
-        <textarea class="feedback-textarea" name="problems" placeholder="เช่น แผนที่โหลดช้าในบางจุด, รหัสวิชาบางตัวค้นไม่เจอ..."></textarea>
+          <label class="survey-q-label">4. ระบบแผนที่และการนำทางไปอาคารสอบ (Map & Navigation)</label>
+          <div class="rating-num-group">
+            <label class="rating-num-btn"><input type="radio" name="q4_map_rating" value="1" />1</label>
+            <label class="rating-num-btn"><input type="radio" name="q4_map_rating" value="2" />2</label>
+            <label class="rating-num-btn"><input type="radio" name="q4_map_rating" value="3" />3</label>
+            <label class="rating-num-btn"><input type="radio" name="q4_map_rating" value="4" />4</label>
+            <label class="rating-num-btn"><input type="radio" name="q4_map_rating" value="5" checked />5</label>
+          </div>
+          <div class="rating-legend-row">
+            <span>1 = ไม่แม่นยำ</span>
+            <span>5 = นำทางแม่นยำมาก</span>
+          </div>
 
-        <button type="submit" class="btn btn-primary" id="btn-submit-feedback">ส่งแบบประเมิน (รับ 30 เหรียญ)</button>
+          <label class="survey-q-label">5. ระบบจัดการตารางสอบและปุ่มกด 'Go' นำทาง (Exam Schedule)</label>
+          <div class="rating-num-group">
+            <label class="rating-num-btn"><input type="radio" name="q5_schedule_rating" value="1" />1</label>
+            <label class="rating-num-btn"><input type="radio" name="q5_schedule_rating" value="2" />2</label>
+            <label class="rating-num-btn"><input type="radio" name="q5_schedule_rating" value="3" />3</label>
+            <label class="rating-num-btn"><input type="radio" name="q5_schedule_rating" value="4" />4</label>
+            <label class="rating-num-btn"><input type="radio" name="q5_schedule_rating" value="5" checked />5</label>
+          </div>
+          <div class="rating-legend-row">
+            <span>1 = ไม่สะดวก</span>
+            <span>5 = สะดวกและมีประโยชน์มาก</span>
+          </div>
+
+          <label class="survey-q-label">6. ระบบดูที่จอดรถและการสะสมเหรียญ (Parking & Coins)</label>
+          <div class="rating-num-group">
+            <label class="rating-num-btn"><input type="radio" name="q6_parking_rating" value="1" />1</label>
+            <label class="rating-num-btn"><input type="radio" name="q6_parking_rating" value="2" />2</label>
+            <label class="rating-num-btn"><input type="radio" name="q6_parking_rating" value="3" />3</label>
+            <label class="rating-num-btn"><input type="radio" name="q6_parking_rating" value="4" />4</label>
+            <label class="rating-num-btn"><input type="radio" name="q6_parking_rating" value="5" checked />5</label>
+          </div>
+          <div class="rating-legend-row">
+            <span>1 = ไม่น่าสนใจ</span>
+            <span>5 = น่าสนใจและมีประโยชน์</span>
+          </div>
+
+          <label class="survey-q-label">7. ฟีเจอร์ที่คุณคิดว่ามีประโยชน์มากที่สุดในช่วงสอบ?</label>
+          <div class="choice-card-list">
+            <label class="choice-option-label">
+              <input type="radio" name="q7_top_feature" value="แผนที่และเส้นทางเดินไปอาคารสอบ" checked />
+              <span>แผนที่และเส้นทางเดินไปอาคารสอบ</span>
+            </label>
+            <label class="choice-option-label">
+              <input type="radio" name="q7_top_feature" value="ตารางสอบส่วนตัวที่กด Go นำทางได้ทันที" />
+              <span>ตารางสอบส่วนตัวที่กด Go นำทางได้ทันที</span>
+            </label>
+            <label class="choice-option-label">
+              <input type="radio" name="q7_top_feature" value="ค้นหาข้อมูลอาคาร แผนก และห้องน้ำ" />
+              <span>ค้นหาข้อมูลอาคาร แผนก และห้องน้ำ</span>
+            </label>
+            <label class="choice-option-label">
+              <input type="radio" name="q7_top_feature" value="ข้อมูลที่จอดรถรอบมหาวิทยาลัย" />
+              <span>ข้อมูลที่จอดรถรอบมหาวิทยาลัย</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- ส่วนที่ 3: ปัญหาที่พบและโอกาสในการบอกต่อ (NPS) -->
+        <div class="survey-section-card">
+          <div class="survey-section-header">
+            <span class="survey-section-num">3</span>
+            <h3 class="survey-section-title">ปัญหาที่พบและโอกาสในการบอกต่อ</h3>
+          </div>
+
+          <label class="survey-q-label">8. ปัญหาหรือจุดติดขัดที่พบระหว่างทดสอบ (เลือกได้หลายข้อ)</label>
+          <div class="choice-card-list">
+            <label class="choice-option-label">
+              <input type="checkbox" name="q8_issues" value="ไม่พบปัญหาเลย ใช้งานได้ราบรื่น" checked />
+              <span>ไม่พบปัญหาเลย ใช้งานได้ราบรื่น</span>
+            </label>
+            <label class="choice-option-label">
+              <input type="checkbox" name="q8_issues" value="พิกัดหรือเส้นทางนำทางไม่ตรงจุดจริง" />
+              <span>พิกัดหรือเส้นทางนำทางไม่ตรงจุดจริง</span>
+            </label>
+            <label class="choice-option-label">
+              <input type="checkbox" name="q8_issues" value="ค้นหารหัสวิชาหรืออาคารไม่เจอ" />
+              <span>ค้นหารหัสวิชาหรืออาคารไม่เจอ</span>
+            </label>
+            <label class="choice-option-label">
+              <input type="checkbox" name="q8_issues" value="หน้าจอโหลดช้า หรือกระตุกในบางจุด" />
+              <span>หน้าจอโหลดช้า หรือกระตุกในบางจุด</span>
+            </label>
+            <label class="choice-option-label">
+              <input type="checkbox" name="q8_issues" value="การปัดหน้าจอ (Swipe) หรือกดปุ่มบางจุดกดยาก" />
+              <span>การปัดหน้าจอ (Swipe) หรือกดปุ่มบางจุดกดยาก</span>
+            </label>
+          </div>
+
+          <label class="survey-q-label">9. Net Promoter Score (NPS): โอกาสที่จะแนะนำให้เพื่อนใช้งาน?</label>
+          <p class="survey-q-desc">คะแนน 0 (ไม่แนะนำแน่นอน) ถึง 10 (แนะนำทุกคนแน่นอน)</p>
+          <div class="nps-grid">
+            <label class="nps-btn"><input type="radio" name="q9_nps_score" value="0" />0</label>
+            <label class="nps-btn"><input type="radio" name="q9_nps_score" value="1" />1</label>
+            <label class="nps-btn"><input type="radio" name="q9_nps_score" value="2" />2</label>
+            <label class="nps-btn"><input type="radio" name="q9_nps_score" value="3" />3</label>
+            <label class="nps-btn"><input type="radio" name="q9_nps_score" value="4" />4</label>
+            <label class="nps-btn"><input type="radio" name="q9_nps_score" value="5" />5</label>
+            <label class="nps-btn"><input type="radio" name="q9_nps_score" value="6" />6</label>
+            <label class="nps-btn"><input type="radio" name="q9_nps_score" value="7" />7</label>
+            <label class="nps-btn"><input type="radio" name="q9_nps_score" value="8" />8</label>
+            <label class="nps-btn"><input type="radio" name="q9_nps_score" value="9" />9</label>
+            <label class="nps-btn"><input type="radio" name="q9_nps_score" value="10" checked />10</label>
+          </div>
+          <div class="rating-legend-row">
+            <span>0 = ไม่แนะนำ</span>
+            <span>10 = แนะนำแน่นอน</span>
+          </div>
+        </div>
+
+        <!-- ส่วนที่ 4: ข้อเสนอแนะเพื่อการพัฒนา -->
+        <div class="survey-section-card">
+          <div class="survey-section-header">
+            <span class="survey-section-num">4</span>
+            <h3 class="survey-section-title">ข้อเสนอแนะเพื่อการพัฒนา</h3>
+          </div>
+
+          <label class="survey-q-label">10. ฟีเจอร์ที่อยากให้มีเพิ่มเติมก่อนเปิดใช้งานจริง</label>
+          <textarea class="feedback-textarea" name="q10_feature_requests" placeholder="เช่น ตารางเดินรถสองแถวรอบ ม., จุดบริการถ่ายเอกสาร, แจ้งเตือนสอบล่วงหน้า..."></textarea>
+
+          <label class="survey-q-label">11. ข้อเสนอแนะหรือความคิดเห็นเพิ่มเติม</label>
+          <textarea class="feedback-textarea" name="q11_general_comments" placeholder="ข้อความถึงทีมผู้พัฒนาเพื่อปรับปรุงระบบให้ดียิ่งขึ้น..."></textarea>
+        </div>
+
+        <button type="submit" class="btn btn-primary" id="btn-submit-feedback" style="width:100%; padding:14px; font-size:1rem; font-weight:800; border-radius:14px; margin-bottom:20px;">
+          ส่งแบบประเมิน (รับ 30 เหรียญ)
+        </button>
       </form>
     </div>
 
@@ -1059,17 +1231,64 @@ function renderFeedbackView() {
   document.getElementById('btn-feedback-back').addEventListener('click', () => renderProfileView());
   bindBottomNavEvents();
 
-  document.getElementById('feedback-form').addEventListener('submit', (e) => {
+  document.getElementById('beta-survey-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const btn = document.getElementById('btn-submit-feedback');
     btn.disabled = true;
-    btn.textContent = 'กำลังส่ง...';
+    btn.textContent = 'กำลังส่งข้อมูล...';
 
-    setTimeout(() => {
-      localStorage.setItem('ram-roo-thang:feedback-done', 'true');
-      showToast('ส่งแบบประเมินสำเร็จ! ได้รับ 30 เหรียญ');
-      renderProfileView();
-    }, 500);
+    const form = e.target;
+    const formData = new FormData(form);
+
+    // รวบรวมคำตอบ Checkbox Q8
+    const issues = [];
+    form.querySelectorAll('input[name="q8_issues"]:checked').forEach((cb) => {
+      issues.push(cb.value);
+    });
+
+    const payload = {
+      timestamp: new Date().toISOString(),
+      userId: (profile && profile.userId) ? profile.userId : 'dev-user-' + Date.now(),
+      displayName: (profile && profile.displayName) ? profile.displayName : 'นักพัฒนา (Dev)',
+      deviceOS: detectedOS,
+      q1_overall_sat: Number(formData.get('q1_overall_sat') || 5),
+      q2_ease_of_use: Number(formData.get('q2_ease_of_use') || 5),
+      q3_speed_perf: Number(formData.get('q3_speed_perf') || 5),
+      q4_map_rating: Number(formData.get('q4_map_rating') || 5),
+      q5_schedule_rating: Number(formData.get('q5_schedule_rating') || 5),
+      q6_parking_rating: Number(formData.get('q6_parking_rating') || 5),
+      q7_top_feature: formData.get('q7_top_feature') || '',
+      q8_issues_found: issues,
+      q9_nps_score: Number(formData.get('q9_nps_score') || 10),
+      q10_feature_requests: (formData.get('q10_feature_requests') || '').trim(),
+      q11_general_comments: (formData.get('q11_general_comments') || '').trim()
+    };
+
+    // ส่งข้อมูลไปยัง Google Apps Script Web App Endpoint ถ้ามีการตั้งค่าไว้
+    const endpointUrl = localStorage.getItem('ram-roo-thang:feedback-sheet-url') || '';
+    if (endpointUrl) {
+      try {
+        await fetch(endpointUrl, {
+          method: 'POST',
+          mode: 'no-cors',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+      } catch (err) {
+        console.warn('Google Sheets sync warning:', err);
+      }
+    }
+
+    // บันทึกสำเนาลง LocalStorage
+    try {
+      const history = JSON.parse(localStorage.getItem('ram-roo-thang:feedback-responses') || '[]');
+      history.push(payload);
+      localStorage.setItem('ram-roo-thang:feedback-responses', JSON.stringify(history));
+    } catch (_) {}
+
+    localStorage.setItem('ram-roo-thang:feedback-done', 'true');
+    showToast('ส่งแบบประเมินสำเร็จ! ได้รับ 30 เหรียญ');
+    renderProfileView();
   });
 }
 
@@ -1131,6 +1350,7 @@ function renderSettingsView() {
 
 // renderProfileView — entry point สำหรับ ?mode=profile
 function renderProfileView() {
+  stopPresenceWatch();
   document.body.classList.remove('map-view');
   const container = getApp();
   const hasConsent = localStorage.getItem(CONSENT_STORAGE_KEY) === 'true';
@@ -1909,16 +2129,69 @@ function parkingZoneAt(location) {
   return hit || null;
 }
 
-// เรียกทุกครั้งที่รู้ตำแหน่งใหม่ — ถ้ายืนอยู่ในลานจอดและยังไม่ได้เลือกจุดหมายอะไร ให้เสนอสิ่งที่
-// ทำได้ตรงนั้นเลย (จำที่จอด / รายงานสภาพ) ไม่ต้องให้ผู้ใช้ไปหาเมนูเอง
+// เฝ้าตำแหน่งไว้ตลอดที่อยู่หน้าแผนที่ ไม่ใช่เช็คแค่ตอนเปิดแอปหรือตอนกดปุ่มตำแหน่ง —
+// เคสจริงคือเปิดแอปตั้งแต่อยู่นอกลาน แล้วค่อยขับ/เดินเข้าไปจอด ถ้าไม่เฝ้าไว้ก็จะไม่มีอะไรเกิดขึ้น
+// จนกว่าผู้ใช้จะเดาเองว่าต้องกดปุ่มตำแหน่ง ซึ่งไม่มีทางรู้
+//
+// ใช้ enableHighAccuracy: false เพราะแค่ต้องรู้ว่าอยู่ในลานไหน ลานเล็กสุดกว้างราว 30 ม.
+// ความละเอียดระดับนี้พอ และประหยัดแบตกว่าโหมดแม่นยำสูงมาก
+const PRESENCE_WATCH_OPTIONS = { enableHighAccuracy: false, maximumAge: 10000, timeout: 30000 };
+let presenceWatchId = null;
+
+function startPresenceWatch() {
+  if (presenceWatchId !== null || DEV_MODE || !navigator.geolocation) return;
+  presenceWatchId = navigator.geolocation.watchPosition(
+    (pos) => handlePresence({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+    () => {},
+    PRESENCE_WATCH_OPTIONS
+  );
+}
+
+function stopPresenceWatch() {
+  if (presenceWatchId === null) return;
+  navigator.geolocation.clearWatch(presenceWatchId);
+  presenceWatchId = null;
+}
+
+function handlePresence(location) {
+  appState.user.location = location;
+  appState.user.isInsideCampus = isWithinCampusBounds(location);
+  updateUserPin(location);
+  offerParkingActions(location);
+}
+
+// ยืนอยู่ในลานจอดและยังไม่ได้เลือกจุดหมายอะไร -> เสนอสิ่งที่ทำได้ตรงนั้นเลย (จำที่จอด / รายงานสภาพ)
+// ออกจากลานเมื่อไหร่ก็เก็บการ์ดไป และรีเซ็ตการปิดทิ้ง เพื่อให้ครั้งหน้าที่เข้าลานใหม่เสนออีกได้
 function offerParkingActions(location) {
   if (appState.target || NavigationController.isActive()) return;
   const here = parkingZoneAt(location);
-  if (!here) return;
+
+  if (!here) {
+    // ออกจากลานแล้วต้องรีเซ็ตทั้งคู่เสมอ — เดิมผูกเงื่อนไขไว้กับ offeredZoneId ซึ่งถูกล้างไปตอน
+    // ผู้ใช้กดปิดการ์ด ทำให้ dismissedZoneId ค้าง แล้วเดินกลับเข้าลานเดิมอีกครั้งก็ไม่เสนอให้อีกเลย
+    if (appState.parking.offeredZoneId) SheetManager.hide();
+    appState.parking.offeredZoneId = null;
+    appState.parking.dismissedZoneId = null;
+    return;
+  }
+
+  const zoneKey = (here.zone && here.zone.zone_id) || here.feature.name;
+  // ผู้ใช้กดปิดการ์ดไปแล้วสำหรับลานนี้ อย่าเด้งขึ้นมาใหม่ทุกครั้งที่ GPS ขยับ น่ารำคาญมาก
+  if (appState.parking.dismissedZoneId === zoneKey) return;
+  if (appState.parking.offeredZoneId === zoneKey) return;
+
+  appState.parking.offeredZoneId = zoneKey;
   showParkingActionSheet(here, location);
 }
 
 function showParkingActionSheet(here, location) {
+  const zoneKey = (here.zone && here.zone.zone_id) || here.feature.name;
+  SheetManager.setOnClose(() => {
+    appState.parking.dismissedZoneId = zoneKey;
+    appState.parking.offeredZoneId = null;
+    SheetManager.hide();
+    SheetManager.setOnClose(clearTarget);
+  });
   const zoneName = here.feature.name;
   const saved = appState.car;
   SheetManager.showParkingActionSheet({
