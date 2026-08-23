@@ -333,9 +333,10 @@ function drawOutsideMask() {
     { lat: -85, lng: -180 }, { lat: -85, lng: 0 }, { lat: -85, lng: 180 },
     { lat: 85, lng: 180 }, { lat: 85, lng: 0 }, { lat: 85, lng: -180 },
   ];
+  // วงในต้องวนสวนทางกับวงนอก ไม่งั้น Google ไม่เจาะรูให้ กลายเป็นแผ่นทึบคลุมทั้งจอรวมในแคมปัสด้วย
   const campus = [
-    { lat: g.minLat, lng: g.minLng }, { lat: g.minLat, lng: g.maxLng },
-    { lat: g.maxLat, lng: g.maxLng }, { lat: g.maxLat, lng: g.minLng },
+    { lat: g.minLat, lng: g.minLng }, { lat: g.maxLat, lng: g.minLng },
+    { lat: g.maxLat, lng: g.maxLng }, { lat: g.minLat, lng: g.maxLng },
   ];
   new google.maps.Polygon({
     map: appState.map.instance,
@@ -786,13 +787,19 @@ function updateLayerToggleAvailability() {
 
 // วาดหมุดเป็น SVG เองทั้งคู่ เพราะหมุดมาตรฐานของ Google เป็นสีแดงสด ชนกับสีพื้นที่ลานจอด
 // (แดง = เต็ม) จนสับสนว่าอันไหนคือจุดหมาย
+// viewBox คงที่ 32x42 แต่ย่อขนาดที่วาดจริงลงเหลือ 24x32 — หมุดใหญ่เกินไปบังตัวแผนที่กับป้ายชิป
+// รอบๆ จนดูรก โดยเฉพาะตอนซูมใกล้ที่หมุดกินพื้นที่ตึกทั้งหลัง
+const PIN_WIDTH = 24;
+const PIN_HEIGHT = 32;
+
 function pinIcon(fill, glyph) {
-  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="42" viewBox="0 0 32 42">'
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${PIN_WIDTH}" height="${PIN_HEIGHT}" viewBox="0 0 32 42">`
     + `<path d="M16 0C7.2 0 0 7.2 0 16c0 11.2 16 26 16 26s16-14.8 16-26c0-8.8-7.2-16-16-16z" fill="${fill}"/>`
     + `<g transform="translate(16 16)" fill="#ffffff">${glyph}</g></svg>`;
   return {
     url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
-    anchor: new google.maps.Point(16, 42),
+    scaledSize: new google.maps.Size(PIN_WIDTH, PIN_HEIGHT),
+    anchor: new google.maps.Point(PIN_WIDTH / 2, PIN_HEIGHT),
   };
 }
 
