@@ -1826,7 +1826,6 @@ function setViewMode(is3D) {
 // ทำให้สะดุดชัดเจน (รอเน็ต) และการ์ดกระพริบหาย-โผล่ — เส้นทางไม่ได้เปลี่ยน แค่วาดของเดิมซ้ำก็พอ
 // โหมดนำทางก็ไม่หยุด NavigationController ไม่ได้ผูกกับ map instance (คุยผ่าน callback อย่างเดียว)
 function rebuildMap() {
-  stopHeadingFollow();
   const previous = appState.map.instance;
   const center = previous.getCenter();
   appState.map.rebuilding = true;
@@ -2428,20 +2427,7 @@ async function acceptLocation() {
   }
 }
 
-// --- ตำแหน่งของฉัน + หมุนแผนที่ตามเข็มทิศ ---
-
-// อัปเดตทิศถี่มาก (เซ็นเซอร์ยิงหลายสิบครั้งต่อวินาที) จำกัดไว้ไม่ให้สั่งหมุนแผนที่ถี่เกินจำเป็น
-// และข้ามการหมุนที่เปลี่ยนน้อยกว่า 3 องศา ไม่งั้นแผนที่จะสั่นตลอดเวลาจากค่าเข็มทิศที่แกว่ง
-const HEADING_MIN_DELTA_DEG = 3;
-const HEADING_THROTTLE_MS = 200;
-
-let headingListener = null;
-let lastHeadingAppliedAt = 0;
-let lastHeading = null;
-
-function isFollowingMe() {
-  return headingListener !== null;
-}
+// --- ตำแหน่งของฉัน ---
 
 // ปุ่มนี้ทำงานได้เฉพาะในรั้วมหาลัย ถ้ารู้แน่แล้วว่าอยู่นอกก็ซ่อนไปเลย ดีกว่าให้กดแล้วเจอข้อความ
 // ปฏิเสธ — ปุ่มที่กดแล้วไม่มีอะไรเกิดขึ้นสร้างความสับสนมากกว่าปุ่มที่ไม่อยู่ตรงนั้นตั้งแต่แรก
@@ -2451,68 +2437,13 @@ function isFollowingMe() {
 function updateMyLocationAvailability() {
   const btn = document.getElementById('my-location-btn');
   if (!btn) return;
-  const knownOutside = appState.user.isGpsAllowed && appState.user.location && !appState.user.isInsideCampus;
-  btn.hidden = knownOutside;
-  if (knownOutside && isFollowingMe()) stopHeadingFollow();
+  btn.hidden = Boolean(appState.user.isGpsAllowed && appState.user.location && !appState.user.isInsideCampus);
 }
 
-function readCompassHeading(event) {
-  // iOS ให้ค่าเข็มทิศจริงมาใน webkitCompassHeading ส่วน Android ใช้ alpha ที่นับสวนทาง
-  if (typeof event.webkitCompassHeading === 'number') return event.webkitCompassHeading;
-  if (typeof event.alpha === 'number') return (360 - event.alpha) % 360;
-  return null;
-}
-
-function onDeviceOrientation(event) {
-  const heading = readCompassHeading(event);
-  if (heading === null || !appState.map.instance) return;
-  const now = Date.now();
-  if (now - lastHeadingAppliedAt < HEADING_THROTTLE_MS) return;
-  if (lastHeading !== null && Math.abs(heading - lastHeading) < HEADING_MIN_DELTA_DEG) return;
-  lastHeadingAppliedAt = now;
-  lastHeading = heading;
-  appState.map.instance.setHeading(heading);
-}
-
-async function startHeadingFollow() {
-  // iOS ต้องขออนุญาตใช้เซ็นเซอร์ และต้องขอจากใน user gesture เท่านั้น (ปุ่มนี้เป็น gesture อยู่แล้ว)
-  const DOE = window.DeviceOrientationEvent;
-  if (DOE && typeof DOE.requestPermission === 'function') {
-    try {
-      if ((await DOE.requestPermission()) !== 'granted') return false;
-    } catch (err) {
-      return false;
-    }
-  }
-  if (!DOE) return false;
-  headingListener = onDeviceOrientation;
-  // deviceorientationabsolute ให้ทิศอ้างอิงทิศเหนือจริงบน Android ส่วน iOS ใช้ deviceorientation
-  window.addEventListener('deviceorientationabsolute', headingListener, true);
-  window.addEventListener('deviceorientation', headingListener, true);
-  return true;
-}
-
-function stopHeadingFollow() {
-  if (headingListener) {
-    window.removeEventListener('deviceorientationabsolute', headingListener, true);
-    window.removeEventListener('deviceorientation', headingListener, true);
-    headingListener = null;
-  }
-  lastHeading = null;
-  const btn = document.getElementById('my-location-btn');
-  if (btn) btn.classList.remove('active');
-  if (appState.map.instance) appState.map.instance.setHeading(CAMERA_PRESETS[currentMode()].heading);
-}
-
-// กดครั้งแรก = ไปที่ตำแหน่งเรา + หมุนแผนที่ตามทิศที่หันอยู่ กดซ้ำ = เลิกหมุนตาม
-// ใช้ได้เฉพาะตอนอยู่ในพื้นที่มหาวิทยาลัยตามที่ทีมกำหนด — นอกรั้วบอกให้รู้ว่าทำไมกดแล้วไม่เกิดอะไร
+// เลื่อนแผนที่ไปที่ตัวเราอย่างเดียว ไม่หมุนตามเข็มทิศแล้ว — การหมุนเป็นหน้าที่ของโหมดนำทาง
+// ซึ่งใช้ทิศจากการเคลื่อนที่จริง นิ่งกว่าเข็มทิศของเครื่องที่สะบัดตามการถือมือถือ
+// และไม่ต้องขอสิทธิ์เซ็นเซอร์ทิศทางบน iOS อีกต่อไป
 async function toggleMyLocation() {
-  const btn = document.getElementById('my-location-btn');
-  if (isFollowingMe()) {
-    stopHeadingFollow();
-    return;
-  }
-
   let location;
   try {
     location = await getUserLocation();
@@ -2532,8 +2463,6 @@ async function toggleMyLocation() {
   appState.map.instance.panTo(location);
   nudgeMapRepaint(appState.map.instance);
   offerParkingActions(location);
-  const started = await startHeadingFollow();
-  if (started && btn) btn.classList.add('active');
 }
 
 // --- โหมดนำทาง ---
@@ -2598,6 +2527,11 @@ function startNavigation(target, route) {
         SheetManager.updateNavigationStats(formatDistance(status.remainingMeters), `${status.remainingMinutes} นาที`);
       }
     },
+    // หันแผนที่ตามทิศที่เดินจริง (heading-up) ทำได้ทั้ง 2D และ 3D เพราะทั้งคู่เป็น vector แล้ว
+    // ใช้ทิศจากการเคลื่อนที่ ไม่ใช่เข็มทิศของเครื่อง เพราะคนเดินถือมือถือเอียงไปมา ทิศจะสะบัด
+    onHeading: (heading) => {
+      if (appState.map.instance) appState.map.instance.setHeading(heading);
+    },
     onArrive: () => {
       SheetManager.updateNavigationStats('ถึงแล้ว', '-');
       if (target.type === 'PARKING') showParkingArrival(target);
@@ -2617,6 +2551,8 @@ function startNavigation(target, route) {
     },
     onStop: () => {
       appState.navigation.path = [];
+      // คืนมุมกล้องตามโหมดที่ใช้อยู่ ไม่ปล่อยให้ค้างเอียงตามทิศสุดท้ายที่เดิน
+      if (appState.map.instance) appState.map.instance.setHeading(CAMERA_PRESETS[currentMode()].heading);
       // กลับไปการ์ดปกติให้กดเริ่มเดินทางใหม่ได้ ถ้ายังเลือกจุดหมายเดิมค้างอยู่
       if (appState.target) selectTarget(appState.target);
     },

@@ -9,6 +9,10 @@
 (function () {
   // ถือว่าถึงจุดหมายเมื่อเข้าใกล้ปลายทางเท่านี้ — GPS มือถือกลางแจ้งคลาดเคลื่อนราว 5-15 ม.
   const ARRIVED_RADIUS_M = 25;
+
+  // ต้องขยับอย่างน้อยเท่านี้ถึงจะคำนวณทิศการเดินใหม่ — GPS นิ่งๆ ก็ยังแกว่งอยู่ 3-5 ม.
+  // ถ้าคำนวณทุกจุดที่ได้มา ทิศจะสะบัดไปมาแล้วแผนที่หมุนวนจนเวียนหัวทั้งที่ยืนอยู่กับที่
+  const HEADING_MIN_MOVE_M = 6;
   const WALKING_SPEED_M_PER_MIN = 75;
 
   // ห่างจากเส้นทางเกินเท่านี้ = น่าจะเดินหลง — ตั้งกว้างกว่าความคลาดเคลื่อน GPS (5-15 ม.) พอสมควร
@@ -178,6 +182,7 @@
       stepEnds: buildStepEnds(config.steps || []),
       progressMeters: 0,
       stepIndex: 0,
+      lastHeadingPoint: null,
       spokenStepIndex: -1,
       muted: false,
       offRouteCount: 0,
@@ -185,6 +190,7 @@
       destinationName: config.destinationName || '',
       onPosition: config.onPosition || (() => {}),
       onArrive: config.onArrive || (() => {}),
+      onHeading: config.onHeading || (() => {}),
       onOffRoute: config.onOffRoute || (() => {}),
       onStop: config.onStop || (() => {}),
       cancelWatch: null,
@@ -212,6 +218,7 @@
     session.onPosition(location);
 
     updateProgress(location);
+    updateHeading(location);
 
     const last = session.steps[session.steps.length - 1];
     if (last && !session.arrived && distanceBetween(location, last.endLocation) < ARRIVED_RADIUS_M) {
@@ -229,6 +236,22 @@
       if (step) speak(step.instruction, session.muted);
     }
     render(location);
+  }
+
+  // ทิศการเดินจริงคำนวณจากจุดสองจุดที่เดินผ่าน ไม่ได้ใช้ทิศของเส้นทางที่วางไว้ — ถ้าเดินหลงหรือ
+  // เดินสวนทาง แผนที่ต้องหันตามที่เดินจริง ไม่ใช่หันตามทางที่ควรจะเดิน ไม่งั้นจะยิ่งงง
+  function updateHeading(location) {
+    if (!session.lastHeadingPoint) {
+      session.lastHeadingPoint = location;
+      return;
+    }
+    if (distanceBetween(session.lastHeadingPoint, location) < HEADING_MIN_MOVE_M) return;
+    const heading = google.maps.geometry.spherical.computeHeading(
+      new google.maps.LatLng(session.lastHeadingPoint.lat, session.lastHeadingPoint.lng),
+      new google.maps.LatLng(location.lat, location.lng)
+    );
+    session.lastHeadingPoint = location;
+    session.onHeading((heading + 360) % 360);
   }
 
   function remainingMeters() {
