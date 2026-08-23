@@ -1485,3 +1485,9 @@ body.is-searching #action-sheet-slot {
 .sheet-icon-btn:active {
   background: #e8e8e8;
 }
+
+/* ปุ่มตำแหน่งของฉันตอนกำลังหมุนตามเข็มทิศ — ย้ำว่ากำลังทำงานอยู่ กดซ้ำเพื่อเลิก */
+.view-toggle-btn.active {
+  background: #1c1c1e;
+  color: #ffffff;
+}

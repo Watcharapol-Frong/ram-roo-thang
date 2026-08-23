@@ -1826,6 +1826,7 @@ function setViewMode(is3D) {
 // ทำให้สะดุดชัดเจน (รอเน็ต) และการ์ดกระพริบหาย-โผล่ — เส้นทางไม่ได้เปลี่ยน แค่วาดของเดิมซ้ำก็พอ
 // โหมดนำทางก็ไม่หยุด NavigationController ไม่ได้ผูกกับ map instance (คุยผ่าน callback อย่างเดียว)
 function rebuildMap() {
+  stopCompassFollow();
   const previous = appState.map.instance;
   const center = previous.getCenter();
   appState.map.rebuilding = true;
@@ -2437,13 +2438,82 @@ async function acceptLocation() {
 function updateMyLocationAvailability() {
   const btn = document.getElementById('my-location-btn');
   if (!btn) return;
-  btn.hidden = Boolean(appState.user.isGpsAllowed && appState.user.location && !appState.user.isInsideCampus);
+  const knownOutside = Boolean(appState.user.isGpsAllowed && appState.user.location && !appState.user.isInsideCampus);
+  btn.hidden = knownOutside;
+  if (knownOutside && isCompassFollowing()) stopCompassFollow();
 }
 
-// เลื่อนแผนที่ไปที่ตัวเราอย่างเดียว ไม่หมุนตามเข็มทิศแล้ว — การหมุนเป็นหน้าที่ของโหมดนำทาง
-// ซึ่งใช้ทิศจากการเคลื่อนที่จริง นิ่งกว่าเข็มทิศของเครื่องที่สะบัดตามการถือมือถือ
-// และไม่ต้องขอสิทธิ์เซ็นเซอร์ทิศทางบน iOS อีกต่อไป
+// หมุนตามเข็มทิศ — ใช้ได้เฉพาะตอน "ยังไม่เริ่มเดินทาง" เท่านั้น
+//
+// ระหว่างนำทางใช้ทิศจากการเคลื่อนที่ (heading-up) ซึ่งนิ่งกว่ามาก เพราะคนเดินถือมือถือเอียงไปมา
+// แต่ตอนยืนนิ่งๆ heading-up ตอบไม่ได้เลย (ไม่มีการเคลื่อนที่ให้คำนวณ) ซึ่งเป็นจังหวะที่คนต้องการ
+// รู้ทิศมากที่สุด — เพิ่งออกจากตึกแล้วงงว่าต้องหันไปทางไหน เข็มทิศตอบได้จังหวะนี้จังหวะเดียว
+//
+// สองระบบนี้ห้ามทำงานพร้อมกันเด็ดขาด ไม่งั้นจะแย่งกันสั่งหมุนแผนที่ (เคยเจอมาแล้ว)
+// จึงกันไว้ 2 ชั้น: เริ่มไม่ได้ถ้ากำลังนำทาง และหยุดให้อัตโนมัติเมื่อเริ่มนำทาง
+const HEADING_MIN_DELTA_DEG = 3;
+const HEADING_THROTTLE_MS = 200;
+
+let compassListener = null;
+let lastCompassAt = 0;
+let lastCompassHeading = null;
+
+function isCompassFollowing() {
+  return compassListener !== null;
+}
+
+function onDeviceOrientation(event) {
+  if (!appState.map.instance || NavigationController.isActive()) return;
+  // iOS ให้ค่าเข็มทิศจริงใน webkitCompassHeading ส่วน Android ใช้ alpha ที่นับสวนทาง
+  const heading = typeof event.webkitCompassHeading === 'number'
+    ? event.webkitCompassHeading
+    : (typeof event.alpha === 'number' ? (360 - event.alpha) % 360 : null);
+  if (heading === null) return;
+
+  const now = Date.now();
+  if (now - lastCompassAt < HEADING_THROTTLE_MS) return;
+  if (lastCompassHeading !== null && Math.abs(heading - lastCompassHeading) < HEADING_MIN_DELTA_DEG) return;
+  lastCompassAt = now;
+  lastCompassHeading = heading;
+  appState.map.instance.setHeading(heading);
+}
+
+async function startCompassFollow() {
+  if (NavigationController.isActive()) return false;
+  const DOE = window.DeviceOrientationEvent;
+  if (!DOE) return false;
+  // iOS ต้องขออนุญาตจากใน user gesture เท่านั้น — ปุ่มนี้เป็น gesture อยู่แล้ว
+  if (typeof DOE.requestPermission === 'function') {
+    try {
+      if ((await DOE.requestPermission()) !== 'granted') return false;
+    } catch (err) {
+      return false;
+    }
+  }
+  compassListener = onDeviceOrientation;
+  window.addEventListener('deviceorientationabsolute', compassListener, true);
+  window.addEventListener('deviceorientation', compassListener, true);
+  return true;
+}
+
+function stopCompassFollow() {
+  if (compassListener) {
+    window.removeEventListener('deviceorientationabsolute', compassListener, true);
+    window.removeEventListener('deviceorientation', compassListener, true);
+    compassListener = null;
+  }
+  lastCompassHeading = null;
+  const btn = document.getElementById('my-location-btn');
+  if (btn) btn.classList.remove('active');
+  if (appState.map.instance) appState.map.instance.setHeading(CAMERA_PRESETS[currentMode()].heading);
+}
+
+// กดครั้งแรก = ไปที่ตัวเรา + หมุนตามทิศที่หันอยู่ กดซ้ำ = เลิกหมุนตาม
 async function toggleMyLocation() {
+  if (isCompassFollowing()) {
+    stopCompassFollow();
+    return;
+  }
   let location;
   try {
     location = await getUserLocation();
@@ -2463,6 +2533,10 @@ async function toggleMyLocation() {
   appState.map.instance.panTo(location);
   nudgeMapRepaint(appState.map.instance);
   offerParkingActions(location);
+
+  const started = await startCompassFollow();
+  const btn = document.getElementById('my-location-btn');
+  if (started && btn) btn.classList.add('active');
 }
 
 // --- โหมดนำทาง ---
@@ -2510,6 +2584,8 @@ function simulateWalk(onUpdate) {
 
 function startNavigation(target, route) {
   if (!route.steps || !route.steps.length) return;
+  // เข็มทิศกับ heading-up ห้ามทำงานพร้อมกัน ตัวไหนเริ่มทีหลังชนะ
+  stopCompassFollow();
   appState.navigation.path = route.path || [];
 
   NavigationController.start({
