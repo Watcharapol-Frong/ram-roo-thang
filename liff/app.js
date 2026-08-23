@@ -322,33 +322,6 @@ async function loadMasterFeatures() {
   return masterFeatures;
 }
 
-// พื้นที่นอกรั้วมหาลัยรกตามาก (ตรอกซอกซอย ร้านค้า ป้ายเต็มไปหมด) แต่จะไปตั้ง Map style ให้ซ่อน
-// ก็ไม่ได้ เพราะสไตล์ที่ผูกกับ Map ID ทำให้ตึก 3D ของ Google หายไปทั้งหมด (เจอมาแล้ว)
-// เลยใช้วิธีวาดแผ่นสีขาวโปร่งคลุมทั้งโลกแล้วเจาะรูตรงแคมปัสแทน — ข้างนอกจางลงแต่ยังพอเห็นเป็นบริบท
-// ส่วนข้างในคมชัดเต็มที่ และไม่ไปยุ่งกับสไตล์แผนที่เลยจึงไม่กระทบ 3D
-function drawOutsideMask() {
-  const g = CAMPUS_CONSTANTS.GEOFENCE;
-  // วงนอกไล่ทวนเข็ม วงในไล่ตามเข็ม -> Google เจาะวงในเป็นรู
-  const world = [
-    { lat: -85, lng: -180 }, { lat: -85, lng: 0 }, { lat: -85, lng: 180 },
-    { lat: 85, lng: 180 }, { lat: 85, lng: 0 }, { lat: 85, lng: -180 },
-  ];
-  // วงในต้องวนสวนทางกับวงนอก ไม่งั้น Google ไม่เจาะรูให้ กลายเป็นแผ่นทึบคลุมทั้งจอรวมในแคมปัสด้วย
-  const campus = [
-    { lat: g.minLat, lng: g.minLng }, { lat: g.maxLat, lng: g.minLng },
-    { lat: g.maxLat, lng: g.maxLng }, { lat: g.minLat, lng: g.maxLng },
-  ];
-  new google.maps.Polygon({
-    map: appState.map.instance,
-    paths: [world, campus],
-    strokeWeight: 0,
-    fillColor: '#f7f7f7',
-    fillOpacity: 0.72,
-    clickable: false,
-    zIndex: -1,
-  });
-}
-
 function isWithinCampusBounds({ lat, lng }) {
   const g = CAMPUS_CONSTANTS.GEOFENCE;
   return lat >= g.minLat && lat <= g.maxLat && lng >= g.minLng && lng <= g.maxLng;
@@ -406,7 +379,6 @@ async function renderMapView({ presetDestId, presetZoneId } = {}) {
   });
   RouteCalculator.init(appState.map.instance);
   SheetManager.setOnClose(clearTarget);
-  drawOutsideMask();
   appState.map.instance.addListener('center_changed', updateLayerToggleAvailability);
   appState.map.instance.addListener('zoom_changed', updateBuildingMarkerVisibility);
   updateLayerToggleAvailability();
