@@ -356,6 +356,16 @@ body.map-view {
   font-weight: 700;
 }
 
+/* ปุ่มมุมขวาบนลอยทับชื่อสถานที่ยาวๆ — กันที่ให้ตามจำนวนปุ่มที่มีจริงในการ์ดใบนั้น
+   (ปุ่มแชร์ + ปิด = 2 ปุ่ม, บางการ์ดมีแค่ปุ่มปิด) ใช้ selector พี่น้องเพราะปุ่มอยู่ก่อน h2 ใน DOM */
+.sheet-actions + h2 {
+  padding-right: 84px;
+}
+
+.sheet-close + h2 {
+  padding-right: 46px;
+}
+
 .nav-info-card p {
   margin: 0 0 14px;
 }
@@ -763,10 +773,11 @@ body.map-view {
   flex-shrink: 0;
 }
 
-/* --- Feedback Form Sub-view --- */
+/* --- Feedback Form Sub-view (Beta Test Comprehensive Survey) --- */
 .feedback-header-bar {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
   margin-bottom: 16px;
 }
@@ -778,47 +789,183 @@ body.map-view {
   padding: 8px 12px;
   border: none;
   border-radius: 8px;
-  background: var(--bg);
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
   color: var(--text);
   font-size: 0.85rem;
   font-weight: 700;
   cursor: pointer;
 }
 
-.feedback-rating-group {
-  display: flex;
-  gap: 8px;
-  margin: 10px 0 16px;
-  overflow-x: auto;
+.survey-section-card {
+  background: #ffffff;
+  border: 1px solid #edf2f7;
+  border-radius: 16px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+  padding: 18px 16px;
+  margin-bottom: 14px;
 }
 
-.rating-pill-label {
-  flex: 1;
-  min-width: 60px;
-  text-align: center;
-  padding: 10px 6px;
-  border: 1.5px solid var(--border);
-  border-radius: 10px;
-  font-size: 0.82rem;
+.survey-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.survey-section-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #e8f5e9;
+  color: #1b5e20;
+  font-size: 0.78rem;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+.survey-section-title {
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: #0f172a;
+  margin: 0;
+}
+
+.survey-q-label {
+  display: block;
+  font-size: 0.88rem;
   font-weight: 700;
-  color: var(--text);
+  color: #1e293b;
+  margin: 14px 0 6px;
+}
+
+.survey-q-label:first-of-type {
+  margin-top: 6px;
+}
+
+.survey-q-desc {
+  font-size: 0.76rem;
+  color: #64748b;
+  margin: -2px 0 8px;
+}
+
+/* 1-5 Number Ratings Row */
+.rating-num-group {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.rating-num-btn {
+  flex: 1;
+  text-align: center;
+  padding: 9px 2px;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 0.92rem;
+  font-weight: 800;
   cursor: pointer;
   transition: all 0.15s;
 }
 
-.rating-pill-label input {
+.rating-num-btn input {
   display: none;
 }
 
-.rating-pill-label:has(input:checked) {
+.rating-num-btn:has(input:checked) {
   border-color: var(--accent);
-  background: #e8f5e9;
-  color: #1b5e20;
+  background: #06c755;
+  color: #ffffff;
+  box-shadow: 0 2px 6px rgba(6, 199, 85, 0.25);
+}
+
+.rating-legend-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.72rem;
+  color: #94a3b8;
+  margin-bottom: 12px;
+}
+
+/* NPS 0-10 Scale Grid */
+.nps-grid {
+  display: grid;
+  grid-template-columns: repeat(11, 1fr);
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.nps-btn {
+  text-align: center;
+  padding: 9px 0;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 0.8rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.nps-btn input {
+  display: none;
+}
+
+.nps-btn:has(input:checked) {
+  border-color: var(--accent);
+  background: #06c755;
+  color: #ffffff;
+  box-shadow: 0 2px 6px rgba(6, 199, 85, 0.25);
+}
+
+/* Choice Option Card (Radio & Checkbox) */
+.choice-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.choice-option-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 12px;
+  background: #f8fafc;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: #334155;
+}
+
+.choice-option-label input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.choice-option-label:has(input:checked) {
+  border-color: var(--accent);
+  background: #f0fdf4;
+  color: #166534;
 }
 
 .feedback-textarea {
   width: 100%;
-  min-height: 80px;
+  min-height: 76px;
   padding: 10px 12px;
   border: 1.5px solid var(--border);
   border-radius: 10px;
@@ -827,7 +974,7 @@ body.map-view {
   color: var(--text);
   outline: none;
   resize: vertical;
-  margin-bottom: 14px;
+  margin-bottom: 12px;
 }
 
 .feedback-textarea:focus {
@@ -1313,3 +1460,33 @@ body.is-searching #action-sheet-slot {
 .report-red    { background: #e74c3c; }
 
 .report-btn:active { filter: brightness(0.92); }
+
+/* ปุ่มไอคอนมุมขวาบนของการ์ด (แชร์ / ปิด) เรียงแถวเดียวกัน */
+.sheet-actions {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  display: flex;
+  gap: 8px;
+}
+
+.sheet-actions .sheet-close {
+  position: static;
+}
+
+.sheet-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 50%;
+  background: var(--bg);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.sheet-icon-btn:active {
+  background: #e8e8e8;
+}
