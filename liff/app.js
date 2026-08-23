@@ -235,11 +235,11 @@ const LAYER_STYLE = {
 // ตั้งกล้องด้วย zoom ไม่ใช่ altitude จึงต้องแปลงก่อน ใช้สูตรเทียบมาตรฐานของ Google Earth
 //   altitude = 35,200,000 / 2^zoom   =>   zoom = log2(35,200,000 / altitude)
 // เป็นค่าประมาณ ไม่ได้คิดผลของละติจูด (ที่ 13.75° ต่างราว 3%) ถ้าอยากเป๊ะกว่านี้ต้องวัดจากจอจริง
-// 605 ม. -> zoom ~15.83 (ภาพรวมทั้งแคมปัส) / 165 ม. -> zoom ~17.70 (ใกล้พอเห็นอาคาร 3D)
+// 400 ม. -> zoom ~16.42 (ภาพรวมทั้งแคมปัส) / 165 ม. -> zoom ~17.70 (ใกล้พอเห็นอาคาร 3D)
 const ZOOM_REFERENCE_ALTITUDE_M = 35200000;
 
 const CAMERA_PRESETS = {
-  '2d': { altitudeMeters: 605, tilt: 0, heading: 0 },
+  '2d': { altitudeMeters: 400, tilt: 0, heading: 0 },
   '3d': { altitudeMeters: 165, tilt: 60, heading: 20 },
 };
 
