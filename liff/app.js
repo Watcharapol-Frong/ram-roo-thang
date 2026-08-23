@@ -757,10 +757,6 @@ function renderDaysLeft(days) {
 // profile = { userId, displayName, pictureUrl } | null
 function renderProfileHeaderHTML(profile) {
   const name = (profile && profile.displayName) ? escapeXml(profile.displayName) : '—';
-  // แสดง userId 8 ตัวแรก ตัดส่วนที่เหลือเป็น "..." (ไม่เปิดเผย ID เต็มบนหน้าจอ)
-  const uid = (profile && profile.userId)
-    ? escapeXml(profile.userId.slice(0, 8) + (profile.userId.length > 8 ? '…' : ''))
-    : '';
 
   // รูปโปรไฟล์: ถ้ามี pictureUrl ใช้ <img>, ไม่มีใช้ตัวอักษรแรกของชื่อ
   const firstChar = (profile && profile.displayName)
@@ -770,27 +766,12 @@ function renderProfileHeaderHTML(profile) {
     ? `<img class="profile-avatar" src="${escapeXml(profile.pictureUrl)}" alt="รูปโปรไฟล์ LINE" />`
     : `<div class="profile-avatar-placeholder">${firstChar}</div>`;
 
-  // SVG arc: circumference ≈ 364 px (r=58), dasharray 215 = ~60% ของวง
-  // rotate(-145) วางจุดเริ่มต้นที่ประมาณ 11 นาฬิกา ไปตามเข็มถึงประมาณ 5 นาฬิกา (เหมือน mockup)
   return `
     <div class="card profile-header">
       <div class="profile-avatar-ring">
-        <svg class="ring-svg" viewBox="0 0 126 126" fill="none" aria-hidden="true">
-          <circle cx="63" cy="63" r="58"
-            stroke="#06c755"
-            stroke-width="5"
-            stroke-linecap="round"
-            stroke-dasharray="215 149"
-            transform="rotate(-145 63 63)"
-          />
-        </svg>
         ${avatarHTML}
-        <div class="profile-badge-wrap">
-          <span class="profile-badge">LINE</span>
-        </div>
       </div>
       <h2 class="profile-name">${name}</h2>
-      ${uid ? `<p class="profile-sub">ID: ${uid}</p>` : ''}
     </div>
   `;
 }
@@ -1111,8 +1092,24 @@ function pinIcon(fill, glyph) {
 }
 
 const TARGET_GLYPH = '<circle r="6"/>';
-// คนยืน: หัว + ลำตัว/ขา วาดหยาบๆ พอให้รู้ว่าเป็นคนที่ขนาด 32px
-const USER_GLYPH = '<circle cy="-4.5" r="3"/><path d="M0 -1.5c-2.6 0-4 1.6-4 3.6V4h2.2l.5 4h2.6l.5-4H4V2.1c0-2-1.4-3.6-4-3.6z"/>';
+
+// ตำแหน่งผู้ใช้ใช้จุดกลมแบบเดียวกับ "ตำแหน่งของฉัน" ที่คนคุ้นจาก Google Maps/แอปนำทางทั่วไป
+// ไม่ใช่หมุดหยดน้ำ — หมุดหยดน้ำสื่อว่า "จุดหมายอยู่ตรงนี้" ซึ่งควรเหลือไว้ให้ปลายทางอย่างเดียว
+// จะได้ไม่มีหมุดหน้าตาเหมือนกันสองอันบนเส้นทางเดียว และจุดกลมกินพื้นที่น้อยกว่ามาก
+const USER_DOT_SIZE = 26;
+
+function userDotIcon() {
+  const r = USER_DOT_SIZE / 2;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${USER_DOT_SIZE}" height="${USER_DOT_SIZE}" viewBox="0 0 ${USER_DOT_SIZE} ${USER_DOT_SIZE}">`
+    + `<circle cx="${r}" cy="${r}" r="${r}" fill="#1560ff" opacity="0.16"/>`
+    + `<circle cx="${r}" cy="${r}" r="7" fill="#ffffff"/>`
+    + `<circle cx="${r}" cy="${r}" r="5" fill="#1560ff"/></svg>`;
+  return {
+    url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
+    scaledSize: new google.maps.Size(USER_DOT_SIZE, USER_DOT_SIZE),
+    anchor: new google.maps.Point(r, r),
+  };
+}
 
 function updateTargetPin(target) {
   const map = appState.map.instance;
@@ -1142,7 +1139,7 @@ function updateUserPin(location) {
     position: location,
     map,
     title: 'ตำแหน่งของคุณ',
-    icon: pinIcon('#1560ff', USER_GLYPH),
+    icon: userDotIcon(),
     zIndex: 998,
   });
 }
