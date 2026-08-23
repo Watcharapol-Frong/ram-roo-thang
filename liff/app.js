@@ -375,10 +375,15 @@ function highlightBuildingMarker(buildingId) {
   });
 }
 
-// สีหมุดลานจอด = สถานะความหนาแน่นปัจจุบัน (เขียว/เหลือง/แดง) ตาม §1
-// ดึงทุกโซนจาก /api/parking/zones ครั้งเดียว (เดิมยิง /api/parking/zone ทีละโซนตาม
-// nearest_parking_zone_id ของอาคาร = 8 request ต่อการเปิดแผนที่ 1 ครั้ง) — ผลพลอยได้คือ
-// โซนที่ยังไม่มีอาคารไหนอ้างถึงก็ขึ้นหมุดด้วย ซึ่งถูกต้องกว่าเดิมสำหรับหน้าแผนที่รวม
+// ลานจอดวาดเป็น "พื้นที่" ไม่ใช่หมุดจุดเดียว — สีพื้นที่คือสถานะความหนาแน่นปัจจุบัน (เขียว/เหลือง/แดง)
+// ตาม §1 ดึงทุกโซนจาก /api/parking/zones ครั้งเดียว
+//
+// โซนไหนมี polygon (พิกัดขอบจริง) ก็วาดตามรูปจริง ส่วนโซนที่ยังไม่มีข้อมูลขอบเขตให้วาดเป็นวงกลม
+// รัศมี 25 ม. แทนไปก่อน (เทียบเท่าพื้นที่ลานจอดจริงที่วัดได้จาก OSM คือ ~57x38 ม.) — เป็นค่าประมาณ
+// ไม่ใช่ขอบเขตจริง พอทีมวัดขอบลานจอดจริงมาใส่ field polygon ใน baseline-dataset.json ได้เลย
+// ไม่ต้องแก้โค้ดตรงนี้
+const PARKING_FALLBACK_RADIUS_METERS = 25;
+
 async function placeParkingMarkers() {
   let zonesData;
   try {
@@ -390,20 +395,22 @@ async function placeParkingMarkers() {
 
   (zonesData.zones || []).forEach(({ zone, parking_status: parkingStatus }) => {
     const status = (parkingStatus && parkingStatus.status) || zone.baseline_status;
-    const marker = new google.maps.Marker({
-      position: { lat: zone.lat, lng: zone.lng },
+    const color = PARKING_STATUS_COLOR[status] || '#999999';
+    const style = {
       map: appState.map.instance,
-      title: `${zone.zone_name} (${PARKING_STATUS_LABEL[status] || status})`,
-      icon: {
-        path: google.maps.SymbolPath.CIRCLE,
-        scale: 8,
-        fillColor: PARKING_STATUS_COLOR[status] || '#999999',
-        fillOpacity: 1,
-        strokeColor: '#ffffff',
-        strokeWeight: 2,
-      },
-    });
-    marker.addListener('click', () => {
+      strokeColor: color,
+      strokeOpacity: 0.9,
+      strokeWeight: 2,
+      fillColor: color,
+      fillOpacity: 0.35,
+      clickable: true,
+    };
+
+    const area = Array.isArray(zone.polygon) && zone.polygon.length >= 3
+      ? new google.maps.Polygon({ ...style, paths: zone.polygon })
+      : new google.maps.Circle({ ...style, center: { lat: zone.lat, lng: zone.lng }, radius: PARKING_FALLBACK_RADIUS_METERS });
+
+    area.addListener('click', () => {
       selectTarget({ id: zone.zone_id, name: zone.zone_name, type: 'PARKING', coords: { lat: zone.lat, lng: zone.lng } });
     });
   });
