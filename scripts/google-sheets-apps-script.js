@@ -27,7 +27,6 @@
 const HEADERS = [
   'Timestamp',
   'User_ID',
-  'Display_Name',
   'Device_OS',
   'Q1_Overall_Satisfaction',
   'Q2_Ease_Of_Use',
@@ -70,7 +69,6 @@ function doPost(e) {
     const row = [
       data.timestamp || new Date().toISOString(),
       data.userId || 'N/A',
-      data.displayName || 'N/A',
       data.deviceOS || 'Unknown',
       data.q1_overall_sat || '',
       data.q2_ease_of_use || '',

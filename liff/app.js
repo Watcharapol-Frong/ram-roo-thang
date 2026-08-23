@@ -1286,8 +1286,9 @@ async function renderFeedbackView() {
 
     const payload = {
       timestamp: new Date().toISOString(),
+      // ส่งแค่ userId — ไม่ส่ง displayName/pictureUrl ออกนอกเครื่องตามหลักของโปรเจกต์
+      // (ดู getUserProfile: ค่าพวกนั้นใช้แสดงผลใน UI เท่านั้น)
       userId: (profile && profile.userId) ? profile.userId : 'dev-user-' + Date.now(),
-      displayName: (profile && profile.displayName) ? profile.displayName : 'นักพัฒนา (Dev)',
       deviceOS: detectedOS,
       q1_overall_sat: Number(formData.get('q1_overall_sat') || 5),
       q2_ease_of_use: Number(formData.get('q2_ease_of_use') || 5),
