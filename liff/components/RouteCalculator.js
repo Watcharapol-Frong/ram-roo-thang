@@ -19,6 +19,10 @@
     directionsRenderer = new google.maps.DirectionsRenderer({
       map,
       suppressMarkers: true,
+      // ค่าเริ่มต้นของ DirectionsRenderer คือจัดกล้องให้เห็นเส้นทางทั้งเส้นทุกครั้งที่ setDirections
+      // ซึ่งไปทับ zoom/มุมกล้องที่เราตั้งไว้ — เลือกอาคารตอนอยู่โหมด 3D แล้วเด้งกลับเป็นมุม 2D
+      // เพราะเหตุนี้ กล้องเป็นเรื่องของ applyViewMode ฝั่งเดียว renderer แค่วาดเส้นพอ
+      preserveViewport: true,
       polylineOptions: { strokeColor: '#1560ff', strokeWeight: 5 },
     });
   }
