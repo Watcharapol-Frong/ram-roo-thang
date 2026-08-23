@@ -1510,7 +1510,7 @@ async function renderFullProfile(container) {
   container.innerHTML = `
     <div class="profile-flat-container">
       ${renderProfileHeaderHTML(profile)}
-      ${renderFeedbackTeaserHTML(Boolean(userRecord && userRecord.awards && userRecord.awards.feedback_at))}
+      ${renderFeedbackTeaserHTML(Boolean(userRecord && userRecord.awards && userRecord.awards.feedback_done))}
       <div id="profile-schedule-slot"></div>
     </div>
     ${renderBottomNavHTML('profile')}
@@ -1693,9 +1693,10 @@ function renderScheduleForm(container, userId) {
     addBtn.disabled = true;
     let addedCount = 0;
 
+    let duplicateCount = 0;
     for (const code of valid) {
       try {
-        await fetchJSON('/api/schedule', {
+        const res = await fetchJSON('/api/schedule', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1703,7 +1704,8 @@ function renderScheduleForm(container, userId) {
             course_code: code,
           }),
         });
-        addedCount++;
+        if (res.status === 'ALREADY_ADDED') duplicateCount++;
+        else addedCount++;
       } catch (err) {
         // เดิมนับว่าสำเร็จเมื่ออยู่ใน DEV_MODE ทำให้ toast ขึ้น "✓ เพิ่มแล้ว" ทั้งที่ POST คืน 400
         // ปิดบังของจริงจนกว่าจะไปเปิดดู network เอง — dev ควรเห็นความพังชัดกว่า production ไม่ใช่น้อยกว่า
@@ -1716,9 +1718,15 @@ function renderScheduleForm(container, userId) {
     inputEl.focus(); // โฟกัสรอพิมพ์วิชาถัดไปต่อเนื่องทันที
 
     if (addedCount > 0) {
-      const skipped = unknown.length ? ` (ข้าม ${unknown.length} รหัสที่ไม่พบ)` : '';
-      showToast(valid.length === 1 ? `✓ เพิ่ม ${valid[0]} แล้ว${skipped}` : `✓ เพิ่มแล้ว ${addedCount} วิชา${skipped}`);
+      const notes = [
+        unknown.length ? `ข้าม ${unknown.length} รหัสที่ไม่พบ` : '',
+        duplicateCount ? `มีอยู่แล้ว ${duplicateCount}` : '',
+      ].filter(Boolean).join(', ');
+      const suffix = notes ? ` (${notes})` : '';
+      showToast(valid.length === 1 ? `✓ เพิ่ม ${valid[0]} แล้ว${suffix}` : `✓ เพิ่มแล้ว ${addedCount} วิชา${suffix}`);
       await refreshScheduleList(userId);
+    } else if (duplicateCount > 0) {
+      showToast(duplicateCount === 1 ? 'วิชานี้อยู่ในตารางแล้ว' : `ทั้ง ${duplicateCount} วิชาอยู่ในตารางแล้ว`);
     } else {
       showToast('✕ ไม่สามารถบันทึกได้ กรุณาลองใหม่');
     }

@@ -24,10 +24,10 @@ id = "f69bf1e6461c4627979722c3b45fb5f7"
 binding = "RATE_LIMIT"
 id = "2de6b2c154d6455d84aa133a0a61e708"
 
-[[kv_namespaces]]
-binding = "STUDENT_SCHEDULES"
-id = "819201b7251a4a48a73c0079f04ca005"
-
-[[kv_namespaces]]
-binding = "USER_PROFILES"
-id = "16c0bc10538845ce91ae7db025c02831"
+# ข้อมูลของผู้ใช้ (โปรไฟล์ เหรียญ ledger ตารางสอบ) ย้ายจาก KV มาที่นี่ — ต้องการ transaction จริง
+# ตอนบวก/หักเหรียญ และต้อง query/รวมยอดได้ ซึ่ง KV ทำไม่ได้เลย
+# สร้างที่ภูมิภาค APAC เพราะ D1 เขียนที่ primary ที่เดียว ถ้าไปตกอเมริกา write จากไทยจะช้าชัดเจน
+[[d1_databases]]
+binding = "DB"
+database_name = "ram-roo-thang"
+database_id = "139f683a-4cbb-4dff-af37-81328699f328"

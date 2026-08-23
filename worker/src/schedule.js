@@ -1,8 +1,15 @@
-// POST/GET/DELETE /api/schedule — บันทึกวิชาสอบ ไม่มี PII
+// POST/GET/DELETE /api/schedule — วิชาที่ผู้ใช้บันทึกไว้ดูวันสอบ
 // MVP-SPEC-for-Dev.md §6.5-6.7, docs/adr/0003, CONTEXT.md "Student Exam Schedule (No-PII)"
 // ผูกกับ LINE userId เท่านั้น ไม่เก็บชื่อ/เบอร์โทร
+//
+// ย้ายจาก STUDENT_SCHEDULES KV มาที่ D1 พร้อมกับ user/ledger — ได้ของแถมคือ UNIQUE
+// (user_id, course_code) กันเพิ่มวิชาซ้ำ ซึ่งของเดิมทำไม่ได้เพราะ key เป็น uuid สุ่มใหม่ทุกครั้ง
+// กดปุ่มเพิ่มรัวๆ จะได้วิชาเดิมซ้ำหลายแถวเต็มหน้าจอ
+//
+// วันสอบ/คาบไม่ได้เก็บที่นี่ — ฝั่ง LIFF เปิดจาก data/exam-lookup.json (ประกาศจริง 2,865 วิชา)
+// เก็บไว้ที่เดียวจะได้ไม่มีวันหลุดจากกันตอนมหาวิทยาลัยประกาศตารางใหม่
 
-import { putSchedule, listSchedulesForUser, deleteSchedule, getBuildingByKey } from './data.js';
+import { ensureUser } from './user.js';
 
 function jsonResponse(body, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -19,45 +26,44 @@ export async function handlePostSchedule(request, env) {
     return jsonResponse({ error: 'Invalid JSON body' }, 400);
   }
 
-  const { user_id, course_code, building_id, exam_at } = payload;
-  if (!user_id || !course_code || !building_id || !exam_at) {
-    return jsonResponse({ error: 'Missing required fields' }, 400);
+  const { user_id, course_code } = payload;
+  if (!user_id || !course_code) {
+    return jsonResponse({ error: 'Missing required fields: user_id, course_code' }, 400);
   }
 
-  const building = await getBuildingByKey(env, building_id);
-  if (!building) {
-    return jsonResponse({ error: 'ไม่พบข้อมูลอาคารนี้' }, 404);
-  }
+  const code = String(course_code).toUpperCase().trim();
+  await ensureUser(env, user_id);
 
-  const schedule = {
-    schedule_id: crypto.randomUUID(),
-    course_code,
-    building_id,
-    exam_at,
-  };
-  await putSchedule(env, user_id, schedule);
+  const id = crypto.randomUUID();
+  const { meta } = await env.DB.prepare(
+    `INSERT INTO user_courses (id, user_id, course_code, created_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT(user_id, course_code) DO NOTHING`
+  ).bind(id, user_id, code, new Date().toISOString()).run();
 
-  return jsonResponse({ status: 'SUCCESS', schedule });
+  // changes = 0 แปลว่าชน UNIQUE คือมีวิชานี้อยู่แล้ว ไม่ใช่ error — ตอบให้ฝั่ง UI รู้ว่าไม่ได้เพิ่มใหม่
+  const added = meta && meta.changes > 0;
+  return jsonResponse({
+    status: added ? 'SUCCESS' : 'ALREADY_ADDED',
+    schedule: { schedule_id: id, course_code: code },
+  });
 }
 
 export async function handleGetSchedule(request, env) {
   const url = new URL(request.url);
   const userId = url.searchParams.get('user_id');
-  if (!userId) {
-    return jsonResponse({ error: 'ต้องระบุ user_id' }, 400);
-  }
+  if (!userId) return jsonResponse({ error: 'ต้องระบุ user_id' }, 400);
 
-  const schedules = await listSchedulesForUser(env, userId);
+  const { results } = await env.DB.prepare(
+    'SELECT id, course_code, created_at FROM user_courses WHERE user_id = ? ORDER BY course_code'
+  ).bind(userId).all();
 
-  // เติม building_name ตาม response shape ใน MVP-SPEC §6.6 (ไม่เก็บซ้ำใน schedule object เอง)
-  const enriched = await Promise.all(
-    schedules.map(async (s) => {
-      const building = await getBuildingByKey(env, s.building_id);
-      return { ...s, building_name: building ? building.name_th : null };
-    })
-  );
-
-  return jsonResponse({ schedules: enriched });
+  return jsonResponse({
+    schedules: (results || []).map((r) => ({
+      schedule_id: r.id,
+      course_code: r.course_code,
+      created_at: r.created_at,
+    })),
+  });
 }
 
 export async function handleDeleteSchedule(request, env) {
@@ -68,6 +74,10 @@ export async function handleDeleteSchedule(request, env) {
     return jsonResponse({ error: 'ต้องระบุ user_id และ schedule_id' }, 400);
   }
 
-  await deleteSchedule(env, userId, scheduleId);
+  // มี user_id ในเงื่อนไขด้วยเสมอ ไม่ให้ลบของคนอื่นได้ด้วยการเดา schedule_id
+  await env.DB.prepare('DELETE FROM user_courses WHERE id = ? AND user_id = ?')
+    .bind(scheduleId, userId)
+    .run();
+
   return jsonResponse({ status: 'SUCCESS' });
 }

@@ -60,6 +60,10 @@ npx wrangler kv namespace create RATE_LIMIT
 npx wrangler kv namespace create STUDENT_SCHEDULES
 # เอา id ที่ได้ไปแทนที่ REPLACE_ME ใน wrangler.toml
 
+npx wrangler d1 create ram-roo-thang --location apac
+# เอา database_id ที่ได้ไปใส่ใน wrangler.toml แล้วสร้างตาราง:
+npx wrangler d1 execute ram-roo-thang --remote --file=migrations/0001_users_and_coin_ledger.sql
+
 cp .secrets.env.example .secrets.env
 # ใส่ค่า LINE_CHANNEL_SECRET / LINE_CHANNEL_ACCESS_TOKEN ลงใน .secrets.env (ครั้งเดียว)
 # ไฟล์นี้ถูก gitignore ไว้ — `npm run deploy` จะยิงขึ้น production ให้เองทุกครั้ง
@@ -70,6 +74,22 @@ cd ..
 cd worker
 npm run dev
 ```
+
+### ข้อมูลอยู่ที่ไหน
+
+| ที่เก็บ | เก็บอะไร | ทำไม |
+|---|---|---|
+| D1 `ram-roo-thang` | users, coin_ledger, user_courses | ต้องมี transaction ตอนบวก/หักเหรียญ และต้อง query/รวมยอดได้ |
+| KV `BASELINE_DATA` | อาคาร ลานจอด ร้านค้า | อ่านอย่างเดียว แทบไม่เปลี่ยน |
+| KV `PARKING_REPORTS` | รายงานสภาพที่จอด | ต้องหมดอายุเอง ใช้ TTL ของ KV |
+| KV `RATE_LIMIT` | เวลารายงานล่าสุดของแต่ละคน | เหมือนกัน ใช้ TTL |
+| KV `CHAT_HISTORY_RAM` | ประวัติแชทกับบอท | เหมือนกัน ใช้ TTL |
+| ไฟล์ static | `ru_master.geojson`, `exam-lookup.json` | ข้อมูลนิ่ง ไม่ต้องผ่าน KV ให้เปลืองโควตาอ่าน |
+
+D1 ไม่มี TTL — อะไรที่ควรหายเองอย่าย้ายมา
+
+ยอดเหรียญ: `coin_ledger` คือความจริง ส่วน `users.coins` เป็นยอดสรุปที่เขียนใน batch เดียวกันเสมอ
+การกันรับเหรียญซ้ำใช้ `UNIQUE (user_id, reason, ref_id)` ให้ฐานข้อมูลปฏิเสธเอง ไม่ได้เขียน if เช็คในโค้ด
 
 ### Secrets บน production
 

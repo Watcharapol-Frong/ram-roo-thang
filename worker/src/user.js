@@ -1,13 +1,15 @@
-// User record + ระบบเหรียญ — เก็บใน USER_PROFILES KV คีย์ `user:{userId}`
+// ผู้ใช้ + บัญชีเหรียญ บน D1 (ดู worker/migrations/0001_users_and_coin_ledger.sql)
 //
-// ก่อนหน้านี้ไม่มี record ของผู้ใช้อยู่ในระบบเลย ทั้งโปรเจกต์มีแต่ตารางสอบ/รายงานที่จอดที่ผูก
-// userId ไว้เฉยๆ ส่วนเหรียญเป็นเลข 120 ฮาร์ดโค้ดในหน้าจอ บวก 30 ที่เก็บใน localStorage —
-// ใครเปิด DevTools ก็แก้ยอดตัวเองได้ และล้างข้อมูลเบราว์เซอร์ทีเดียวก็หายหมด
-// ยอดเหรียญจึงต้องอยู่ฝั่ง server เท่านั้น ฝั่ง client มีหน้าที่แสดงผลอย่างเดียว
+// ย้ายมาจาก USER_PROFILES KV ด้วยเหตุผลสามข้อ:
+//   1. KV ไม่มี atomic increment — บวก/หักเหรียญคือ read-modify-write ยอดหายได้ถ้ายิงพร้อมกัน
+//      พอมี shop ที่ต้องหักเหรียญ เรื่องนี้กลายเป็นของจริงที่ผู้ใช้เสียประโยชน์ ไม่ใช่เคสทฤษฎี
+//   2. ledger ต้อง query ได้ (เรียงเวลา/กรองตามคน/รวมยอด) ซึ่ง KV ทำไม่ได้เลย
+//   3. โควตาเขียนของ KV free tier คือ 1,000 แถว/วัน ส่วน D1 คือ 100,000 แถว/วัน
+//
+// หลักการ: coin_ledger คือความจริง ส่วน users.coins เป็นยอดสรุปที่คำนวณไว้ล่วงหน้า
+// ทั้งสองอย่างเขียนใน batch เดียวกันเสมอ ถ้าไม่ตรงกันเมื่อไรให้เชื่อ ledger (ดู recalculateBalance)
 //
 // ไม่เก็บ PII — มีแค่ LINE userId เหมือนส่วนอื่นของระบบ (CONTEXT.md "PII")
-
-const USER_KEY_PREFIX = 'user:';
 
 // จำนวนเหรียญของแต่ละการกระทำ — แก้ที่นี่ที่เดียว
 export const COIN_REWARDS = {
@@ -23,116 +25,177 @@ function jsonResponse(body, status = 200) {
   });
 }
 
-function newUser(userId) {
-  return {
-    user_id: userId,
-    coins: 0,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-    // กันการรับซ้ำ — feedback ให้ครั้งเดียวตลอด, save_car ให้วันละครั้ง
-    awards: { feedback_at: null, car_saved_date: null },
-    totals: { parking_reports: 0, cars_saved: 0 },
-  };
+function nowIso() {
+  return new Date().toISOString();
 }
 
-export async function getUser(env, userId) {
-  const raw = await env.USER_PROFILES.get(`${USER_KEY_PREFIX}${userId}`);
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
+// วันที่ตามเวลาไทย ไม่ใช่ UTC — ไม่งั้นสิทธิ์รายวันจะรีเซ็ตตอนเที่ยงคืน UTC (7 โมงเช้าบ้านเรา)
+export function bangkokDate(at = Date.now()) {
+  return new Date(at + 7 * 3600 * 1000).toISOString().slice(0, 10);
 }
 
-async function putUser(env, user) {
-  user.updated_at = new Date().toISOString();
-  await env.USER_PROFILES.put(`${USER_KEY_PREFIX}${user.user_id}`, JSON.stringify(user));
-  return user;
+// สร้างแถวผู้ใช้ถ้ายังไม่มี — ไม่ต้องมีขั้นตอนสมัครแยก เจอ userId ครั้งแรกก็มีบัญชีเลย
+export async function ensureUser(env, userId) {
+  const at = nowIso();
+  await env.DB.prepare(
+    'INSERT INTO users (user_id, coins, created_at, updated_at) VALUES (?, 0, ?, ?) ON CONFLICT(user_id) DO NOTHING'
+  ).bind(userId, at, at).run();
 }
 
-// สร้าง record ให้อัตโนมัติเมื่อเจอ userId ครั้งแรก ไม่ต้องมีขั้นตอนสมัครสมาชิกแยก
-export async function getOrCreateUser(env, userId) {
-  return (await getUser(env, userId)) || newUser(userId);
+export async function getUserRow(env, userId) {
+  return env.DB.prepare('SELECT user_id, coins, created_at, updated_at FROM users WHERE user_id = ?')
+    .bind(userId)
+    .first();
 }
 
-// เพิ่มเหรียญแล้วบันทึก — คืน user ที่อัปเดตแล้ว
+// บวก/หักเหรียญพร้อมลงรายการใน ledger
 //
-// หมายเหตุ: KV เป็น read-modify-write ไม่มี atomic increment ถ้าผู้ใช้คนเดียวกันยิงสองคำขอ
-// พร้อมกันเป๊ะๆ ยอดอาจหายไปหนึ่งรายการ ในทางปฏิบัติแทบเป็นไปไม่ได้เพราะทุกทางที่ให้เหรียญ
-// มีกลไกกันซ้ำของตัวเองอยู่แล้ว (rate limit 30 นาที / ให้ครั้งเดียว / วันละครั้ง)
-async function award(env, user, amount) {
-  user.coins += amount;
-  return putUser(env, user);
+// ref_id คือตัวกันรับซ้ำ ตกลงกันไว้ที่ UNIQUE (user_id, reason, ref_id) ในสคีมา — ยิงซ้ำจะชน
+// constraint แล้ว INSERT ตกไปเอง ไม่ต้องเขียน if เช็คเองแล้วหวังว่าจะครอบคลุมทุกทางเข้า
+//
+// คืน { awarded, coins, duplicate } — duplicate = true แปลว่าเคยรับรายการนี้ไปแล้ว
+export async function applyCoins(env, userId, { delta, reason, refId }) {
+  await ensureUser(env, userId);
+
+  const user = await getUserRow(env, userId);
+  const balanceAfter = user.coins + delta;
+
+  // กันยอดติดลบตั้งแต่ต้นทาง — สำคัญกับฝั่ง shop ที่หักเหรียญ
+  if (balanceAfter < 0) {
+    return { awarded: 0, coins: user.coins, duplicate: false, insufficient: true };
+  }
+
+  const at = nowIso();
+  try {
+    // batch = ทรานแซกชันเดียวใน D1 — ledger กับยอดสรุปต้องเข้าหรือไม่เข้าพร้อมกันเท่านั้น
+    await env.DB.batch([
+      env.DB.prepare(
+        'INSERT INTO coin_ledger (user_id, delta, reason, ref_id, balance_after, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+      ).bind(userId, delta, reason, refId, balanceAfter, at),
+      env.DB.prepare('UPDATE users SET coins = ?, updated_at = ? WHERE user_id = ?')
+        .bind(balanceAfter, at, userId),
+    ]);
+  } catch (err) {
+    // ชน UNIQUE = เคยรับรายการนี้ไปแล้ว ถือเป็นผลลัพธ์ปกติ ไม่ใช่ error
+    if (String(err && err.message).includes('UNIQUE')) {
+      return { awarded: 0, coins: user.coins, duplicate: true };
+    }
+    throw err;
+  }
+
+  return { awarded: delta, coins: balanceAfter, duplicate: false };
 }
 
-// GET /api/user?user_id= — โปรไฟล์ + ยอดเหรียญ (สร้าง record ให้ถ้ายังไม่มี)
+// คำนวณยอดใหม่จาก ledger ทั้งหมด — ใช้ตอนสงสัยว่ายอดสรุปเพี้ยน
+export async function recalculateBalance(env, userId) {
+  const row = await env.DB.prepare('SELECT COALESCE(SUM(delta), 0) AS total FROM coin_ledger WHERE user_id = ?')
+    .bind(userId)
+    .first();
+  const total = row ? row.total : 0;
+  await env.DB.prepare('UPDATE users SET coins = ?, updated_at = ? WHERE user_id = ?')
+    .bind(total, nowIso(), userId)
+    .run();
+  return total;
+}
+
+// GET /api/user?user_id= — โปรไฟล์ + ยอดเหรียญ + สิทธิ์ที่รับไปแล้ว + รายการล่าสุด
 export async function handleGetUser(request, env) {
   const url = new URL(request.url);
   const userId = url.searchParams.get('user_id');
   if (!userId) return jsonResponse({ error: 'ต้องระบุ user_id' }, 400);
 
-  const existing = await getUser(env, userId);
-  const user = existing || (await putUser(env, newUser(userId)));
-  return jsonResponse({ user });
+  await ensureUser(env, userId);
+  const user = await getUserRow(env, userId);
+
+  // สถานะสิทธิ์อ่านจาก ledger ตรงๆ ไม่ต้องเก็บ flag ซ้ำอีกที่ให้หลุดจากกันได้
+  const [claims, history] = await Promise.all([
+    env.DB.prepare(
+      `SELECT reason, ref_id FROM coin_ledger
+        WHERE user_id = ? AND ((reason = 'FEEDBACK' AND ref_id = 'once') OR (reason = 'SAVE_CAR' AND ref_id = ?))`
+    ).bind(userId, bangkokDate()).all(),
+    env.DB.prepare(
+      'SELECT delta, reason, balance_after, created_at FROM coin_ledger WHERE user_id = ? ORDER BY id DESC LIMIT 20'
+    ).bind(userId).all(),
+  ]);
+
+  const rows = claims.results || [];
+  return jsonResponse({
+    user: {
+      user_id: user.user_id,
+      coins: user.coins,
+      created_at: user.created_at,
+      awards: {
+        feedback_done: rows.some((r) => r.reason === 'FEEDBACK'),
+        car_saved_today: rows.some((r) => r.reason === 'SAVE_CAR'),
+      },
+    },
+    ledger: history.results || [],
+  });
 }
 
-// POST /api/user/feedback — ให้เหรียญค่าทำแบบประเมิน ครั้งเดียวต่อบัญชี
-// เดิมสถานะ "ทำแบบประเมินแล้ว" อยู่ใน localStorage ล้วนๆ ล้างแล้วกดรับใหม่ได้เรื่อยๆ
+// GET /api/user/ledger?user_id= — รายการเข้า-ออกทั้งหมด (ไว้ตรวจย้อนหลัง/หน้าประวัติเหรียญ)
+export async function handleGetLedger(request, env) {
+  const url = new URL(request.url);
+  const userId = url.searchParams.get('user_id');
+  if (!userId) return jsonResponse({ error: 'ต้องระบุ user_id' }, 400);
+
+  const limit = Math.min(Number(url.searchParams.get('limit')) || 50, 200);
+  const { results } = await env.DB.prepare(
+    'SELECT id, delta, reason, ref_id, balance_after, created_at FROM coin_ledger WHERE user_id = ? ORDER BY id DESC LIMIT ?'
+  ).bind(userId, limit).all();
+
+  return jsonResponse({ ledger: results || [] });
+}
+
+async function readUserId(request) {
+  try {
+    const payload = await request.json();
+    return payload && payload.user_id ? String(payload.user_id) : null;
+  } catch {
+    return null;
+  }
+}
+
+// POST /api/user/feedback — ครั้งเดียวตลอดชีพ (ref_id คงที่ = 'once')
 export async function handleFeedbackAward(request, env) {
-  let payload;
-  try {
-    payload = await request.json();
-  } catch {
-    return jsonResponse({ error: 'Invalid JSON body' }, 400);
-  }
+  const userId = await readUserId(request);
+  if (!userId) return jsonResponse({ error: 'ต้องระบุ user_id' }, 400);
 
-  const { user_id } = payload;
-  if (!user_id) return jsonResponse({ error: 'ต้องระบุ user_id' }, 400);
-
-  const user = await getOrCreateUser(env, user_id);
-  if (user.awards.feedback_at) {
-    return jsonResponse({ status: 'ALREADY_CLAIMED', coins: user.coins, awarded: 0 });
-  }
-
-  user.awards.feedback_at = new Date().toISOString();
-  await award(env, user, COIN_REWARDS.FEEDBACK);
-  return jsonResponse({ status: 'SUCCESS', coins: user.coins, awarded: COIN_REWARDS.FEEDBACK });
+  const result = await applyCoins(env, userId, {
+    delta: COIN_REWARDS.FEEDBACK,
+    reason: 'FEEDBACK',
+    refId: 'once',
+  });
+  return jsonResponse({
+    status: result.duplicate ? 'ALREADY_CLAIMED' : 'SUCCESS',
+    coins: result.coins,
+    awarded: result.awarded,
+  });
 }
 
-// POST /api/user/save-car — ให้เหรียญค่าบันทึกตำแหน่งรถ วันละครั้ง
-// ตัวตำแหน่งรถยังเก็บในเครื่องผู้ใช้เหมือนเดิม (ผู้ใช้เลือกไว้ตอนออกแบบฟีเจอร์) ที่ส่งมาที่นี่
-// มีแค่ userId เพื่อนับสิทธิ์เหรียญ ไม่ได้ส่งพิกัดรถขึ้น server
+// POST /api/user/save-car — วันละครั้ง (ref_id = วันที่ตามเวลาไทย)
 export async function handleSaveCarAward(request, env) {
-  let payload;
-  try {
-    payload = await request.json();
-  } catch {
-    return jsonResponse({ error: 'Invalid JSON body' }, 400);
-  }
+  const userId = await readUserId(request);
+  if (!userId) return jsonResponse({ error: 'ต้องระบุ user_id' }, 400);
 
-  const { user_id } = payload;
-  if (!user_id) return jsonResponse({ error: 'ต้องระบุ user_id' }, 400);
-
-  // ใช้วันตามเวลาไทย ไม่ใช่ UTC — ไม่งั้นสิทธิ์จะรีเซ็ตตอนเที่ยงคืนของ UTC (7 โมงเช้าบ้านเรา)
-  const bangkokDate = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
-
-  const user = await getOrCreateUser(env, user_id);
-  if (user.awards.car_saved_date === bangkokDate) {
-    return jsonResponse({ status: 'ALREADY_CLAIMED_TODAY', coins: user.coins, awarded: 0 });
-  }
-
-  user.awards.car_saved_date = bangkokDate;
-  user.totals.cars_saved += 1;
-  await award(env, user, COIN_REWARDS.SAVE_CAR);
-  return jsonResponse({ status: 'SUCCESS', coins: user.coins, awarded: COIN_REWARDS.SAVE_CAR });
+  const result = await applyCoins(env, userId, {
+    delta: COIN_REWARDS.SAVE_CAR,
+    reason: 'SAVE_CAR',
+    refId: bangkokDate(),
+  });
+  return jsonResponse({
+    status: result.duplicate ? 'ALREADY_CLAIMED_TODAY' : 'SUCCESS',
+    coins: result.coins,
+    awarded: result.awarded,
+  });
 }
 
 // ให้เหรียญค่ารายงานที่จอด — เรียกจาก handleParkingReport หลังบันทึกรายงานสำเร็จแล้วเท่านั้น
-// ไม่ต้องกันซ้ำเองเพราะ rate limit 30 นาที + geofence 150 ม. ของ endpoint นั้นกันให้อยู่แล้ว
-export async function awardParkingReport(env, userId) {
-  const user = await getOrCreateUser(env, userId);
-  user.totals.parking_reports += 1;
-  await award(env, user, COIN_REWARDS.PARKING_REPORT);
-  return { coins: user.coins, awarded: COIN_REWARDS.PARKING_REPORT };
+// refId ใช้ reportedAt ของรายงานนั้น ทำให้ 1 รายงาน = 1 ครั้งเสมอ แม้ handler จะถูกเรียกซ้ำ
+export async function awardParkingReport(env, userId, reportRefId) {
+  return applyCoins(env, userId, {
+    delta: COIN_REWARDS.PARKING_REPORT,
+    reason: 'PARKING_REPORT',
+    refId: reportRefId,
+  });
 }

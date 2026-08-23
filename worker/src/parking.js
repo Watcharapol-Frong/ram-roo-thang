@@ -78,9 +78,10 @@ export async function handleParkingReport(request, env) {
 
   // 4. ให้เหรียญ — อยู่หลัง geofence + rate limit จึงกดรัวๆ เพื่อฟาร์มเหรียญไม่ได้
   //    ถ้าตรงนี้พังไม่ควรทำให้รายงานที่บันทึกไปแล้วกลายเป็นล้มเหลว แค่ไม่ได้เหรียญรอบนี้
+  //    refId = เวลาที่รายงาน ทำให้ 1 รายงาน = 1 ครั้งเสมอ ต่อให้ handler ถูกเรียกซ้ำ
   let reward = { coins: null, awarded: 0 };
   try {
-    reward = await awardParkingReport(env, user_id);
+    reward = await awardParkingReport(env, user_id, reportedAt);
   } catch (e) {
     console.error('awardParkingReport error', e);
   }

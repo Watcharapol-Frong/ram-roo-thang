@@ -11,6 +11,7 @@
 // ใช้ไม่ได้ที่นี่ — สคริปต์นี้มีไว้สำหรับงานฝั่ง LIFF ซึ่งเรียกเฉพาะ /api/* เท่านั้น
 
 import { createServer } from 'node:http';
+import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -41,35 +42,78 @@ function createKV(seed = {}) {
   };
 }
 
+// D1 จำลอง — ใช้ node:sqlite (มีมากับ Node 22.5+) รัน SQL จริงตาม migrations ตัวเดียวกับ production
+// ไม่ได้ mock ผลลัพธ์ ดังนั้น UNIQUE constraint ที่ใช้กันรับเหรียญซ้ำก็ถูกทดสอบจริงในเครื่องด้วย
+function createD1() {
+  const db = new DatabaseSync(':memory:');
+  db.exec(readFileSync(path.join(ROOT_DIR, 'worker/migrations/0001_users_and_coin_ledger.sql'), 'utf8'));
+
+  const wrap = (sql, params = []) => ({
+    bind: (...args) => wrap(sql, args),
+    async run() {
+      const info = db.prepare(sql).run(...params);
+      return { success: true, meta: { changes: Number(info.changes), last_row_id: Number(info.lastInsertRowid) } };
+    },
+    async first() {
+      return db.prepare(sql).get(...params) ?? null;
+    },
+    async all() {
+      return { success: true, results: db.prepare(sql).all(...params) };
+    },
+    __exec() {
+      return db.prepare(sql).run(...params);
+    },
+  });
+
+  return {
+    prepare: (sql) => wrap(sql),
+    // D1 รัน batch เป็นทรานแซกชันเดียว — ถ้าตัวใดตัวหนึ่งพังต้อง rollback ทั้งชุด
+    async batch(statements) {
+      db.exec('BEGIN');
+      try {
+        const out = statements.map((st) => st.__exec());
+        db.exec('COMMIT');
+        return out.map((info) => ({ success: true, meta: { changes: Number(info.changes) } }));
+      } catch (err) {
+        db.exec('ROLLBACK');
+        throw err;
+      }
+    },
+  };
+}
+
 const baseline = {};
 for (const b of dataset.buildings) baseline[`building:${b.building_id}`] = JSON.stringify(b);
 for (const z of dataset.parking_zones) baseline[`parking_zone:${z.zone_id}`] = JSON.stringify(z);
 for (const s of dataset.services) baseline[`service:${s.service_id}`] = JSON.stringify(s);
 for (const sh of dataset.shops || []) baseline[`shop:${sh.shop_id}`] = JSON.stringify(sh);
 
-const initialSchedules = {
-  'schedule:DEV_USER:demo-1': JSON.stringify({ schedule_id: 'demo-1', course_code: 'RAM1101' }),
-  'schedule:DEV_USER:demo-2': JSON.stringify({ schedule_id: 'demo-2', course_code: 'MGT1001' }),
-  'schedule:DEV_USER:demo-3': JSON.stringify({ schedule_id: 'demo-3', course_code: 'LAW1001' }),
-  'schedule:DEV_USER:demo-4': JSON.stringify({ schedule_id: 'demo-4', course_code: 'ECO1003' }),
-  'schedule:DEV_USER:demo-5': JSON.stringify({ schedule_id: 'demo-5', course_code: 'COS1101' }),
-  'schedule:DEV_USER:demo-6': JSON.stringify({ schedule_id: 'demo-6', course_code: 'THA1001' }),
-  'schedule:DEV_USER:demo-7': JSON.stringify({ schedule_id: 'demo-7', course_code: 'ACC1101' }),
-  'schedule:DEV_USER:demo-8': JSON.stringify({ schedule_id: 'demo-8', course_code: 'POL1100' }),
-  'schedule:DEV_USER:demo-9': JSON.stringify({ schedule_id: 'demo-9', course_code: 'RAM1000' }),
-  'schedule:DEV_USER:demo-10': JSON.stringify({ schedule_id: 'demo-10', course_code: 'ENG1001' }),
-};
+// ตารางสอบตัวอย่างของ DEV_USER ย้ายไป seed ใน D1 ด้านล่างแทน (ของเดิมเป็นคีย์แบบ KV ใช้ไม่ได้แล้ว)
+const DEMO_COURSES = ['RAM1101', 'MGT1001', 'LAW1001', 'ECO1003', 'COS1101',
+                      'THA1001', 'ACC1101', 'POL1100', 'RAM1000', 'ENG1001'];
 
 const env = {
   BASELINE_DATA: createKV(baseline),
   PARKING_REPORTS: createKV(),
   RATE_LIMIT: createKV(),
-  STUDENT_SCHEDULES: createKV(initialSchedules),
-  USER_PROFILES: createKV(),
+  DB: createD1(),
   CHAT_HISTORY_RAM: createKV(),
   LIFF_URL: `http://localhost:8123/?dev=1&api=http://localhost:${port}`,
 };
 const ctx = { waitUntil: () => {} };
+
+// seed วิชาตัวอย่างให้ DEV_USER — ผ่าน handler จริง ไม่ได้ยัด SQL ตรง จะได้เจอถ้า handler พัง
+for (const code of DEMO_COURSES) {
+  await worker.fetch(
+    new Request(`http://localhost:${port}/api/schedule`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: 'DEV_USER', course_code: code }),
+    }),
+    env,
+    ctx
+  );
+}
 
 createServer(async (req, res) => {
   const chunks = [];
