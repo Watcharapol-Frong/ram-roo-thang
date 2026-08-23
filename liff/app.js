@@ -448,6 +448,7 @@ async function renderMapView({ presetDestId, presetZoneId } = {}) {
   `;
   document.getElementById('layer-toggle-btn').addEventListener('click', toggle3D);
   document.getElementById('my-location-btn').addEventListener('click', toggleMyLocation);
+  updateMyLocationAvailability();
 
   buildingMarkers.length = 0;
   targetPin = null;
@@ -802,14 +803,7 @@ function renderProfileHeaderHTML(profile) {
       ${avatarHTML}
       <div class="profile-info-compact">
         <h2 class="profile-name-compact">${name}</h2>
-        <div class="profile-coin-text" title="คะแนนสะสมจากการมีส่วนร่วมบอกข้อมูลที่จอดรถ">
-          <svg class="coin-svg" viewBox="0 0 24 24" width="15" height="15" fill="none">
-            <circle cx="12" cy="12" r="10" fill="#f59e0b"/>
-            <circle cx="12" cy="12" r="8" stroke="#fde68a" stroke-width="1.2" fill="#fbbf24"/>
-            <text x="12" y="16" font-size="11" font-weight="bold" fill="#78350f" text-anchor="middle" font-family="sans-serif">R</text>
-          </svg>
-          <span>${coins} Coins</span>
-        </div>
+        <div class="profile-coin-text" title="คะแนนสะสมจากการมีส่วนร่วมบอกข้อมูลที่จอดรถ">${coins} เหรียญ</div>
       </div>
     </div>
   `;
@@ -825,7 +819,7 @@ function renderFeedbackTeaserHTML() {
           <div class="feedback-icon-box done">✓</div>
           <div class="feedback-teaser-info">
             <div class="feedback-teaser-title">ส่งแบบประเมินเรียบร้อยแล้ว</div>
-            <div class="feedback-teaser-sub">ขอบคุณสำหรับข้อเสนอแนะในการพัฒนา (+30 Coins)</div>
+            <div class="feedback-teaser-sub">ขอบคุณสำหรับข้อเสนอแนะในการพัฒนา (+30 เหรียญ)</div>
           </div>
         </div>
       </div>
@@ -837,7 +831,7 @@ function renderFeedbackTeaserHTML() {
       <div class="feedback-teaser-left">
         <div class="feedback-icon-box">💬</div>
         <div class="feedback-teaser-info">
-          <div class="feedback-teaser-title">แบบประเมินพัฒนาระบบ <span class="badge-reward-coin">+30 Coins</span></div>
+          <div class="feedback-teaser-title">แบบประเมินพัฒนาระบบ <span class="badge-reward-coin">+30 เหรียญ</span></div>
           <div class="feedback-teaser-sub">ร่วมแสดงความคิดเห็นเพื่อช่วยพัฒนาระบบ (ทำได้ 1 ครั้ง)</div>
         </div>
       </div>
@@ -946,7 +940,7 @@ function renderFeedbackView() {
     </div>
 
     <div class="card">
-      <h2 style="font-size: 1.15rem;">แบบประเมินพัฒนาระบบ <span class="badge-reward-coin">+30 Coins</span></h2>
+      <h2 style="font-size: 1.15rem;">แบบประเมินพัฒนาระบบ <span class="badge-reward-coin">+30 เหรียญ</span></h2>
       <p class="muted" style="margin-bottom: 16px; font-size: 0.82rem;">ความคิดเห็นของท่านมีคุณค่าอย่างยิ่งในการช่วยพัฒนา "รามรู้ทาง" ให้ดียิ่งขึ้น</p>
 
       <form id="feedback-form">
@@ -982,7 +976,7 @@ function renderFeedbackView() {
         </label>
         <textarea class="feedback-textarea" name="problems" placeholder="เช่น แผนที่โหลดช้าในบางจุด, รหัสวิชาบางตัวค้นไม่เจอ..."></textarea>
 
-        <button type="submit" class="btn btn-primary" id="btn-submit-feedback">ส่งแบบประเมิน (รับ +30 Coins)</button>
+        <button type="submit" class="btn btn-primary" id="btn-submit-feedback">ส่งแบบประเมิน (รับ 30 เหรียญ)</button>
       </form>
     </div>
 
@@ -1000,7 +994,7 @@ function renderFeedbackView() {
 
     setTimeout(() => {
       localStorage.setItem('ram-roo-thang:feedback-done', 'true');
-      showToast('🎉 ส่งแบบประเมินสำเร็จ! ได้รับ +30 Coins');
+      showToast('🎉 ส่งแบบประเมินสำเร็จ! ได้รับ 30 เหรียญ');
       renderProfileView();
     }, 500);
   });
@@ -1017,16 +1011,9 @@ function renderShopView() {
       <div style="display:flex; justify-content:space-between; align-items:center;">
         <div>
           <h2 style="margin:0; font-size: 1.15rem;">ร้านค้า & สิทธิพิเศษ</h2>
-          <p class="muted" style="margin:2px 0 0; font-size:0.8rem;">แลกของรางวัลด้วยคะแนนสะสม RAM Coins</p>
+          <p class="muted" style="margin:2px 0 0; font-size:0.8rem;">แลกของรางวัลด้วยคะแนนสะสมเหรียญ</p>
         </div>
-        <div class="profile-coin-text">
-          <svg class="coin-svg" viewBox="0 0 24 24" width="15" height="15" fill="none">
-            <circle cx="12" cy="12" r="10" fill="#f59e0b"/>
-            <circle cx="12" cy="12" r="8" stroke="#fde68a" stroke-width="1.2" fill="#fbbf24"/>
-            <text x="12" y="16" font-size="11" font-weight="bold" fill="#78350f" text-anchor="middle" font-family="sans-serif">R</text>
-          </svg>
-          <span>${coins} Coins</span>
-        </div>
+        <div class="profile-coin-text">${coins} เหรียญ</div>
       </div>
     </div>
 
@@ -1038,14 +1025,14 @@ function renderShopView() {
             <div style="font-weight:700; font-size:0.9rem;">☕ คูปองส่วนลดเครื่องดื่ม 10 บาท</div>
             <div class="muted" style="font-size:0.75rem;">ร้านกาแฟและคาเฟ่รอบมหาวิทยาลัย</div>
           </div>
-          <button class="btn-nav-exam" style="background:#fef3c7; color:#92400e;" disabled>50 Coins</button>
+          <button class="btn-nav-exam" style="background:#f1f5f9; color:#475569;" disabled>50 เหรียญ</button>
         </div>
         <div style="display:flex; justify-content:space-between; align-items:center; padding:12px; background:var(--bg); border-radius:10px;">
           <div>
             <div style="font-weight:700; font-size:0.9rem;">🎁 สติกเกอร์รามรู้ทาง Limited</div>
             <div class="muted" style="font-size:0.75rem;">รับได้ที่จุดประชาสัมพันธ์ สวป.</div>
           </div>
-          <button class="btn-nav-exam" style="background:#fef3c7; color:#92400e;" disabled>100 Coins</button>
+          <button class="btn-nav-exam" style="background:#f1f5f9; color:#475569;" disabled>100 เหรียญ</button>
         </div>
       </div>
     </div>
@@ -1693,6 +1680,7 @@ async function selectTarget(target) {
   if (appState.user.isGpsAllowed && appState.user.location) {
     appState.user.isInsideCampus = isWithinCampusBounds(appState.user.location);
     updateUserPin(appState.user.location);
+    updateMyLocationAvailability();
     await runContextRouting(target, appState.user.location);
     return;
   }
@@ -1704,6 +1692,7 @@ async function selectTarget(target) {
     SheetManager.hideGpsWarning();
     appState.user.isInsideCampus = isWithinCampusBounds(userLocation);
     updateUserPin(userLocation);
+    updateMyLocationAvailability();
     await runContextRouting(target, userLocation);
   } catch (err) {
     appState.user.isGpsAllowed = false;
@@ -1794,6 +1783,19 @@ function isFollowingMe() {
   return headingListener !== null;
 }
 
+// ปุ่มนี้ทำงานได้เฉพาะในรั้วมหาลัย ถ้ารู้แน่แล้วว่าอยู่นอกก็ซ่อนไปเลย ดีกว่าให้กดแล้วเจอข้อความ
+// ปฏิเสธ — ปุ่มที่กดแล้วไม่มีอะไรเกิดขึ้นสร้างความสับสนมากกว่าปุ่มที่ไม่อยู่ตรงนั้นตั้งแต่แรก
+//
+// แต่ตอนที่ "ยังไม่รู้ตำแหน่ง" ต้องโชว์ไว้ เพราะปุ่มนี้เป็นทางที่ผู้ใช้จะกดขอสิทธิ์ตำแหน่งครั้งแรก
+// ถ้าซ่อนตั้งแต่ยังไม่รู้ ก็จะไม่มีทางเข้าถึงเลย
+function updateMyLocationAvailability() {
+  const btn = document.getElementById('my-location-btn');
+  if (!btn) return;
+  const knownOutside = appState.user.isGpsAllowed && appState.user.location && !appState.user.isInsideCampus;
+  btn.hidden = knownOutside;
+  if (knownOutside && isFollowingMe()) stopHeadingFollow();
+}
+
 function readCompassHeading(event) {
   // iOS ให้ค่าเข็มทิศจริงมาใน webkitCompassHeading ส่วน Android ใช้ alpha ที่นับสวนทาง
   if (typeof event.webkitCompassHeading === 'number') return event.webkitCompassHeading;
@@ -1863,11 +1865,9 @@ async function toggleMyLocation() {
   appState.user.isGpsAllowed = true;
   appState.user.isInsideCampus = isWithinCampusBounds(location);
   updateUserPin(location);
+  updateMyLocationAvailability();
 
-  if (!appState.user.isInsideCampus) {
-    SheetManager.showNotice('ปุ่มนี้ใช้ได้เฉพาะตอนอยู่ในพื้นที่ ม.รามฯ เท่านั้นครับ');
-    return;
-  }
+  if (!appState.user.isInsideCampus) return;
 
   appState.map.instance.panTo(location);
   nudgeMapRepaint(appState.map.instance);
@@ -1987,6 +1987,7 @@ function startCampusArrivalWatch(target) {
       stopCampusArrivalWatch();
       appState.user.isInsideCampus = true;
       updateUserPin(location);
+      updateMyLocationAvailability();
       SheetManager.showNotice('ถึง ม.รามฯ แล้ว เปลี่ยนเป็นนำทางเดินเท้าให้อัตโนมัติ');
       runContextRouting(target, location);
     },
@@ -2062,18 +2063,37 @@ async function handleGpsDenied(target) {
   }
 }
 
-// กด "เปิดตำแหน่ง" — ขอสิทธิ์ใหม่ ถ้าได้ก็เข้าสู่ flow ปกติทันที ถ้ายังไม่ได้ก็บอกให้รู้ว่ายังไม่ได้
-// (เบราว์เซอร์บางตัวจำการปฏิเสธไว้ ต้องไปแก้ในตั้งค่าเอง กดปุ่มซ้ำเฉยๆ จะไม่มีอะไรเกิดขึ้น)
+// ไม่มี API ไหนสั่งให้ LINE/ระบบเด้งหน้าขอสิทธิ์ตำแหน่งได้โดยตรง — ตัวที่ทำให้เด้งคือการเรียก
+// getCurrentPosition เท่านั้น (ซึ่งปุ่ม "เปิดตำแหน่ง" ทำอยู่แล้ว) แต่ถ้าเคยกดปฏิเสธไปแล้ว
+// เบราว์เซอร์จะจำไว้และไม่เด้งอีก กดปุ่มก็เงียบ ไม่มีอะไรเกิดขึ้น ซึ่งงงกว่าไม่มีปุ่ม
+//
+// เช็คสถานะสิทธิ์ก่อนจึงบอกได้ตรงจุดว่าต้องทำอะไรต่อ: ถ้ายังขอได้ก็ปล่อยให้เด้งตามปกติ
+// ถ้าโดนบล็อกถาวรแล้วก็บอกทางไปแก้ในตั้งค่าแทนการปล่อยให้กดแล้วเงียบ
+async function locationPermissionState() {
+  if (!navigator.permissions || !navigator.permissions.query) return 'unknown';
+  try {
+    const status = await navigator.permissions.query({ name: 'geolocation' });
+    return status.state; // 'granted' | 'prompt' | 'denied'
+  } catch (err) {
+    return 'unknown';
+  }
+}
+
 async function retryLocation(target) {
+  if ((await locationPermissionState()) === 'denied') {
+    SheetManager.showNotice('ตำแหน่งถูกปิดไว้ เปิดได้ที่ ตั้งค่า > LINE > ตำแหน่ง แล้วกลับมากดอีกครั้ง');
+    return;
+  }
   try {
     const location = await getUserLocation();
     appState.user.location = location;
     appState.user.isGpsAllowed = true;
     appState.user.isInsideCampus = isWithinCampusBounds(location);
     updateUserPin(location);
+    updateMyLocationAvailability();
     await runContextRouting(target, location);
   } catch (err) {
-    SheetManager.showNotice('ยังเปิดตำแหน่งไม่ได้ ลองอนุญาตตำแหน่งในตั้งค่าของเบราว์เซอร์ดูครับ');
+    SheetManager.showNotice('ยังเปิดตำแหน่งไม่ได้ เปิดได้ที่ ตั้งค่า > LINE > ตำแหน่ง แล้วกลับมากดอีกครั้ง');
   }
 }
 
