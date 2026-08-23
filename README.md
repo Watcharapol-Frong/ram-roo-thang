@@ -1,275 +1,292 @@
-# รามรู้ทาง (RAM-ROO-THANG)
+# RAM-ROO-THANG (รามรู้ทาง)
 
-LINE bot + LIFF สำหรับนำทางในมหาวิทยาลัยรามคำแหง — ค้นหาอาคาร นำทางแบบเลี้ยวต่อเลี้ยว
-ดูสภาพลานจอดรถแบบ crowdsourced จำตำแหน่งรถ และดูวันเวลาสอบของวิชาที่บันทึกไว้
+A LINE bot + LIFF app for navigating Ramkhamhaeng University — find buildings, get turn-by-turn
+walking directions, check crowdsourced parking conditions, remember where you parked, and look up
+exam dates for the courses you saved.
 
-> **สถานะ**: อยู่ระหว่างพัฒนาเพื่อ RU Innovation 2026 (demo 1 ก.ย. 2026)
-> ดู [สถานะรายระบบ](#สถานะรายระบบ) ท้ายไฟล์ว่าอะไรเสร็จแล้ว อะไรยังไม่ได้ทำ
+> **Status**: in development for RU Innovation 2026 (demo Sept 1, 2026).
+> See [System status](#system-status) at the bottom for what is done and what is not.
 
-## เอกสารที่ต้องอ่านก่อนเริ่ม
+## Read these before you start
 
-1. `CONTEXT.md` — นิยามศัพท์ (MVP vs Full Vision ห้ามสับสน)
-2. `MVP-SPEC-for-Dev.md` — สเปกเต็ม รวม section 9 Out of Scope
-3. `docs/adr/` — เหตุผลของการตัดสินใจสำคัญ 4 เรื่อง
+1. `CONTEXT.md` — terminology (MVP vs Full Vision — do not conflate them)
+2. `MVP-SPEC-for-Dev.md` — full spec, including section 9 Out of Scope
+3. `docs/adr/` — the reasoning behind four key decisions
 
-**ห้ามทำ**: อะไรก็ตามใน section 9 (Out of Scope) ของ `MVP-SPEC-for-Dev.md` โดยไม่คุยกันก่อน
+**Do not build** anything listed in section 9 (Out of Scope) of `MVP-SPEC-for-Dev.md` without
+discussing it first.
 
-## สถาปัตยกรรม
+## Architecture
 
-ระบบเป็น Cloudflare Worker **สองตัวแยกกัน** deploy คนละคำสั่ง อย่าสับสน:
+The system is **two separate Cloudflare Workers**, deployed with different commands. Don't mix them up:
 
-| Worker | ทำอะไร | config | deploy |
+| Worker | Responsibility | Config | Deploy |
 |---|---|---|---|
-| `ram-roo-thang-bot` | backend ทั้งหมด — LINE webhook + `/api/*` | `worker/wrangler.toml` | `cd worker && npm run deploy` |
-| `ram-roo-thang-liff` | static assets ของหน้า LIFF | `liff/wrangler.jsonc` | `npx wrangler deploy --config liff/wrangler.jsonc` |
+| `ram-roo-thang-bot` | All backend — LINE webhook + `/api/*` | `worker/wrangler.toml` | `cd worker && npm run deploy` |
+| `ram-roo-thang-liff` | Static assets for the LIFF pages | `liff/wrangler.jsonc` | `npx wrangler deploy --config liff/wrangler.jsonc` |
 
-> ⚠️ **อย่าเชื่อมต่อ GitHub integration / Workers Builds กับ repo นี้** — เคยทำให้ static assets ถูก
-> deploy ทับ API worker ทุกครั้งที่ push จนบอทล่ม และล้าง secrets ทิ้งทั้งชุด (22 ส.ค. 2026)
-> deploy ด้วยมือผ่าน wrangler พร้อม `--config` ที่ระบุชัดเสมอ
+> ⚠️ **Never connect a GitHub integration / Workers Builds to this repo.** It previously deployed
+> the static assets *over* the API worker on every push, taking the bot down and wiping all secrets
+> (Aug 22, 2026). Always deploy manually via wrangler with an explicit `--config`.
 
-## ข้อมูลอยู่ที่ไหน
+## Where data lives
 
-| ที่เก็บ | เก็บอะไร | ทำไมอยู่ที่นี่ |
+| Store | Contents | Why here |
 |---|---|---|
-| **D1** `ram-roo-thang` | `users`, `coin_ledger`, `user_courses` | ต้องมี transaction ตอนบวก/หักเหรียญ และต้อง query/รวมยอดได้ |
-| **KV** `BASELINE_DATA` | อาคาร 35 / ลานจอด 8 / บริการ 11 / ร้านค้า 25 | อ่านอย่างเดียว แทบไม่เปลี่ยน |
-| **KV** `PARKING_REPORTS` | รายงานสภาพลานจอด | ต้องหมดอายุเอง — ใช้ TTL ของ KV |
-| **KV** `RATE_LIMIT` | เวลารายงานล่าสุดของแต่ละคน | เหมือนกัน ใช้ TTL |
-| **KV** `CHAT_HISTORY_RAM` | ประวัติแชทกับบอท | เหมือนกัน ใช้ TTL |
-| **ไฟล์ static** | `ru_master.geojson` (91 จุด), `exam-lookup.json` (2,865 วิชา) | ข้อมูลนิ่ง เสิร์ฟตรงจาก LIFF ไม่เปลืองโควตาอ่านของ KV |
+| **D1** `ram-roo-thang` | `users`, `coin_ledger`, `user_courses` | Needs real transactions when granting/spending coins, and needs to be queryable |
+| **KV** `BASELINE_DATA` | 35 buildings / 8 parking zones / 11 services / 25 shops | Read-only, almost never changes |
+| **KV** `PARKING_REPORTS` | Parking condition reports | Must expire on its own — uses KV TTL |
+| **KV** `RATE_LIMIT` | Last report time per user | Same, uses TTL |
+| **KV** `CHAT_HISTORY_RAM` | Bot conversation history | Same, uses TTL |
+| **Static files** | `ru_master.geojson` (91 places), `exam-lookup.json` (2,865 courses) | Static data — served directly by the LIFF worker instead of burning KV read quota |
 
-**D1 ไม่มี TTL** — อะไรที่ควรหายเองอย่าย้ายมา
+**D1 has no TTL** — don't move anything here that should expire by itself.
 
-### ทำไมข้อมูลผู้ใช้ถึงอยู่บน D1 ไม่ใช่ KV
+### Why user data is on D1 and not KV
 
-1. KV ไม่มี atomic increment — บวก/หักเหรียญเป็น read-modify-write ยอดหายได้ถ้ายิงพร้อมกัน
-2. KV query ไม่ได้เลย จึงทำ ledger (เรียงเวลา/กรองตามคน/รวมยอด) ไม่ได้
-3. โควตาเขียน free tier: KV 1,000 แถว/วัน ส่วน D1 100,000 แถว/วัน — beta 200 คนประเมินไว้ ~2,200 writes/วัน
+1. KV has no atomic increment — granting/spending coins is read-modify-write, so concurrent
+   requests silently lose writes.
+2. KV cannot be queried at all, so a ledger (ordered by time, filtered by user, summed) is impossible.
+3. Free-tier write quota: KV allows 1,000 rows/day, D1 allows 100,000 rows/day. A 200-user beta is
+   estimated at ~2,200 writes/day.
 
-D1 สร้างที่ภูมิภาค **APAC** เพราะเขียนที่ primary ที่เดียว ถ้าไปตกอเมริกา write จากไทยจะช้าเห็นได้ชัด
+D1 is created in the **APAC** region because writes go to a single primary — a US primary would make
+every write from Thailand noticeably slower.
 
-### กติกาเหรียญ
+### Coin rules
 
-| การกระทำ | เหรียญ | กันรับซ้ำด้วย |
+| Action | Coins | Abuse protection |
 |---|---|---|
-| รายงานสภาพลานจอด | +10 | geofence 150 ม. + rate limit 30 นาที |
-| ทำแบบประเมิน | +30 | ครั้งเดียวตลอดชีพ |
-| บันทึกตำแหน่งรถ | +5 | วันละครั้ง (วันที่ตามเวลาไทย ไม่ใช่ UTC) |
+| Report parking conditions | +10 | 150 m geofence + 30 min rate limit |
+| Complete the feedback survey | +30 | Once per account, ever |
+| Save your car location | +5 | Once per day (Bangkok date, not UTC) |
 
-แก้ตัวเลขที่ `COIN_REWARDS` ใน `worker/src/user.js` ที่เดียว
+Change the amounts in one place: `COIN_REWARDS` in `worker/src/user.js`.
 
-**`coin_ledger` คือความจริง** ส่วน `users.coins` เป็นยอดสรุปที่เขียนใน `batch` เดียวกันเสมอ (ทรานแซกชันเดียว)
-ถ้าสองอันไม่ตรงกันให้เชื่อ ledger แล้วเรียก `recalculateBalance()`
+**`coin_ledger` is the source of truth.** `users.coins` is a materialized total, always written in the
+same `batch` (a single D1 transaction). If the two ever disagree, trust the ledger and call
+`recalculateBalance()`.
 
-การกันรับซ้ำใช้ **`UNIQUE (user_id, reason, ref_id)`** ให้ฐานข้อมูลปฏิเสธเอง ไม่ได้เขียน `if` เช็คในโค้ด:
+Double-claim protection is enforced by **`UNIQUE (user_id, reason, ref_id)`** — the database rejects
+it, not an `if` statement in application code:
 
-| reason | ref_id | ผล |
+| reason | ref_id | Effect |
 |---|---|---|
-| `FEEDBACK` | `once` | ครั้งเดียวตลอดชีพ |
-| `SAVE_CAR` | `2026-08-23` | วันละครั้ง |
-| `PARKING_REPORT` | เวลาที่รายงาน | 1 รายงาน = 1 ครั้ง |
-| `SHOP_REDEEM` | id การแลก | (จองไว้ ยังไม่มีฝั่ง shop) |
+| `FEEDBACK` | `once` | Claimable once, ever |
+| `SAVE_CAR` | `2026-08-23` | Once per day |
+| `PARKING_REPORT` | Report timestamp | One report = one grant |
+| `SHOP_REDEEM` | Redemption id | (reserved — shop not built yet) |
 
-## โครงสร้าง Project
+## Project structure
 
 ```
 ram-roo-thang-bot/
-├── CONTEXT.md                     — นิยามศัพท์
-├── MVP-SPEC-for-Dev.md            — สเปกเต็ม
-├── docs/adr/                      — เหตุผลการตัดสินใจ (0001-0004)
+├── CONTEXT.md                     — terminology
+├── MVP-SPEC-for-Dev.md            — full spec
+├── docs/adr/                      — decision records (0001-0004)
 │
-├── worker/                        — API Worker (backend ทั้งหมด)
+├── worker/                        — API Worker (all backend)
 │   ├── wrangler.toml              — bindings: 4 KV + D1 + Workers AI
-│   ├── .secrets.env.example       — คัดลอกเป็น .secrets.env แล้วใส่ token
+│   ├── .secrets.env.example       — copy to .secrets.env and fill in tokens
 │   ├── migrations/
 │   │   └── 0001_users_and_coin_ledger.sql
 │   └── src/
 │       ├── index.js               — router (LINE webhook + /api/*) + CORS
-│       ├── line.js                — signature verify, chat history, Flex Message, reply
-│       ├── ai.js                  — Workers AI + alias matching (timeout 5 วิ พร้อม fallback)
+│       ├── line.js                — signature verify, chat history, Flex Messages, reply
+│       ├── ai.js                  — Workers AI + alias matching (5s timeout with fallback)
 │       ├── data.js                — KV access
-│       ├── user.js                — ผู้ใช้ + เหรียญ + ledger (D1)
-│       ├── schedule.js            — วิชาที่ผู้ใช้บันทึก (D1)
-│       ├── parking.js             — รายงานลานจอด geofence + rate limit + aggregation
-│       ├── building.js            — ข้อมูลอาคาร
-│       ├── shop.js                — ลิสต์ร้านค้า/ซุ้ม
-│       └── utils.js               — Haversine
+│       ├── user.js                — users, coins, ledger (D1)
+│       ├── schedule.js            — saved courses (D1)
+│       ├── parking.js             — parking reports: geofence, rate limit, aggregation
+│       ├── building.js            — building lookup
+│       ├── shop.js                — shop/stall listing
+│       └── utils.js               — Haversine distance
 │
-├── liff/                          — หน้า LIFF (static ไม่มี build step)
+├── liff/                          — LIFF pages (plain static, no build step)
 │   ├── wrangler.jsonc
-│   ├── index.html                 — โหลด LIFF SDK + components + app.js
-│   ├── app.js                     — ทุก view, แผนที่, นำทาง, โปรไฟล์ (~3,000 บรรทัด)
+│   ├── index.html                 — loads LIFF SDK + components + app.js
+│   ├── app.js                     — all views, map, navigation, profile (~3,000 lines)
 │   ├── style.css
 │   ├── components/
-│   │   ├── RouteCalculator.js     — Google Directions API + เส้นประเชื่อมหมุด
-│   │   ├── NavigationController.js— นำทางสด: ติดตามระยะ, เสียงพูด, คำนวณเส้นใหม่เมื่อออกนอกเส้น
-│   │   └── SheetManager.js        — bottom sheet ทุกแบบ
-│   └── data/                      — สำเนาไฟล์ static ที่เสิร์ฟให้ browser
+│   │   ├── RouteCalculator.js     — Google Directions API + dashed marker connectors
+│   │   ├── NavigationController.js— live nav: progress tracking, voice, auto re-routing
+│   │   └── SheetManager.js        — every bottom sheet variant
+│   └── data/                      — copies of the static files served to the browser
 │
-├── data/                          — แหล่งความจริงของข้อมูล
-│   ├── baseline-dataset.json      — ข้อมูลที่ seed เข้า KV
-│   ├── ru_master.geojson           — 91 จุดบนแผนที่ (อาคาร 51 / จอดรถ 8 / ร้านค้า 25 / อื่นๆ 7)
-│   ├── exam-schedule.json          — ตารางสอบเต็ม 2,865 วิชา (ผลจาก parser)
-│   ├── exam-lookup.json            — รูปแบบกะทัดรัดที่ LIFF ใช้จริง (~10 KB หลัง gzip)
-│   └── 20260302_exam_169.pdf       — ประกาศตารางสอบต้นฉบับ 111 หน้า
+├── data/                          — source of truth for datasets
+│   ├── baseline-dataset.json      — seeded into KV
+│   ├── ru_master.geojson           — 91 map places (51 buildings / 8 parking / 25 shops / 7 other)
+│   ├── exam-schedule.json          — full exam timetable, 2,865 courses (parser output)
+│   ├── exam-lookup.json            — compact form the LIFF actually loads (~10 KB gzipped)
+│   └── 20260302_exam_169.pdf       — the original 111-page university announcement
 │
 └── scripts/
-    ├── dev-api.mjs                — backend สำหรับ dev (worker จริง + KV/D1 ในหน่วยความจำ)
-    ├── serve-liff.mjs             — static server สำหรับ dev
-    ├── seed-kv.sh                 — seed baseline-dataset.json เข้า KV (ต้องมี jq)
-    ├── build-exam-schedule.py     — แปลง PDF ตารางสอบ -> JSON (ต้องมี pypdf)
-    └── google-sheets-apps-script.js— โค้ดฝั่ง Google Sheets สำหรับรับผลแบบประเมิน
+    ├── dev-api.mjs                — dev backend (real worker + in-memory KV/D1)
+    ├── serve-liff.mjs             — dev static server
+    ├── seed-kv.sh                 — seed baseline-dataset.json into KV (needs jq)
+    ├── build-exam-schedule.py     — convert the exam PDF to JSON (needs pypdf)
+    └── google-sheets-apps-script.js— Google Sheets receiver for survey responses
 ```
 
 ## API
 
-ทุก endpoint ใต้ `/api/` มี CORS เปิดไว้ เพราะ LIFF อยู่คนละ origin กับ worker เสมอ
+Every `/api/*` endpoint has CORS enabled, because the LIFF is always on a different origin than the worker.
 
-| Method | Path | ทำอะไร |
+| Method | Path | Purpose |
 |---|---|---|
-| POST | `/webhook` | LINE webhook (ตรวจ HMAC signature ก่อนเสมอ) |
-| GET | `/api/buildings` · `/api/building?building_id=` | ข้อมูลอาคาร |
-| GET | `/api/shops` | ร้านค้า/ซุ้ม |
-| GET | `/api/parking/zones` · `/api/parking/zone?zone_id=` | ลานจอด + สถานะล่าสุด |
-| GET | `/api/parking/status?zone_id=` | สถานะรวมของลานเดียว |
-| POST | `/api/parking/report` | รายงานสภาพ (geofence + rate limit) → ได้ +10 เหรียญ |
-| GET | `/api/user?user_id=` | โปรไฟล์ + ยอดเหรียญ + สิทธิ์ที่รับแล้ว + 20 รายการล่าสุด |
-| GET | `/api/user/ledger?user_id=&limit=` | รายการเข้า-ออกของเหรียญ |
-| POST | `/api/user/feedback` · `/api/user/save-car` | รับเหรียญ (idempotent) |
-| GET/POST/DELETE | `/api/schedule` | วิชาที่ผู้ใช้บันทึก |
+| POST | `/webhook` | LINE webhook (HMAC signature is verified first, always) |
+| GET | `/api/buildings` · `/api/building?building_id=` | Building data |
+| GET | `/api/shops` | Shops and stalls |
+| GET | `/api/parking/zones` · `/api/parking/zone?zone_id=` | Parking zones + latest status |
+| GET | `/api/parking/status?zone_id=` | Aggregated status for one zone |
+| POST | `/api/parking/report` | Submit a report (geofence + rate limit) → grants +10 coins |
+| GET | `/api/user?user_id=` | Profile, coin balance, claimed rewards, last 20 ledger entries |
+| GET | `/api/user/ledger?user_id=&limit=` | Full coin transaction history |
+| POST | `/api/user/feedback` · `/api/user/save-car` | Claim coins (idempotent) |
+| GET/POST/DELETE | `/api/schedule` | The user's saved courses |
 
 ## LIFF deep links
 
-| URL | ไปหน้าไหน |
+| URL | Opens |
 |---|---|
-| `?` (ไม่มี param) | แผนที่รวม เลือกจุดหมายเอง |
-| `?dest_id=ECB` | แผนที่ + เลือกอาคารนั้นให้เลย |
-| `?mode=parking&zone_id=...` | แผนที่ + เลือกลานจอดนั้น |
-| `?car=lat,lng` | นำทางไปหารถที่เพื่อนแชร์มา |
-| `?mode=profile` | โปรไฟล์ + เหรียญ + ตารางสอบ |
-| `?mode=shop` · `?mode=settings` · `?mode=feedback` | ร้านค้า (Coming Soon) / ตั้งค่า / แบบประเมิน |
+| `?` (no params) | Full map, user picks a destination |
+| `?dest_id=ECB` | Map with that building already selected |
+| `?mode=parking&zone_id=...` | Map with that parking zone selected |
+| `?car=lat,lng` | Navigate to a car location a friend shared |
+| `?mode=profile` | Profile + coins + exam schedule |
+| `?mode=shop` · `?mode=settings` · `?mode=feedback` | Shop (Coming Soon) / Settings / Survey |
 
-> LINE ส่ง query string จริงมาใน `?liff.state=` ไม่ได้ส่งตรงๆ — `readAppParams()` ใน `app.js`
-> จัดการให้แล้ว **อย่าอ่าน `window.location.search` ตรงๆ เวลาทำ deep link ใหม่** ไม่งั้นหน้าจะแวบไปที่แผนที่ก่อน
+> LINE delivers the real query string inside `?liff.state=`, not directly. `readAppParams()` in
+> `app.js` handles this. **Do not read `window.location.search` directly when adding a new deep
+> link** — the page will flash the map first before landing on the right view.
 
-## เริ่มงาน (Setup)
+## Setup
 
-ต้องมีบัญชี Cloudflare และ LINE Developers Console แล้ว
+Assumes you already have a Cloudflare account and a LINE Developers Console channel.
 
 ```bash
 cd worker
 npm install
 
-# 1. KV 4 ตัว — เอา id ที่ได้ไปใส่ wrangler.toml
+# 1. Four KV namespaces — put the returned ids into wrangler.toml
 npx wrangler kv namespace create BASELINE_DATA
 npx wrangler kv namespace create PARKING_REPORTS
 npx wrangler kv namespace create RATE_LIMIT
 npx wrangler kv namespace create CHAT_HISTORY_RAM
 
-# 2. D1 — เอา database_id ไปใส่ wrangler.toml แล้วสร้างตาราง
+# 2. D1 — put database_id into wrangler.toml, then create the tables
 npx wrangler d1 create ram-roo-thang --location apac
 npx wrangler d1 execute ram-roo-thang --remote --file=migrations/0001_users_and_coin_ledger.sql
 
-# 3. secrets — ใส่ครั้งเดียว ไฟล์นี้ถูก gitignore ไว้
+# 3. Secrets — fill in once; this file is gitignored
 cp .secrets.env.example .secrets.env
-#    LINE_CHANNEL_SECRET       -> Console แท็บ Basic settings
-#    LINE_CHANNEL_ACCESS_TOKEN -> Console แท็บ Messaging API (ตัว long-lived)
+#    LINE_CHANNEL_SECRET       -> Console, Basic settings tab
+#    LINE_CHANNEL_ACCESS_TOKEN -> Console, Messaging API tab (the long-lived one)
 
-# 4. seed ข้อมูลอาคาร/ลานจอดเข้า KV
+# 4. Seed building/parking data into KV
 cd .. && ./scripts/seed-kv.sh
 
 cd worker && npm run deploy
 ```
 
-ฝั่ง LIFF: แก้ `LIFF_ID`, `PROD_WORKER_BASE_URL`, `GOOGLE_MAPS_API_KEY`, `GOOGLE_MAPS_MAP_ID`,
-`GOOGLE_MAPS_MAP_ID_2D` ที่ต้นไฟล์ `liff/app.js` (สร้าง LIFF app ผ่าน LINE Developers Console แยกต่างหาก)
+For the LIFF: set `LIFF_ID`, `PROD_WORKER_BASE_URL`, `GOOGLE_MAPS_API_KEY`, `GOOGLE_MAPS_MAP_ID` and
+`GOOGLE_MAPS_MAP_ID_2D` at the top of `liff/app.js` (create the LIFF app separately in the LINE
+Developers Console).
 
-### เรื่อง Map ID สองตัว
+### Why there are two Map IDs
 
-- `GOOGLE_MAPS_MAP_ID` — โหมด 3D ไม่ใส่ style เพราะ style ทำให้ตึก 3D หายไป
-- `GOOGLE_MAPS_MAP_ID_2D` — โหมด 2D ใส่ style ซ่อน POI ของ Google ไว้
+- `GOOGLE_MAPS_MAP_ID` — used for 3D mode, **unstyled**, because any style removes the 3D buildings
+- `GOOGLE_MAPS_MAP_ID_2D` — used for 2D mode, styled to hide Google's own POI labels
 
-การซ่อนป้าย POI กับการแสดงตึก 3D ใช้ร่วมกันไม่ได้บน Google Maps (ทดสอบยืนยันแล้ว 3 รอบ)
-จึงต้องแยก Map ID สองตัวและสลับตอนเปลี่ยนโหมด
+Hiding POI labels and showing 3D buildings are mutually exclusive on Google Maps (verified three
+times). Hence two Map IDs, swapped when the view mode changes.
 
-## Secrets บน production
+## Secrets in production
 
-`worker/.secrets.env` (gitignore ไว้) เป็นแหล่งความจริงของ secrets — `npm run deploy` ส่งไฟล์นี้ไปกับทุก
-deployment ผ่าน `wrangler deploy --secrets-file` ซึ่งทำงานแบบ additive (ไม่ลบตัวที่ไม่ได้ระบุ)
+`worker/.secrets.env` (gitignored) is the source of truth for secrets. `npm run deploy` ships it with
+every deployment via `wrangler deploy --secrets-file`, which is additive — it never deletes secrets
+you didn't list.
 
-เหตุผลที่ต้องผูกไว้กับ deploy: เคยเจอ secrets หายทั้งชุดตอน worker ถูกเขียนทับ พอ secret หาย
-`verifySignature` จะเอาสตริง `"undefined"` ไปทำ HMAC ทุก webhook จาก LINE จึงได้ 401 กลับไป
-**บอทเงียบสนิทโดยไม่มี error ให้เห็น** ตอนนี้ webhook แยกเคสนี้เป็น 500 พร้อม log บอกชื่อ secret ที่ขาดแล้ว
+Why they're tied to the deploy: all secrets were once wiped when the worker got overwritten. With the
+secret missing, `verifySignature` hashes the literal string `"undefined"`, so every LINE webhook gets
+a 401 back — **the bot goes completely silent with no error anywhere**. The webhook now returns 500
+with a log naming the missing secret, so this failure mode is no longer invisible.
 
 ```bash
 cd worker
-npm run deploy          # deploy + ยิง secrets ขึ้นไปด้วย (ใช้ตัวนี้เป็นปกติ)
-npm run secrets:push    # ยิงเฉพาะ secrets ไม่ deploy โค้ด
-npm run secrets:check   # ดูว่าบน production มี secret อะไรบ้าง — ต้องเห็นครบ 2 ตัว
-npm run tail            # ดู log สด (รันในเทอร์มินัลจริง ไม่งั้น output จะถูก buffer)
+npm run deploy          # deploy + push secrets (use this normally)
+npm run secrets:push    # push secrets only, no code deploy
+npm run secrets:check   # list secrets in production — you should see both
+npm run tail            # live logs (run in a real terminal, or output gets buffered)
 ```
 
-## พัฒนาบนเครื่องตัวเอง
+## Local development
 
-ต้องรัน 2 โปรเซส คนละเทอร์มินัล — LIFF เป็นแค่ static file ต้องมี backend ให้เรียก:
+Two processes, two terminals — the LIFF is static files and needs a backend to call:
 
 ```bash
 node scripts/dev-api.mjs      # backend -> :8787
 cd liff && npm run dev        # static server -> :8123
 ```
 
-เปิด **http://localhost:8123/?dev=1&api=http://localhost:8787**
+Open **http://localhost:8123/?dev=1&api=http://localhost:8787**
 
-- `dev-api.mjs` รัน `worker/src/index.js` **ตัวจริง** (router/handler เดิมทั้งหมด ไม่ได้เขียน mock)
-  โดยสลับ KV เป็น Map ในหน่วยความจำ และสลับ D1 เป็น `node:sqlite` ที่รัน migration ไฟล์เดียวกับ production
-  — UNIQUE constraint ที่ใช้กันรับเหรียญซ้ำจึงถูกทดสอบจริงตั้งแต่ในเครื่อง
-- ข้อมูลหายเมื่อปิดโปรเซส และ `/webhook` ใช้ที่นี่ไม่ได้ (ต้องมี LINE + Workers AI จริง)
-- **แก้โค้ด worker แล้วต้องรีสตาร์ท `dev-api.mjs`** ไม่มี hot reload
-- `?dev=1` จะ stub LIFF SDK ทิ้งและจำลอง GPS ให้อยู่ในแคมปัส (เติม `&lat=&lng=` เพื่อจำลองตำแหน่งอื่น)
-  **ทำงานเฉพาะ localhost** บน production พารามิเตอร์นี้ไม่มีผลโดยตั้งใจ ไม่งั้นใครก็ปลอมพิกัดผ่าน geofence ได้
+- `dev-api.mjs` runs the **real** `worker/src/index.js` (same router and handlers, nothing mocked),
+  swapping KV for in-memory Maps and D1 for `node:sqlite` running the same migration file as
+  production — so the UNIQUE constraints that prevent double coin claims are genuinely exercised locally.
+- Data is lost when the process exits, and `/webhook` doesn't work here (needs real LINE + Workers AI).
+- **Restart `dev-api.mjs` after editing worker code** — there is no hot reload.
+- `?dev=1` stubs out the LIFF SDK and fakes a GPS position on campus (add `&lat=&lng=` to simulate
+  elsewhere). It **only works on localhost** — on production the parameter is deliberately ignored,
+  otherwise anyone could spoof coordinates past the parking geofence from a normal browser.
 
-ทดสอบ intent/alias matching ของ AI: `node test-module1-readiness.mjs` (30 เคส import ฟังก์ชันจริงจาก `ai.js`)
+Test the AI's intent/alias matching: `node test-module1-readiness.mjs` (30 cases, importing the real
+functions from `ai.js`).
 
-## Data pipeline
+## Data pipelines
 
-**แผนที่** — แก้ `data/ru_master.geojson` แล้วคัดลอกไป `liff/data/` ด้วย (LIFF เสิร์ฟจากที่นั่น)
-ถ้าแก้ลานจอด/ร้านค้า ต้อง seed KV ใหม่ด้วย ถ้าแก้แค่อาคารไม่ต้อง
+**Map** — edit `data/ru_master.geojson`, then copy it to `liff/data/` as well (that's what the LIFF
+serves). If you changed parking zones or shops you also need to re-seed KV; building-only changes
+don't require it.
 
-**ตารางสอบ** — มหาวิทยาลัยประกาศเป็น PDF ทุกภาค:
+**Exam timetable** — the university publishes a PDF each term:
 
 ```bash
-python3 scripts/build-exam-schedule.py <ไฟล์.pdf> -o data/exam-schedule.json
+python3 scripts/build-exam-schedule.py <file.pdf> -o data/exam-schedule.json
 ```
 
-parser อ่านจาก **พิกัดบนหน้ากระดาษ** ไม่ใช่ลำดับบรรทัด เพราะลำดับบรรทัดให้ผลผิด — มีวิชาที่ช่องวันสอบ
-ว่างจริง (เช่น `ACC3255(0)` วิชา 0 หน่วยกิต) ทำให้แถวถัดไปรับวันสอบของแถวอื่นมาทั้งหน้า
-ใช้คอลัมน์ "ลำดับที่" เป็น checksum ว่าต้องได้ 1..N ครบเรียงไม่ขาดไม่ซ้ำ **ถ้า checksum ไม่ผ่านห้ามใช้ผลลัพธ์**
+The parser reads **coordinates on the page**, not line order, because line order produces wrong data —
+some courses have a genuinely empty exam-date cell (e.g. `ACC3255(0)`, a 0-credit course), which makes
+every following row inherit another row's exam date for the rest of the page. The "ลำดับที่" (sequence)
+column is used as a checksum: it must come out as exactly 1..N with no gaps or duplicates.
+**If the checksum fails, do not use the output.**
 
-แล้วสร้าง `exam-lookup.json` (รูปแบบกะทัดรัดที่ LIFF โหลด) จาก `exam-schedule.json` อีกที
+Then regenerate `exam-lookup.json` (the compact form the LIFF loads) from `exam-schedule.json`.
 
-**ห้ามแต่งข้อมูลสอบขึ้นมาเอง** — โค้ดเดิมเคยมี fallback ที่ hash รหัสวิชาแล้วสุ่มอาคาร/ห้อง/วัน/เวลาออกมา
-พิมพ์รหัสอะไรลงไปก็ได้คำตอบเสมอทั้งที่ไม่มีข้อมูลจริง สำหรับแอปที่พาคนไปห้องสอบแปลว่าไปผิดที่ผิดเวลา
-ตอนนี้รหัสที่ไม่มีในตารางจะถูกปฏิเสธตั้งแต่ตอนกดเพิ่ม
+**Never fabricate exam data.** The old code had a fallback that hashed the course code to invent a
+building, room, date and time — so any string you typed produced a confident answer with nothing real
+behind it. For an app that walks people to an exam room, that means sending them to the wrong place at
+the wrong time. Course codes not present in the timetable are now rejected at input.
 
-## สถานะรายระบบ
+## System status
 
-| ระบบ | สถานะ | หมายเหตุ |
+| System | Status | Notes |
 |---|---|---|
-| แผนที่ + นำทางในแอป | ✅ | 2D/3D, เสียงพูดไทย, คำนวณเส้นใหม่เมื่อออกนอกเส้น, หมุนตามทิศ |
-| ลานจอดรถ | ✅ | 8 โซนเป็น polygon, รายงาน 3 ระดับ, geofence, aggregation |
-| Find My Car | ✅ | เก็บใน localStorage — เปลี่ยนเครื่องแล้วหาย (ตั้งใจ) |
-| ruMaster Dataset | ✅ | 91 จุด |
-| Exam Schedule Dataset | ⚠️ | 2,865 วิชา มีวันสอบ+คาบ **แต่ไม่มีอาคาร/ห้องสอบ** และเวลาคาบ A/B ยังไม่ยืนยัน |
-| User Database + เหรียญ | ✅ | D1 + ledger กันรับซ้ำระดับฐานข้อมูล |
-| แบบประเมิน → Google Sheets | ⚠️ | โค้ดพร้อม แต่ยังไม่ได้ใส่ `FEEDBACK_ENDPOINT_URL` = ยังเก็บผลไม่ได้ |
-| Shop / ใช้เหรียญ | ❌ | หน้าเป็น Coming Soon — ฐานรองรับการหักเหรียญไว้แล้ว เหลือเคาะว่าแลกอะไร |
-| Proactive Exam Alerts (Cron) | ❌ | ยังไม่มี `[triggers]` และ `scheduled` handler — ติดที่รอข้อมูลห้องสอบ + เวลาคาบ |
-| Community | ❌ | ยังไม่เริ่ม (ADR-0004 ตัดออกจาก MVP ไว้ก่อน) |
+| Map + in-app navigation | ✅ | 2D/3D, Thai voice guidance, auto re-routing, heading-up rotation |
+| Parking | ✅ | 8 zones as polygons, 3-level reports, geofence, aggregation |
+| Find My Car | ✅ | Stored in localStorage — lost when switching devices (by design) |
+| ruMaster dataset | ✅ | 91 places |
+| Exam schedule dataset | ⚠️ | 2,865 courses with dates + periods, **but no building/room**, and the A/B period times are unconfirmed |
+| User database + coins | ✅ | D1 + ledger, double-claim prevention enforced by the database |
+| Survey → Google Sheets | ⚠️ | Code is ready but `FEEDBACK_ENDPOINT_URL` is unset, so no responses are collected yet |
+| Shop / spending coins | ❌ | Page is Coming Soon. The spend path is supported in the backend; we just need to decide what's redeemable |
+| Proactive Exam Alerts (Cron) | ❌ | No `[triggers]` and no `scheduled` handler yet — blocked on exam room data + period times |
+| Community | ❌ | Not started (ADR-0004 kept it out of the MVP) |
 
-### ยังต้องทำก่อนวัน demo
+### Before demo day
 
-- [ ] ใส่อาคาร/ห้องสอบ และยืนยันเวลาคาบ A/B (บล็อก Exam Alerts อยู่)
-- [ ] ใส่ `FEEDBACK_ENDPOINT_URL` หลัง deploy Google Apps Script
-- [ ] โหลดทดสอบจริงกับคน 100-200 คนพร้อมกัน — ยังไม่เคยทดสอบโหลดจริงเลย
-- [ ] seed ข้อมูลรายงานลานจอดจริงก่อนวันงาน (ต้องมีคนเดินไปเช็คอินจริง)
-- [ ] เตรียม QR code ชี้ไปหา LINE OA (ไม่ใช่ LIFF ตรงๆ ต้องผ่านแชทก่อน)
+- [ ] Add exam buildings/rooms and confirm the A/B period times (this blocks Exam Alerts)
+- [ ] Set `FEEDBACK_ENDPOINT_URL` after deploying the Google Apps Script
+- [ ] Real load test with 100–200 concurrent users — this has never been done
+- [ ] Seed real parking reports before the event (requires people physically checking in)
+- [ ] Prepare a QR code pointing at the LINE OA (not the LIFF directly — users must go through chat first)
