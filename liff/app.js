@@ -270,6 +270,7 @@ async function renderMapView({ presetDestId, presetZoneId }) {
   const buildings = buildingsData.buildings || [];
   placeBuildingMarkers(buildings);
   await placeParkingMarkers();
+  if (!presetDestId && !presetZoneId) frameCampus(buildings);
 
   if (presetDestId) {
     const building = buildings.find((b) => b.building_id === presetDestId);
@@ -292,6 +293,11 @@ async function renderMapView({ presetDestId, presetZoneId }) {
 
 // หมุดอาคารเป็น "ป้ายชิป" เล็กๆ ที่มีรหัสอาคารอยู่ข้างใน แทนหมุดสีแดงมาตรฐานของ Google —
 // อาคาร 35 หลังในพื้นที่ ~1 ตร.กม. ถ้าใช้หมุดมาตรฐานจะบังกันจนมองไม่เห็นตัวแผนที่เลย
+//
+// ใช้ google.maps.Marker ตัวเดิม ไม่ใช่ AdvancedMarkerElement ถึงแม้จะมี mapId แล้วก็ตาม —
+// ลองแล้ว AdvancedMarkerElement ไม่ถูก mount ลง DOM เลยสักตัว (content.isConnected เป็น false
+// ทั้ง 35 ตัว ไม่มี error ให้จับ) ส่วน Marker ตัวเดิมวาดได้ปกติ และ Google ประกาศชัดว่ายังไม่มี
+// กำหนดเลิกรองรับ ถ้าจะย้ายไป AdvancedMarkerElement ในอนาคตต้องไล่เช็ค config ของ Map ID ก่อน
 const BUILDING_MARKER_MIN_ZOOM = 16;
 const buildingMarkers = [];
 
@@ -332,9 +338,27 @@ function placeBuildingMarkers(buildings) {
   updateBuildingMarkerVisibility();
 }
 
+// จัดกล้องให้เห็นอาคารทุกหลังพอดีจอ แทนการ hardcode center/zoom ไว้ตายตัว (ของเดิมทำให้อาคาร
+// ริมขอบอย่าง KLB ตกนอกจอตั้งแต่เปิดหน้ามา)
+//
+// การขยับกล้อง "จริงๆ" ตรงนี้ยังจำเป็นอีกอย่าง: vector map ของ Google ไม่วาดหมุดที่เพิ่งเพิ่มเข้าไป
+// หลังจากแผนที่นิ่งแล้ว จนกว่ากล้องจะขยับ — หมุดจะหายทั้งแผนที่แบบไม่มี error (เจอตอนเทสจริง
+// ลองแล้วทั้ง trigger 'resize' และ panBy(0,0) ไม่ช่วย ต้องเป็นการขยับกล้องจริงเท่านั้น)
+function frameCampus(buildings) {
+  const map = appState.map.instance;
+  if (!map || !buildings.length) return;
+  const bounds = new google.maps.LatLngBounds();
+  buildings.forEach((b) => bounds.extend({ lat: b.lat, lng: b.lng }));
+  map.fitBounds(bounds, 40);
+  google.maps.event.addListenerOnce(map, 'idle', () => {
+    // fitBounds อาจซูมออกจนต่ำกว่าเกณฑ์ที่ป้ายชิปจะโชว์ (จอแคบ) — ดันกลับขึ้นมาให้เห็นหมุดเสมอ
+    if (map.getZoom() < BUILDING_MARKER_MIN_ZOOM) map.setZoom(BUILDING_MARKER_MIN_ZOOM);
+  });
+}
+
 // ซูมออกไกลๆ ป้ายชิปจะทับกันเป็นพืด ซ่อนไปเลยดีกว่า เหลือแต่หมุดลานจอดที่มีไม่กี่จุด
-// getZoom() คืน undefined ได้ถ้าแผนที่ยังตั้งตัวไม่เสร็จ (เช่นตอน key ถูกปฏิเสธ referrer) —
-// ต้อง default เป็น "โชว์" ไม่งั้น undefined >= 16 เป็น false แล้วหมุดหายหมดทั้งแผนที่แบบเงียบๆ
+// getZoom() คืน undefined ได้ถ้าแผนที่ยังตั้งตัวไม่เสร็จ — ต้อง default เป็น "โชว์" ไม่งั้น
+// undefined >= 16 เป็น false แล้วหมุดหายหมดทั้งแผนที่แบบเงียบๆ
 function updateBuildingMarkerVisibility() {
   const map = appState.map.instance;
   if (!map) return;
@@ -345,8 +369,9 @@ function updateBuildingMarkerVisibility() {
 
 function highlightBuildingMarker(buildingId) {
   buildingMarkers.forEach((marker) => {
-    marker.setIcon(buildingMarkerIcon(marker.buildingId, marker.buildingId === buildingId));
-    marker.setZIndex(marker.buildingId === buildingId ? 100 : 1);
+    const isSelected = marker.buildingId === buildingId;
+    marker.setIcon(buildingMarkerIcon(marker.buildingId, isSelected));
+    marker.setZIndex(isSelected ? 100 : 1);
   });
 }
 
@@ -460,6 +485,15 @@ function applyViewMode() {
     map.setTilt(0);
     map.setHeading(0);
   }
+  nudgeMapRepaint(map);
+}
+
+// vector map ของ Google ไม่วาดเฟรมใหม่ให้เอง หลังเปลี่ยนสถานะกล้องด้วยโค้ด (setTilt/setHeading/
+// setZoom) หรือเพิ่งเพิ่มหมุดเข้าไป — จอจะค้างภาพเดิมหรือว่างเปล่าจนกว่าผู้ใช้จะไปแตะแผนที่เอง
+// ขยับ 1 พิกเซลเพื่อบังคับให้วาดใหม่ (ตาเปล่ามองไม่เห็น) ลองแล้วทั้ง trigger 'resize' และ
+// panBy(0,0) ไม่ได้ผล ต้องเป็นการขยับที่ระยะไม่ใช่ 0 เท่านั้น
+function nudgeMapRepaint(map) {
+  if (map) map.panBy(1, 0);
 }
 
 function updateLayerToggleAvailability() {
