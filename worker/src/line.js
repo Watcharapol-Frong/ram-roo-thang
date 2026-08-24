@@ -327,7 +327,9 @@ function serviceQuickReply(info, exclude = null) {
 // ผู้ใช้ถามด้านหนึ่ง แต่ยังไม่ได้บอกว่าเรื่องไหน — ยื่นรายชื่อบริการให้เลือก โดยพก intent เดิมไปด้วย
 // กดแล้วได้คำตอบที่ถามไว้ทันที ไม่ต้องพิมพ์ซ้ำ
 function serviceChoiceQuickReply(services, intent) {
-  const items = services.slice(0, 11).map((svc) => ({
+  // LINE รับ quick reply ได้ 13 ปุ่ม — รายการบริการยาวกว่านั้นแล้ว ที่เกินต้องพิมพ์ชื่อเอา
+  // (ข้อความข้างบนบอกให้พิมพ์ได้อยู่แล้ว จึงไม่ได้ตัน แค่ไม่ได้ยื่นให้ครบทุกอัน)
+  const items = services.slice(0, 13).map((svc) => ({
     type: 'action',
     action: {
       type: 'postback',

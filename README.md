@@ -416,10 +416,10 @@ So every service answers questions today, and answers more of them as explicit f
 
 Run `node scripts/service-data-report.mjs` for current coverage — it reads the dataset through the
 same `normalizeService()` the bot uses, so it reports what the bot can actually answer rather than
-what happens to be typed in the file. As of Aug 24 2026, after importing the registry research: steps and
-document lists are complete for all 11 services; fee 7/11, period 6/11, duration 5/11, contact 3/11,
-and opening hours only 2/11 — the source document states hours for the One Stop Service counter and
-nothing else.
+what happens to be typed in the file. As of Aug 24 2026, after importing the registry research and the four
+services it described that the dataset didn't carry: 15 services, steps and document lists complete
+for all of them; fee 10/15, period 8/15, duration 6/15, contact 3/15, and opening hours only 4/15 —
+the source states hours for the One Stop Service counter and nothing else.
 
 **`docs/service-data-checklist.md` is the working document for closing those gaps** — field spec,
 writing rules, and the order to do them in.
