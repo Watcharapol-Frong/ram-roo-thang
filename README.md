@@ -208,10 +208,11 @@ The message lists each course sorted by exam period, with times, plus a link to 
 Exam rooms are not in the university announcement, so the message says so explicitly rather than
 guessing. When room data arrives, `formatAlertMessage()` in `worker/src/exam.js` is the only place to change.
 
-Period times (confirmed against the university announcement, Aug 23 2026):
-**A = 09:30–12:00/12:30**, **B = 14:00–16:30**. `PERIOD_TIME` in `worker/src/exam.js` must stay in
-sync with `EXAM_PERIOD_TIME` in `liff/app.js`. An earlier value of 13:30–16:00 for period B was
-wrong — it came from a hardcoded demo table, not the announcement.
+Period times (confirmed against the university announcement, Aug 24 2026):
+**A = 09:00–12:00**, **B = 14:00–16:30**. `PERIOD_TIME` in `worker/src/exam.js` must stay in
+sync with `EXAM_PERIOD_TIME` in `liff/app.js`. Both values in the original hardcoded demo table were
+wrong: period B read 13:30–16:00, half an hour early, and period A read 09:30–12:00/12:30 — wrong
+start time and a second end time that doesn't exist.
 
 ### Exam rooms come from the student, via OCR
 
