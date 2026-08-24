@@ -140,12 +140,15 @@ export function answerForIntent(info, intent) {
 
 // สรุปทุกด้านที่มีข้อมูล ใช้ตอบคำถามกว้างๆ อย่าง "ขอรายละเอียดเพิ่ม"
 export function fullSummary(info) {
+  // ไม่มี emoji นำหน้าบรรทัด — ใช้คำกำกับแทน อ่านออกแน่นอนทุกเครื่องและไม่รกตา
+  // (regex ด้านบนที่ match emoji ยังต้องอยู่ เพราะใช้อ่าน "ข้อมูลต้นทาง" ที่ทีมกรอกมาแบบมี emoji
+  //  คนละเรื่องกับข้อความที่เราส่งออกไป)
   const parts = [info.name];
-  if (info.location || info.short_answer) parts.push(`\n📍 ${info.location || info.short_answer}`);
-  if (info.hours) parts.push(`🕒 ${info.hours}`);
-  if (info.fee) parts.push(`💰 ${info.fee}`);
-  if (info.period) parts.push(`🗓 เปิดรับ: ${info.period}`);
-  if (info.duration) parts.push(`⏳ ใช้เวลา: ${info.duration}`);
+  if (info.location || info.short_answer) parts.push(`\nสถานที่: ${info.location || info.short_answer}`);
+  if (info.hours) parts.push(`เวลาทำการ: ${info.hours}`);
+  if (info.fee) parts.push(`ค่าธรรมเนียม: ${info.fee}`);
+  if (info.period) parts.push(`เปิดรับ: ${info.period}`);
+  if (info.duration) parts.push(`ใช้เวลา: ${info.duration}`);
   if (info.documents.length) parts.push(`\nสิ่งที่ต้องเตรียม\n${bulleted(info.documents)}`);
   if (info.procedure.length) parts.push(`\nขั้นตอน\n${numbered(info.procedure)}`);
   if (info.contact) parts.push(`\nติดต่อ: ${info.contact}`);
