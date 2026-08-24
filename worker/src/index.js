@@ -3,7 +3,7 @@
 import { handleWebhookRequest } from './line.js';
 import { handleParkingReport, handleParkingStatus, handleParkingZone, handleParkingZones } from './parking.js';
 import { handleGetBuilding, handleListBuildings } from './building.js';
-import { handleListShops } from './shop.js';
+import { handleListShops, handleListShopItems, handleRedeemItem, handleListRedemptions } from './shop.js';
 import { handlePostSchedule, handleGetSchedule, handleDeleteSchedule } from './schedule.js';
 import { handleGetUser, handleGetLedger, handleFeedbackAward, handleSaveCarAward } from './user.js';
 import { handleAdminExamAlerts, runDailyExamAlerts } from './exam.js';
@@ -79,6 +79,16 @@ async function route(request, env, ctx) {
 
   if (method === 'POST' && pathname === '/api/admin/exam-alerts') {
     return handleAdminExamAlerts(request, env);
+  }
+
+  if (method === 'GET' && pathname === '/api/shop/items') {
+    return handleListShopItems(request, env);
+  }
+  if (method === 'POST' && pathname === '/api/shop/redeem') {
+    return handleRedeemItem(request, env);
+  }
+  if (method === 'GET' && pathname === '/api/shop/redemptions') {
+    return handleListRedemptions(request, env);
   }
 
   if (method === 'GET' && pathname === '/api/user') {

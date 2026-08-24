@@ -29,6 +29,11 @@ const SYSTEM_INSTRUCTION = `
 
 const AI_TIMEOUT_MS = 5000;
 
+// เก็บบทสนทนาย้อนหลังกี่ "ข้อความ" (1 รอบ = ผู้ใช้ถาม + บอทตอบ = 2 ข้อความ)
+// 12 = 6 รอบ ตามที่ต้องการ ของเดิม 6 คือแค่ 3 รอบ ซึ่งสั้นไปจนบอทลืมว่าคุยเรื่องตึกไหนอยู่
+// ค่านี้ต้องตรงกับที่ appendHistory ใน line.js ใช้ตัด (import จากที่นี่)
+export const HISTORY_MAX_MESSAGES = 12;
+
 // ตัด PII ก่อนส่งเข้า LLM (CONTEXT.md — MVP ไม่เก็บ PII) เรียงจากรูปแบบยาวไปสั้น กัน
 // เลขบัตร 13 หลักโดนตัดซ้ำเป็นรหัสนักศึกษา 10 หลักบางส่วน (\b กัน match ทับกันอยู่แล้ว แต่เรียงไว้ให้ชัดเจน)
 const PII_PATTERNS = [
@@ -136,8 +141,8 @@ export async function callWorkersAI(userMessage, history, env) {
     history.push({ role: "user", text: maskedMessage });
     history.push({ role: "model", text: aiResponse });
 
-    if (history.length > 6) {
-       history = history.slice(history.length - 6);
+    if (history.length > HISTORY_MAX_MESSAGES) {
+       history = history.slice(history.length - HISTORY_MAX_MESSAGES);
     }
 
     return { aiResponseText: aiResponse, newHistory: history };

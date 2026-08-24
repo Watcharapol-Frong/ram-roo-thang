@@ -1491,3 +1491,73 @@ body.is-searching #action-sheet-slot {
   background: #1c1c1e;
   color: #ffffff;
 }
+
+/* --- ร้านค้าแลกเหรียญ --- */
+/* ใช้ขอบ/เงา/รัศมีชุดเดียวกับการ์ดในหน้าโปรไฟล์ (.feedback-flat-banner) ให้สลับแท็บแล้วรู้สึกต่อเนื่อง */
+
+.shop-balance {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 16px;
+  background: #ffffff;
+  border: 1px solid #edf2f7;
+  border-radius: 14px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+  margin-bottom: 18px;
+}
+
+.shop-balance-label { font-size: 0.85rem; color: var(--muted); }
+.shop-balance-value { font-size: 1.6rem; font-weight: 800; color: #111827; }
+
+.shop-item,
+.shop-history-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  background: #ffffff;
+  border: 1px solid #edf2f7;
+  border-radius: 14px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+  margin-bottom: 10px;
+}
+
+.shop-item-main { min-width: 0; }
+.shop-item-name { font-size: 0.95rem; font-weight: 700; color: #111827; }
+.shop-item-desc { font-size: 0.78rem; color: var(--muted); margin-top: 3px; line-height: 1.4; }
+
+.shop-item-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.shop-item-price { font-size: 0.8rem; font-weight: 700; color: #111827; white-space: nowrap; }
+
+.shop-item-btn {
+  border: 0;
+  border-radius: 10px;
+  padding: 8px 16px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #ffffff;
+  background: #1560ff;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: transform 0.15s ease, background-color 0.15s ease;
+}
+
+.shop-item-btn:active:not(:disabled) { transform: scale(0.96); }
+
+/* ปุ่มที่กดไม่ได้ต้องดูต่างชัดเจน ไม่ใช่แค่จางลงนิดเดียว — ผู้ใช้จะได้ไม่กดซ้ำแล้วสงสัยว่าพัง */
+.shop-item-btn:disabled {
+  background: #eef2f7;
+  color: #9aa5b1;
+  cursor: not-allowed;
+}
+
+.shop-history-price { font-size: 0.9rem; font-weight: 700; color: #d64545; flex-shrink: 0; }

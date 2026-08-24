@@ -1,9 +1,12 @@
 // LINE webhook: signature verify, chat history, reply
 // MVP-SPEC-for-Dev.md §1, §8 — Schedule intent ข้าม AI ไปเลย (ลดจุดเสี่ยง timeout)
 
-import { retrieveContext, callWorkersAI } from './ai.js';
-import { getServiceByKey, getBuildingByKey } from './data.js';
+import { retrieveContext, callWorkersAI, HISTORY_MAX_MESSAGES } from './ai.js';
+import { getServiceByKey, getBuildingByKey, getParkingZoneByKey } from './data.js';
+import { resolveStatusForZone } from './parking.js';
+import { haversineDistanceMeters } from './utils.js';
 import { processExamScheduleImage, confirmRoomImport, cancelRoomImport } from './examroom.js';
+import { resultCard, row, FLEX_TOKENS } from './flex.js';
 
 export async function verifySignature(body, signature, channelSecret) {
   const encoder = new TextEncoder();
@@ -67,56 +70,53 @@ function withParkingZoneId(liffUrl, zoneId) {
   return `${liffUrl}${separator}mode=parking&zone_id=${encodeURIComponent(zoneId)}`;
 }
 
-function generateFlexMessage(buildingName, buildingDesc, liffUrl) {
-  const actionUri = liffUrl || "https://line.me";
-  return {
-    type: "flex",
-    altText: `ข้อมูล${buildingName}`,
-    contents: {
-      type: "bubble",
-      size: "kilo",
-      body: {
-        type: "box", layout: "vertical", paddingAll: "16px",
-        contents: [
-          {
-            type: "box", layout: "horizontal",
-            contents: [
-              {
-                type: "box", layout: "vertical",
-                contents: [
-                  { type: "text", text: buildingName, weight: "bold", size: "lg", color: "#111111" },
-                  { type: "text", text: buildingDesc, size: "xs", color: "#666666", margin: "xs" }
-                ],
-                flex: 4
-              },
-              {
-                type: "box", layout: "vertical", backgroundColor: "#EAF9F1", cornerRadius: "8px", justifyContent: "center", alignItems: "center", width: "32px", height: "32px",
-                contents: [{ type: "text", text: "📍", size: "sm" }], flex: 0
-              }
-            ]
-          },
-          { type: "separator", margin: "md", color: "#EAEAEA" },
-          {
-            type: "box", layout: "horizontal", margin: "md", alignItems: "center",
-            contents: [
-              { type: "text", text: "ℹ️", size: "xs", flex: 0 },
-              { type: "text", text: "แตะปุ่มด้านล่างเพื่อเปิดแผนที่และดูที่จอดรถ", size: "xxs", color: "#666666", wrap: true, margin: "sm" }
-            ]
-          }
-        ]
-      },
-      footer: {
-        type: "box", layout: "vertical", paddingTop: "0px", paddingStart: "16px", paddingEnd: "16px", paddingBottom: "16px",
-        contents: [
-          {
-            type: "button", style: "primary", color: "#06C755", height: "sm",
-            action: { type: "uri", label: "เปิดระบบนำทาง & ที่จอดรถ", uri: actionUri }
-          }
-        ]
-      },
-      styles: { footer: { separator: false } }
+const PARKING_STATUS_WORD = { GREEN: 'เบาบาง', YELLOW: 'ปานกลาง', RED: 'หนาแน่น' };
+const PARKING_STATUS_COLOR = { GREEN: FLEX_TOKENS.green, YELLOW: '#D98E04', RED: FLEX_TOKENS.red };
+const WALKING_SPEED_M_PER_MIN = 75;
+
+// การ์ดผลการค้นหาอาคาร
+//
+// async เพราะต้องไปอ่านลานจอดที่ใกล้ที่สุดกับสถานะล่าสุดของมัน — ข้อมูลสองอย่างนี้คือเหตุผล
+// ที่ผู้ใช้ถามหาตึกตั้งแต่แรก เอามาไว้ในการ์ดเลยดีกว่าให้กดเข้าไปดูอีกที
+//
+// ระยะทางคำนวณจากพิกัดจริงแบบเส้นตรง ไม่ใช่ระยะเดินตามทางจริง จึงเขียนว่า "ประมาณ" เสมอ
+// (ระยะเดินจริงคำนวณตอนเปิดแผนที่ด้วย Directions API อยู่แล้ว ไม่ยิง API ซ้ำแค่เพื่อทำการ์ด)
+async function generateBuildingCard(env, building, liffUrl) {
+  const rows = [];
+
+  if (building.nearest_parking_zone_id) {
+    try {
+      const zone = await getParkingZoneByKey(env, building.nearest_parking_zone_id);
+      if (zone) {
+        const status = await resolveStatusForZone(env, zone);
+        const level = status && status.status ? status.status : zone.baseline_status;
+        const zoneName = String(zone.zone_name).replace(/^ที่จอดรถ\s*/, '');
+        rows.push(row('ที่จอดรถใกล้สุด', `${zoneName} (${PARKING_STATUS_WORD[level] || 'ไม่ทราบ'})`, {
+          strong: true,
+          color: PARKING_STATUS_COLOR[level] || FLEX_TOKENS.ink,
+        }));
+
+        const meters = Math.round(haversineDistanceMeters(building.lat, building.lng, zone.lat, zone.lng));
+        const minutes = Math.max(1, Math.ceil(meters / WALKING_SPEED_M_PER_MIN));
+        rows.push(row('ระยะเดินเท้า', `ประมาณ ${meters} ม. (${minutes} นาที)`));
+      }
+    } catch (err) {
+      // ลานจอดอ่านไม่ได้ไม่ควรทำให้การ์ดทั้งใบหาย — ตัดสองแถวนี้ทิ้งแล้วส่งที่เหลือไป
+      console.error('อ่านลานจอดสำหรับการ์ดไม่สำเร็จ', err);
     }
-  };
+  }
+
+  return resultCard({
+    title: 'พบข้อมูลอาคาร',
+    badge: building.building_id,
+    headerColor: FLEX_TOKENS.blueSoft,
+    hero: building.building_id,
+    heroNote: building.name_th,
+    rows,
+    note: '* ข้อมูลการนำทางจะปรับตามตำแหน่ง GPS ของคุณโดยอัตโนมัติ',
+    actions: [{ label: 'เริ่มต้นเดินทาง', action: { type: 'uri', label: 'เริ่มต้นเดินทาง', uri: liffUrl || 'https://line.me' } }],
+    altText: `ข้อมูล${building.name_th}`,
+  });
 }
 
 // บริการ/ขั้นตอนราชการ (docs/adr/0004) — short_answer/steps เป็นข้อความที่ทีมกรอกไว้ล่วงหน้าใน
@@ -144,32 +144,21 @@ function generateServiceSummaryMessage(service) {
 }
 
 function generateScheduleFlexMessage(liffUrl) {
-  const actionUri = liffUrl ? `${liffUrl}${liffUrl.includes('?') ? '&' : '?'}mode=profile` : "https://line.me";
-  return {
-    type: "flex",
-    altText: "บันทึกวิชาสอบ",
-    contents: {
-      type: "bubble",
-      size: "kilo",
-      body: {
-        type: "box", layout: "vertical", paddingAll: "16px",
-        contents: [
-          { type: "text", text: "บันทึกวิชาสอบ", weight: "bold", size: "lg", color: "#111111" },
-          { type: "text", text: "จดรหัสวิชา อาคาร และเวลาสอบไว้ล่วงหน้า", size: "xs", color: "#666666", margin: "xs", wrap: true }
-        ]
-      },
-      footer: {
-        type: "box", layout: "vertical", paddingTop: "0px", paddingStart: "16px", paddingEnd: "16px", paddingBottom: "16px",
-        contents: [
-          {
-            type: "button", style: "primary", color: "#06C755", height: "sm",
-            action: { type: "uri", label: "เปิดบันทึกวิชาสอบ", uri: actionUri }
-          }
-        ]
-      },
-      styles: { footer: { separator: false } }
-    }
-  };
+  const uri = liffUrl ? `${liffUrl}${liffUrl.includes('?') ? '&' : '?'}mode=profile` : 'https://line.me';
+  return resultCard({
+    title: 'ตารางสอบของคุณ',
+    badge: 'ตารางสอบ',
+    headerColor: FLEX_TOKENS.blueSoft,
+    hero: 'บันทึกวิชาที่จะสอบ',
+    heroNote: 'ใส่รหัสวิชา ระบบจะดึงวันและคาบสอบจากประกาศให้เอง',
+    rows: [
+      row('วันสอบ', 'ดึงจากประกาศอัตโนมัติ'),
+      row('ห้องสอบ', 'ส่งรูปตารางสอบให้อ่าน'),
+      row('แจ้งเตือน', 'ล่วงหน้า 1 วัน'),
+    ],
+    actions: [{ label: 'เปิดตารางสอบ', action: { type: 'uri', label: 'เปิดตารางสอบ', uri } }],
+    altText: 'บันทึกวิชาสอบ',
+  });
 }
 
 export async function handleWebhookRequest(request, env, ctx) {
@@ -263,8 +252,8 @@ async function appendHistory(env, userId, userMessage, modelText) {
 
   history.push({ role: 'user', text: userMessage });
   history.push({ role: 'model', text: modelText });
-  if (history.length > 6) {
-    history = history.slice(history.length - 6);
+  if (history.length > HISTORY_MAX_MESSAGES) {
+    history = history.slice(history.length - HISTORY_MAX_MESSAGES);
   }
 
   try {
@@ -274,67 +263,30 @@ async function appendHistory(env, userId, userMessage, modelText) {
   }
 }
 
-const THAI_MONTH_ABBR = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
-                         'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
-
-function shortThaiDate(iso) {
-  if (!iso) return '';
-  const [y, m, d] = iso.split('-').map(Number);
-  return `${d} ${THAI_MONTH_ABBR[m - 1]} ${String(y + 543).slice(-2)}`;
-}
-
 // การ์ดสรุปผลอ่านรูป พร้อมปุ่มยืนยัน/ยกเลิก
 //
 // ต้องให้กดยืนยันเสมอ ห้ามบันทึกทันที — OCR ผิดได้ และผิดแปลว่าคนไปผิดห้องสอบ
 // คนที่ตัดสินใจครั้งสุดท้ายต้องเป็นเจ้าของตารางสอบ ไม่ใช่โมเดล
 function generateRoomConfirmFlex(accepted, rejected, draftId) {
-  const rows = accepted.map((item) => ({
-    type: 'box', layout: 'horizontal', spacing: 'sm', margin: 'md',
-    contents: [
-      { type: 'text', text: item.course_code, size: 'sm', weight: 'bold', flex: 4, color: '#111111' },
-      { type: 'text', text: item.room, size: 'sm', flex: 4, align: 'end', color: '#1560ff' },
-      { type: 'text', text: shortThaiDate(item.exam_date), size: 'xxs', flex: 3, align: 'end', color: '#888888', gravity: 'center' },
+  const rows = accepted.map((item) =>
+    row(item.course_code, item.room, { strong: true, color: FLEX_TOKENS.brand }));
+
+  const note = rejected.length
+    ? `อ่านไม่ผ่าน ${rejected.length} รายการ เพราะไม่พบรหัสในตารางสอบของมหาวิทยาลัย — วันสอบใช้ของประกาศเสมอ อ่านจากรูปเฉพาะห้องสอบ ตรวจให้ตรงก่อนกดบันทึกนะครับ`
+    : 'วันสอบใช้ของประกาศมหาวิทยาลัยเสมอ อ่านจากรูปเฉพาะห้องสอบ ตรวจให้ตรงก่อนกดบันทึกนะครับ';
+
+  return resultCard({
+    title: 'อ่านห้องสอบจากรูปแล้ว',
+    badge: `${accepted.length} วิชา`,
+    headerColor: FLEX_TOKENS.amberSoft,
+    rows,
+    note,
+    actions: [
+      { label: 'บันทึกห้องสอบ', action: { type: 'postback', label: 'บันทึก', data: `rooms_confirm:${draftId}`, displayText: 'บันทึกห้องสอบ' } },
+      { label: 'ยกเลิก', color: FLEX_TOKENS.inkFaint, action: { type: 'postback', label: 'ยกเลิก', data: `rooms_cancel:${draftId}`, displayText: 'ยกเลิก' } },
     ],
-  }));
-
-  const notes = [];
-  if (rejected.length) {
-    notes.push({
-      type: 'text', wrap: true, size: 'xxs', color: '#c0392b', margin: 'md',
-      text: `อ่านไม่ผ่าน ${rejected.length} รายการ (ไม่พบรหัสในตารางสอบของมหาวิทยาลัย) กรอกเองในแอปได้`,
-    });
-  }
-  notes.push({
-    type: 'text', wrap: true, size: 'xxs', color: '#888888', margin: 'md',
-    text: 'วันสอบใช้ของประกาศมหาวิทยาลัยเสมอ อ่านจากรูปเฉพาะห้องสอบ ตรวจให้ตรงก่อนกดบันทึกนะครับ',
-  });
-
-  return {
-    type: 'flex',
     altText: `อ่านห้องสอบได้ ${accepted.length} วิชา กดยืนยันเพื่อบันทึก`,
-    contents: {
-      type: 'bubble',
-      body: {
-        type: 'box', layout: 'vertical',
-        contents: [
-          { type: 'text', text: 'อ่านห้องสอบจากรูปแล้ว', weight: 'bold', size: 'md' },
-          { type: 'text', text: `${accepted.length} วิชา`, size: 'xs', color: '#888888', margin: 'xs' },
-          { type: 'separator', margin: 'lg' },
-          ...rows,
-          ...notes,
-        ],
-      },
-      footer: {
-        type: 'box', layout: 'horizontal', spacing: 'sm',
-        contents: [
-          { type: 'button', style: 'secondary', height: 'sm',
-            action: { type: 'postback', label: 'ยกเลิก', data: `rooms_cancel:${draftId}`, displayText: 'ยกเลิก' } },
-          { type: 'button', style: 'primary', height: 'sm', color: '#1560ff',
-            action: { type: 'postback', label: 'บันทึก', data: `rooms_confirm:${draftId}`, displayText: 'บันทึกห้องสอบ' } },
-        ],
-      },
-    },
-  };
+  });
 }
 
 // ผู้ใช้ส่งรูปเข้ามา — ถือว่าเป็นรูปตารางสอบเสมอ เพราะเป็นกรณีเดียวที่บอทรับรูป
@@ -390,7 +342,7 @@ async function handlePostback(event, env) {
   }
 
   // data: "service_nav:{service_id}" — สร้าง Flex Message นำทางแบบเดียวกับการบอกทางตึกปกติ
-  // (reuse generateFlexMessage เดิม ไม่ใช่การ์ดใหม่แยกต่างหาก)
+  // (reuse generateBuildingCard เดิม ไม่ใช่การ์ดใหม่แยกต่างหาก)
   if (action === 'service_nav' && serviceId) {
     const service = await getServiceByKey(env, serviceId);
     if (!service || !service.building_id) {
@@ -403,11 +355,7 @@ async function handlePostback(event, env) {
     await appendHistory(env, userId, displayText, `เปิดเส้นทางไป ${building.name_th} ให้แล้วครับ`);
     return replyToLINE(
       event.replyToken,
-      [generateFlexMessage(
-        building.name_th,
-        "แตะปุ่มด้านล่างเพื่อดูเส้นทางและที่จอดรถ",
-        withDestId(env.LIFF_URL, building.building_id)
-      )],
+      [await generateBuildingCard(env, building, withDestId(env.LIFF_URL, building.building_id))],
       env.LINE_CHANNEL_ACCESS_TOKEN
     );
   }
@@ -504,11 +452,7 @@ async function handleEvent(event, env) {
           text: replyPhrase,
           quickReply: QUICK_REPLY_ITEMS
         },
-        generateFlexMessage(
-          context.building.name_th,
-          "แตะปุ่มด้านล่างเพื่อดูเส้นทางและที่จอดรถ",
-          liffUrl
-        )
+        await generateBuildingCard(env, context.building, liffUrl)
       ],
       env.LINE_CHANNEL_ACCESS_TOKEN
     );

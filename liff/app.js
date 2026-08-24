@@ -1390,20 +1390,132 @@ async function renderFeedbackView() {
 }
 
 // renderShopView — หน้าร้านค้า & สิทธิพิเศษ (Coming Soon กลางจอใหญ่ๆ)
-function renderShopView() {
+// renderShopView — ร้านค้าแลกเหรียญ ใช้โครงและสไตล์ชุดเดียวกับหน้าโปรไฟล์
+// (profile-flat-container / การ์ดขอบบาง / badge เหรียญ) จะได้ไม่รู้สึกว่าเป็นคนละแอปตอนสลับแท็บ
+async function renderShopView() {
   const container = getApp();
+  container.innerHTML = '<p style="text-align:center;padding:40px 0;color:var(--muted)">กำลังโหลด...</p>';
+
+  let userId = null;
+  try {
+    userId = await getUserId();
+  } catch (_) { /* ยังดูรายการได้ แค่แลกไม่ได้ */ }
+
+  let data;
+  try {
+    data = await fetchJSON(`/api/shop/items${userId ? `?user_id=${encodeURIComponent(userId)}` : ''}`);
+  } catch (err) {
+    console.error('โหลดร้านค้าไม่สำเร็จ', err);
+    container.innerHTML = `<div class="card"><p class="muted">โหลดร้านค้าไม่สำเร็จ ลองใหม่อีกครั้ง</p></div>${renderBottomNavHTML('shop')}`;
+    bindBottomNavEvents();
+    return;
+  }
+
+  const coins = typeof data.coins === 'number' ? data.coins : null;
+  const items = data.items || [];
+
+  const itemsHTML = items.length ? items.map((item) => {
+    const disabled = item.sold_out || item.affordable === false || !userId;
+    const label = item.sold_out ? 'หมดแล้ว'
+      : item.affordable === false ? `ขาดอีก ${item.price_coins - (coins || 0)}`
+      : 'แลก';
+    return `
+      <div class="shop-item">
+        <div class="shop-item-main">
+          <div class="shop-item-name">${escapeXml(item.name)}</div>
+          ${item.description ? `<div class="shop-item-desc">${escapeXml(item.description)}</div>` : ''}
+        </div>
+        <div class="shop-item-side">
+          <div class="shop-item-price">${item.price_coins} เหรียญ</div>
+          <button type="button" class="shop-item-btn" data-item="${escapeXml(item.id)}" ${disabled ? 'disabled' : ''}>${escapeXml(label)}</button>
+        </div>
+      </div>
+    `;
+  }).join('') : '<div class="schedule-empty">ยังไม่มีของให้แลกตอนนี้</div>';
 
   container.innerHTML = `
-    <div class="coming-soon-container">
-      <div class="coming-soon-badge">Shop</div>
-      <h1 class="coming-soon-title">Coming Soon</h1>
-      <p class="coming-soon-sub">ระบบร้านค้าและแลกสิทธิพิเศษกำลังอยู่ระหว่างการพัฒนา</p>
-    </div>
+    <div class="profile-flat-container">
+      <div class="shop-balance">
+        <span class="shop-balance-label">เหรียญของคุณ</span>
+        <span class="shop-balance-value">${coins === null ? '—' : coins}</span>
+      </div>
 
+      <div class="schedule-flat-header-row">
+        <h2>ของรางวัล <span class="badge-beta">Beta</span></h2>
+      </div>
+      ${itemsHTML}
+
+      <div id="shop-history-slot"></div>
+    </div>
     ${renderBottomNavHTML('shop')}
   `;
 
   bindBottomNavEvents();
+
+  container.querySelectorAll('.shop-item-btn:not([disabled])').forEach((btn) => {
+    btn.addEventListener('click', () => redeemShopItem(btn.dataset.item, btn));
+  });
+
+  if (userId) renderRedemptionHistory(userId);
+}
+
+// ยืนยันก่อนหักเหรียญเสมอ — กดพลาดแล้วเหรียญหายไปเลยโดยไม่ได้ตั้งใจคือประสบการณ์ที่แย่ที่สุด
+async function redeemShopItem(itemId, btn) {
+  if (!window.confirm('ยืนยันการแลกของรางวัลนี้?\nเหรียญจะถูกหักทันทีและขอคืนไม่ได้')) return;
+
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'กำลังแลก...';
+
+  try {
+    const userId = await getUserId();
+    const res = await fetchJSON('/api/shop/redeem', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: userId, item_id: itemId }),
+    });
+    showToast(`แลก ${res.redemption.item_name} สำเร็จ ทีมงานจะติดต่อกลับทางแชท`);
+    renderShopView();
+  } catch (err) {
+    const data = err.data || {};
+    const message = data.status === 'INSUFFICIENT_COINS'
+      ? `เหรียญไม่พอ มีอยู่ ${data.coins} ต้องใช้ ${data.price_coins}`
+      : data.status === 'OUT_OF_STOCK' ? 'ของหมดพอดี'
+      : (data.error || 'แลกไม่สำเร็จ ลองใหม่อีกครั้ง');
+    showToast(message);
+    btn.disabled = false;
+    btn.textContent = original;
+  }
+}
+
+async function renderRedemptionHistory(userId) {
+  const slot = document.getElementById('shop-history-slot');
+  if (!slot) return;
+
+  let data;
+  try {
+    data = await fetchJSON(`/api/shop/redemptions?user_id=${encodeURIComponent(userId)}`);
+  } catch (_) {
+    return;
+  }
+  const list = data.redemptions || [];
+  if (!list.length) return;
+
+  const STATUS_LABEL = { PENDING: 'รอทีมงานส่งให้', FULFILLED: 'ส่งแล้ว', CANCELLED: 'ยกเลิก (คืนเหรียญแล้ว)' };
+  slot.innerHTML = `
+    <div class="schedule-flat-header-row" style="margin-top:22px">
+      <h2>ประวัติการแลก</h2>
+    </div>
+    ${list.map((r) => `
+      <div class="shop-history-row">
+        <div>
+          <div class="shop-item-name">${escapeXml(r.item_name)}</div>
+          <div class="shop-item-desc">${escapeXml(STATUS_LABEL[r.status] || r.status)}</div>
+        </div>
+        <div class="shop-history-price">-${r.price_coins}</div>
+      </div>
+    `).join('')}
+  `;
 }
 
 // renderSettingsView — หน้าการตั้งค่า (Minimal Pure Typography)
