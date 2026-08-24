@@ -102,7 +102,9 @@ it, not an `if` statement in application code:
 ram-roo-thang-bot/
 ├── CONTEXT.md                     — terminology
 ├── MVP-SPEC-for-Dev.md            — full spec
-├── docs/adr/                      — decision records (0001-0004)
+├── docs/
+│   ├── adr/                       — decision records (0001-0004)
+│   └── service-data-checklist.md  — what service data is still missing, and how to fill it
 │
 ├── worker/                        — API Worker (all backend)
 │   ├── wrangler.toml              — bindings: 4 KV + D1 + Workers AI
@@ -156,6 +158,7 @@ ram-roo-thang-bot/
 └── scripts/
     ├── dev-api.mjs                — dev backend (real worker + in-memory KV/D1)
     ├── serve-liff.mjs             — dev static server
+    ├── service-data-report.mjs    — which service facets are filled in, and which are still empty
     ├── healthcheck.mjs            — poll /api/health from outside and print a readable summary
     ├── validate-flex.mjs          — check every Flex card against LINE's real constraints
     ├── loadtest.mjs               — 200-user journey against production
@@ -410,8 +413,14 @@ offers those buttons.
    headings, the whole thing is treated as the procedure
 
 So every service answers questions today, and answers more of them as explicit fields get filled in.
-Current coverage from the existing data: 11/11 services have steps, 5/11 have a document list, none
-have fee, hours, duration or period as separate fields.
+
+Run `node scripts/service-data-report.mjs` for current coverage — it reads the dataset through the
+same `normalizeService()` the bot uses, so it reports what the bot can actually answer rather than
+what happens to be typed in the file. As of Aug 24 2026: 11/11 services have steps, 5/11 have a
+document list, and fee, hours, duration, period and contact are empty everywhere.
+
+**`docs/service-data-checklist.md` is the working document for closing those gaps** — field spec,
+writing rules, and the order to do them in.
 
 ### Finding out what's missing
 
