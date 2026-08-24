@@ -8,6 +8,7 @@ import { handlePostSchedule, handleGetSchedule, handleDeleteSchedule, handlePatc
 import { handleGetUser, handleGetLedger, handleFeedbackAward, handleSaveCarAward } from './user.js';
 import { handleAdminExamAlerts, runDailyExamAlerts } from './exam.js';
 import { handleHealth, recordHeartbeat } from './health.js';
+import { handleAdminUnanswered } from './analytics.js';
 
 // LIFF (liff/) เป็น static site คนละ origin กับ worker นี้เสมอ — ต้องมี CORS ให้ /api/* ถึงจะเรียก
 // fetch() จากฝั่ง browser ได้จริง (ไม่มีมาก่อนหน้านี้ ทำให้ทุก endpoint ใต้ /api/ เรียกจาก LIFF ไม่ได้เลย
@@ -98,6 +99,10 @@ async function route(request, env, ctx) {
   }
   if (method === 'POST' && pathname === '/api/admin/redemptions/fulfill') {
     return handleAdminFulfill(request, env);
+  }
+  // คำถามที่บอทตอบไม่ได้ — ใช้ดูว่าควรเติมข้อมูล/alias อะไรต่อ
+  if (method === 'GET' && pathname === '/api/admin/unanswered') {
+    return handleAdminUnanswered(request, env);
   }
   if (method === 'POST' && pathname === '/api/admin/exam-alerts') {
     return handleAdminExamAlerts(request, env);

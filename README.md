@@ -113,11 +113,16 @@ ram-roo-thang-bot/
 │   │   ├── 0003_exam_rooms.sql
 │   │   ├── 0004_shop.sql
 │   │   ├── 0005_shop_limits.sql
-│   │   └── 0006_bot_heartbeat.sql
+│   │   ├── 0006_bot_heartbeat.sql
+│   │   └── 0007_unanswered_queries.sql
 │   └── src/
 │       ├── index.js               — router (LINE webhook + /api/*) + CORS
 │       ├── line.js                — signature verify, chat history, Flex Messages, reply
 │       ├── ai.js                  — Workers AI + alias matching (5s timeout with fallback)
+│       ├── conversation.js        — chat history + what the user is currently asking about
+│       ├── intent.js              — which facet a follow-up question is asking for
+│       ├── serviceinfo.js         — service data as separate facets + per-facet answers
+│       ├── analytics.js           — log of questions the bot couldn't answer
 │       ├── data.js                — KV access
 │       ├── user.js                — users, coins, ledger (D1)
 │       ├── schedule.js            — saved courses (D1)
@@ -181,6 +186,7 @@ Every `/api/*` endpoint has CORS enabled, because the LIFF is always on a differ
 | POST | `/api/shop/redeem` | Spend coins on an item |
 | GET | `/api/shop/redemptions?user_id=` | The user's redemption history |
 | POST | `/api/admin/exam-alerts` | Manually trigger exam alerts (requires `x-admin-token`) |
+| GET | `/api/admin/unanswered` | Questions the bot couldn't answer, grouped by frequency (requires `x-admin-token`) |
 
 ## LIFF deep links
 
@@ -330,6 +336,95 @@ curl -X POST https://<worker>/api/admin/exam-alerts \
 
 `ADMIN_TOKEN` lives in `worker/.secrets.env`. Without it the endpoint always returns 401; the cron
 still works regardless.
+
+## Service questions: keeping a conversation going
+
+A real transcript from the beta shows the failure this section exists to fix:
+
+```
+user: ฉันต้องไปขอใบเช็คเกรด
+bot : ขอใบรับรองผลการเรียน — ติดต่อได้ที่อาคาร สวป. (KLB) ชั้น 1 ช่อง 4    ✅
+user: [taps] ขอเส้นทางไปอาคาร
+bot : [building card for KLB]                                            ✅
+user: ขอขั้นตอนการยื่น
+bot : รามรู้ทางยังไม่มีข้อมูลขั้นตอนการยื่นขอใบเช็คเกรดในระบบครับ            ❌ ← it does
+```
+
+`TRANSCRIPT_REQUEST` has all five steps in `baseline-dataset.json`. The bot denied having data it
+was shipped with — a false negative, which is worse than an error, because the student believes it
+and stops asking.
+
+**Why it happened.** The bot had no conversation, only independent messages:
+
+1. `retrieveContext()` matched aliases against **the current message only**. "ขอขั้นตอนการยื่น"
+   contains no service name, so nothing matched and it fell through to the model.
+2. The model was never given the steps. `callWorkersAI()` received the system prompt and the chat
+   history as plain text — service data was never part of its context.
+3. Rule 4 of the system prompt says: if you have no data, say so. The model followed it correctly.
+   The anti-hallucination rule turned into a conversation stopper.
+4. `service_steps` was reachable **only** from the quick-reply button under the first answer. Once
+   the user tapped "สร้างเส้นทาง", that row of buttons was gone and the building card offered no way
+   back.
+5. History stored text only, no `service_id`, so nothing could reliably remember the topic.
+
+### Two axes instead of one
+
+Questions are now matched on **what is being asked about** (entity) and **which facet** (intent),
+which compose:
+
+| | user says | matched |
+|---|---|---|
+| entity + intent | "ขั้นตอนขอใบเช็คเกรด" | answer that facet of that service |
+| entity only | "ฉันต้องไปขอใบเช็คเกรด" | summary + buttons for every facet that has data |
+| intent only | "ขอขั้นตอนการยื่น" | apply it to the service in focus |
+| intent, no focus | "ต้องเตรียมอะไรบ้าง" | ask which service, buttons carry the intent through |
+| neither | "ยากไหมครับ" | model, grounded with the focused service's real data |
+
+Facets are detected by keyword in `intent.js` — `STEPS`, `DOCUMENTS`, `FEE`, `HOURS`, `DURATION`,
+`PERIOD`, `CONTACT`, `LOCATION`. Keywords, not the model: faster, free, and incapable of inventing an
+answer.
+
+**Focus** (the current topic) lives in `conversation.js`, in the same KV key as the chat history —
+KV free tier allows 1,000 writes/day and every message already writes history once, so a separate key
+would have doubled it. It expires after 15 minutes: being asked about steps half an hour after the
+topic changed should not drag the old service back. Asking for directions to a service keeps the
+**service** in focus, not the building — that swap is exactly where the transcript above broke.
+
+### Buttons that don't disappear
+
+Every follow-up button is a postback carrying `svc:{service_id}:{INTENT}`, so it answers about the
+right service no matter what was said in between. Buttons are offered only for facets that actually
+hold data, so nothing invites a tap that leads to "ยังไม่มีข้อมูล". The building card returned for a
+service now carries a **ดูขั้นตอน** button back to the steps.
+
+When a facet genuinely has no data, the reply never dead-ends: it names what *is* available and
+offers those buttons.
+
+### Service data: facets, with a fallback
+
+`serviceinfo.js` reads two shapes and prefers the first:
+
+1. **Explicit fields** — `location`, `documents[]`, `procedure[]`, `fee`, `hours`, `duration`,
+   `period`, `contact`, `notes`
+2. **The legacy `steps` blob** — split on the `📍` `📋` `🔄` headings the team already writes; with no
+   headings, the whole thing is treated as the procedure
+
+So every service answers questions today, and answers more of them as explicit fields get filled in.
+Current coverage from the existing data: 11/11 services have steps, 5/11 have a document list, none
+have fee, hours, duration or period as separate fields.
+
+### Finding out what's missing
+
+Until now, the only way to learn the bot answered badly was a screenshot from a user. Every dead end
+is now recorded in `unanswered_queries` (PII-masked, no user id, written only on an actual dead end
+so the volume stays low):
+
+```bash
+curl -H "x-admin-token: $ADMIN_TOKEN" https://<worker>/api/admin/unanswered
+```
+
+Grouped by frequency, because the useful question is "what gets asked a lot that we can't answer",
+not a raw time-ordered log.
 
 ## Bot status checks
 
@@ -545,6 +640,7 @@ the wrong time. Course codes not present in the timetable are now rejected at in
 | Shop / spending coins | ✅ | One item (LINE sticker, 30 coins). Items live in `shop_items` so pricing can change without a deploy; an admin page is still to come |
 | Proactive Exam Alerts (Cron) | ✅ | Day-before push including the exam room when the student has supplied one |
 | Bot status checks | ✅ | `/api/health` + heartbeats + an in-chat status card; `scripts/healthcheck.mjs` for monitors |
+| Service Q&A follow-ups | ✅ | Topic memory + per-facet answers; gaps recorded in `unanswered_queries` |
 | Community | ❌ | Not started (ADR-0004 kept it out of the MVP) |
 
 ### Load test results (Aug 24, 2026)

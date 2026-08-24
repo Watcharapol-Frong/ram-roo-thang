@@ -103,6 +103,23 @@ for(const [name,status,over] of [['การ์ดสถานะ (ปกติ)
 
 check('การ์ดเมนูหลัก (ของจริง)', generateMainMenuFlex('https://liff.line.me/2011201463-2rdSwrwB'));
 
+// การ์ดอาคารที่ถูกแปะปุ่ม "ดูขั้นตอน" เพิ่มตอนตอบ service_nav — ปุ่มถูกยัดเข้า footer ตอน runtime
+// ไม่ได้สร้างจาก resultCard ตรงๆ จึงต้องตรวจรูปหลังยัดแล้ว ไม่ใช่ตรวจแต่ของที่ resultCard คืนมา
+const navCard = resultCard({
+  title:'พบข้อมูลอาคาร', badge:'KLB', headerColor:FLEX_TOKENS.blueSoft,
+  hero:'KLB', heroNote:'อาคารกงไกรลาศ',
+  rows:[row('ที่จอดรถใกล้สุด','อาคารหอประชุมพ่อขุนราม (ปานกลาง)',{strong:true,color:'#D98E04'})],
+  note:'* ข้อมูลการนำทางจะปรับตามตำแหน่ง GPS ของคุณโดยอัตโนมัติ',
+  actions:[{label:'เริ่มต้นเดินทาง',action:{type:'uri',label:'เริ่มต้นเดินทาง',uri:'https://liff.line.me/x?dest_id=KLB'}}],
+  altText:'ข้อมูลอาคารกงไกรลาศ'});
+navCard.contents.footer.contents.unshift(
+  { type:'separator', margin:'none', color:FLEX_TOKENS.line },
+  { type:'box', layout:'vertical', paddingAll:'14px',
+    action:{ type:'postback', label:'ดูขั้นตอน', data:'svc:TRANSCRIPT_REQUEST:STEPS', displayText:'ขั้นตอนขอใบรับรองผลการเรียน' },
+    contents:[{ type:'text', text:'ดูขั้นตอนและเอกสารที่ต้องเตรียม', size:'sm', weight:'bold', color:FLEX_TOKENS.brand, align:'center', wrap:true }] },
+);
+check('การ์ดอาคาร + ปุ่มดูขั้นตอน', navCard);
+
 check('การ์ดเมนู', menuCard({title:'เมนู',subtitle:'ทดสอบ',groups:[{label:'กลุ่ม',items:[
   {label:'ก',action:{type:'message',label:'ก',text:'ก'}},{label:'ข',action:{type:'message',label:'ข',text:'ข'}},
   {label:'ค',action:{type:'message',label:'ค',text:'ค'}}]}],altText:'เมนู'}));

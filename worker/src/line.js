@@ -1,8 +1,12 @@
 // LINE webhook: signature verify, chat history, reply
 // MVP-SPEC-for-Dev.md §1, §8 — Schedule intent ข้าม AI ไปเลย (ลดจุดเสี่ยง timeout)
 
-import { retrieveContext, callWorkersAI, HISTORY_MAX_MESSAGES } from './ai.js';
-import { getServiceByKey, getBuildingByKey, getParkingZoneByKey } from './data.js';
+import { retrieveContext, callWorkersAI } from './ai.js';
+import { getServiceByKey, getBuildingByKey, getParkingZoneByKey, listServices } from './data.js';
+import { loadConversation, saveConversation, appendExchange, activeFocus, serviceFocus, buildingFocus } from './conversation.js';
+import { detectFollowUpIntent, isContinuation } from './intent.js';
+import { normalizeService, availableIntents, answerForIntent, fullSummary, groundingText } from './serviceinfo.js';
+import { logUnanswered } from './analytics.js';
 import { resolveStatusForZone } from './parking.js';
 import { haversineDistanceMeters } from './utils.js';
 import { processExamScheduleImage, confirmRoomImport, cancelRoomImport } from './examroom.js';
@@ -125,22 +129,24 @@ async function generateBuildingCard(env, building, liffUrl) {
 // (ไม่ใช้ Flex Message สำหรับคำตอบสั้นนี้ — เก็บ Flex ไว้ใช้ตอนกด "สร้างเส้นทาง" ให้เหมือนหน้าตา
 // การนำทางปกติเท่านั้น ดู service_nav ใน handlePostback ด้านล่าง)
 function generateServiceSummaryMessage(service) {
+  const info = normalizeService(service);
+
+  // ปุ่มชุดนี้เดิมมีแค่สองอันตายตัว (สร้างเส้นทาง / ดูขั้นตอนทั้งหมด) และหายไปทันทีที่มีข้อความใหม่
+  // ตอนนี้เสนอทุกด้านที่บริการนี้มีข้อมูลจริง และทุกใบพก service_id ไปด้วย จึงกดได้ตลอด
   const items = [];
-  if (service.building_id) {
+  if (info.building_id) {
     items.push({
-      type: "action",
-      action: { type: "postback", label: "🧭 สร้างเส้นทาง", data: `service_nav:${service.service_id}`, displayText: "ขอเส้นทางไปอาคาร" }
+      type: 'action',
+      action: { type: 'postback', label: 'เส้นทาง', data: `service_nav:${info.id}`, displayText: 'ขอเส้นทางไปอาคาร' },
     });
   }
-  items.push({
-    type: "action",
-    action: { type: "postback", label: "📋 ดูขั้นตอนทั้งหมด", data: `service_steps:${service.service_id}`, displayText: `ขอดูขั้นตอน: ${service.name}` }
-  });
+  items.push(...serviceQuickReply(info, 'LOCATION').items);
 
   return {
     type: 'text',
-    text: `${service.name}\n${service.short_answer || service.steps || ''}`,
-    quickReply: { items }
+    text: `${info.name}\n${info.short_answer || ''}`.trim(),
+    // LINE รับ quick reply ได้สูงสุด 13 ปุ่ม เกินแล้วปฏิเสธทั้งข้อความ ไม่ใช่ตัดให้
+    quickReply: { items: items.slice(0, 13) },
   };
 }
 
@@ -170,6 +176,48 @@ export function generateScheduleFlexMessage(liffUrl) {
     actions: [{ label: 'เปิดตารางสอบ', action: { type: 'uri', label: 'เปิดตารางสอบ', uri } }],
     altText: 'บันทึกวิชาสอบ ส่งรูปเอกสารหรือพิมพ์รหัสวิชาเอง',
   });
+}
+
+// ตอบคำถามหนึ่งด้านของบริการหนึ่งเรื่อง — หัวใจของการแก้ปัญหาบทสนทนาขาดตอน
+//
+// คืนเป็น { messages, focus, logged } เสมอ เพื่อให้ผู้เรียกบันทึกประวัติกับ focus ได้ที่เดียว
+//
+// เคสที่ยังไม่มีข้อมูลด้านนั้น ต้องไม่ตอบว่า "ไม่มีข้อมูล" แล้วจบ — เสนอด้านที่มีแทนเสมอ
+// (บทสนทนาที่ตันคือจุดที่ผู้ใช้เลิกใช้ ไม่ใช่จุดที่เขาไปหาข้อมูลเอง)
+async function respondServiceIntent(env, service, intent, userMessage) {
+  const info = normalizeService(service);
+
+  // ถามว่าอยู่ไหน/ไปยังไง = อยากได้เส้นทาง ใช้การ์ดสรุปเดิมที่มีปุ่มนำทางอยู่แล้ว
+  if (intent === 'LOCATION') {
+    return {
+      messages: [generateServiceSummaryMessage(service)],
+      reply: `${info.name}: ${info.location || info.short_answer || ''}`,
+      focus: serviceFocus(info.id),
+    };
+  }
+
+  const text = answerForIntent(info, intent);
+  if (text) {
+    return {
+      messages: [{ type: 'text', text, quickReply: serviceQuickReply(info, intent) }],
+      reply: text,
+      focus: serviceFocus(info.id),
+    };
+  }
+
+  const has = availableIntents(info).filter((i) => i !== intent);
+  const alternatives = has.map((i) => INTENT_LABEL[i]).filter(Boolean).join(' / ');
+  const fallback = alternatives
+    ? `เรื่อง${info.name}\nยังไม่มีข้อมูล${INTENT_LABEL[intent] || 'ส่วนนี้'}ในระบบครับ แต่มี ${alternatives} ให้ดูได้`
+    : `เรื่อง${info.name} ยังไม่มีรายละเอียดในระบบครับ แนะนำให้สอบถามที่หน่วยงานโดยตรงนะครับ`;
+
+  await logUnanswered(env, { message: userMessage, intent, focusId: info.id, reason: 'INTENT_NO_DATA' });
+
+  return {
+    messages: [{ type: 'text', text: fallback, quickReply: serviceQuickReply(info, intent) }],
+    reply: fallback,
+    focus: serviceFocus(info.id),
+  };
 }
 
 export async function handleWebhookRequest(request, env, ctx) {
@@ -242,6 +290,55 @@ function pickBuildingFoundPhrase(name) {
 // เหตุผล: LINE จำกัด label ไว้ 20 ตัวอักษร และ emoji กินโควตานั้นไป 2 ตัวต่อดวง
 // พอเป็นภาษาไทยที่ยาวกว่าอังกฤษอยู่แล้วจะเหลือที่ให้คำน้อยจนต้องตัดคำ อ่านยากกว่าเดิม
 // ตัวเลือกในแถบนี้อ่านเร็วอยู่แล้วเพราะสั้นและอยู่ติดกล่องพิมพ์ ไม่ต้องมีไอคอนช่วย
+// ป้ายปุ่มต่อยอดของแต่ละด้าน — สั้นพอสำหรับเพดาน 20 ตัวอักษรของ quick reply label
+const INTENT_LABEL = {
+  STEPS: 'ขั้นตอน',
+  DOCUMENTS: 'ต้องเตรียมอะไร',
+  FEE: 'ค่าใช้จ่าย',
+  HOURS: 'เวลาทำการ',
+  DURATION: 'ใช้เวลากี่วัน',
+  PERIOD: 'ช่วงเวลายื่น',
+  CONTACT: 'ติดต่อ',
+  LOCATION: 'เส้นทาง',
+};
+
+// ปุ่มต่อยอดของบริการที่กำลังคุยอยู่ — เสนอเฉพาะด้านที่มีข้อมูลจริง
+//
+// ใช้ postback ไม่ใช่ message เพราะ postback พก service_id ไปด้วยเสมอ กดเมื่อไหร่ก็ตอบถูกเรื่อง
+// ไม่ต้องพึ่งว่าระบบยังจำ focus อยู่ไหม (เคสที่พังคือกดปุ่มหลังคุยเรื่องอื่นคั่นไปแล้ว)
+function serviceQuickReply(info, exclude = null) {
+  const items = availableIntents(info)
+    .filter((intent) => intent !== exclude)
+    .slice(0, 10)
+    .map((intent) => ({
+      type: 'action',
+      action: {
+        type: 'postback',
+        label: INTENT_LABEL[intent] || intent,
+        data: `svc:${info.id}:${intent}`,
+        displayText: `${INTENT_LABEL[intent]} ${info.name}`.slice(0, 300),
+      },
+    }));
+
+  items.push({ type: 'action', action: { type: 'message', label: 'เมนูหลัก', text: 'เมนูหลัก' } });
+  return { items };
+}
+
+// ผู้ใช้ถามด้านหนึ่ง แต่ยังไม่ได้บอกว่าเรื่องไหน — ยื่นรายชื่อบริการให้เลือก โดยพก intent เดิมไปด้วย
+// กดแล้วได้คำตอบที่ถามไว้ทันที ไม่ต้องพิมพ์ซ้ำ
+function serviceChoiceQuickReply(services, intent) {
+  const items = services.slice(0, 11).map((svc) => ({
+    type: 'action',
+    action: {
+      type: 'postback',
+      label: String((svc.aliases && svc.aliases[0]) || svc.name).slice(0, 20),
+      data: `svc:${svc.service_id}:${intent}`,
+      displayText: `${INTENT_LABEL[intent] || ''} ${svc.name}`.trim().slice(0, 300),
+    },
+  }));
+  return { items };
+}
+
 const QUICK_REPLY_ITEMS = {
   items: [
     { type: 'action', action: { type: 'message', label: 'เมนูหลัก', text: 'เมนูหลัก' } },
@@ -307,33 +404,6 @@ export function generateMainMenuFlex(liffUrl) {
       },
     },
   };
-}
-
-// บันทึก exchange ลง CHAT_HISTORY_RAM — ใช้ร่วมกันทั้ง fast-path, postback, และ AI path
-// เพื่อให้คำถามต่อยอด (เช่น "ขอรายละเอียด") มี context ว่าเพิ่งคุยอะไรไป ไม่ใช่แค่ AI path
-// เท่านั้นที่บันทึก (เดิมพลาดตรงนี้ — fast-path/postback ไม่เคยเขียน history เลย ทำให้คำถามต่อยอด
-// หลุดไปเจอ history เก่า/ว่างเปล่า)
-async function appendHistory(env, userId, userMessage, modelText) {
-  if (!userId) return;
-  let history = [];
-  try {
-    const stored = await env.CHAT_HISTORY_RAM.get(userId);
-    if (stored) history = JSON.parse(stored);
-  } catch (e) {
-    console.error("KV Read Error:", e);
-  }
-
-  history.push({ role: 'user', text: userMessage });
-  history.push({ role: 'model', text: modelText });
-  if (history.length > HISTORY_MAX_MESSAGES) {
-    history = history.slice(history.length - HISTORY_MAX_MESSAGES);
-  }
-
-  try {
-    await env.CHAT_HISTORY_RAM.put(userId, JSON.stringify(history), { expirationTtl: 3600 });
-  } catch (e) {
-    console.error("KV Write Error:", e);
-  }
 }
 
 // การ์ดสรุปผลอ่านเอกสาร พร้อมปุ่มยืนยัน/ยกเลิก
@@ -424,23 +494,31 @@ async function handleImageMessage(event, env) {
 // steps/building เป็นข้อมูลที่ทีมกรอกไว้ล่วงหน้าเท่านั้น ไม่ใช่สิ่งที่ AI แต่งเอง
 async function handlePostback(event, env) {
   const data = event.postback && event.postback.data ? event.postback.data : '';
-  const [action, serviceId] = data.split(':');
+  const [action, serviceId, extra] = data.split(':');
   const userId = event.source && event.source.userId;
   const displayText = (event.postback && event.postback.displayText) || data;
 
-  // data: "service_steps:{service_id}" — ตอบ steps เต็มเป็นข้อความแชท
+  // data: "svc:{service_id}:{INTENT}" — ปุ่มต่อยอดทุกใบในระบบใช้รูปแบบนี้
+  // พก service_id ไปด้วยเสมอ จึงตอบถูกเรื่องแม้ผู้ใช้จะไปคุยเรื่องอื่นคั่นมาก่อน
+  if (action === 'svc' && serviceId && extra) {
+    const service = await getServiceByKey(env, serviceId);
+    if (!service) {
+      return replyToLINE(event.replyToken, [{ type: 'text', text: 'ไม่พบข้อมูลบริการนี้ครับ' }], env.LINE_CHANNEL_ACCESS_TOKEN);
+    }
+    const result = await respondServiceIntent(env, service, extra, displayText);
+    await appendExchange(env, userId, displayText, result.reply, result.focus);
+    return replyToLINE(event.replyToken, result.messages, env.LINE_CHANNEL_ACCESS_TOKEN);
+  }
+
+  // data: "service_steps:{service_id}" — รูปแบบเดิม ปุ่มที่ค้างอยู่ในแชทเก่ายังต้องกดได้
   if (action === 'service_steps' && serviceId) {
     const service = await getServiceByKey(env, serviceId);
     if (!service) {
       return replyToLINE(event.replyToken, [{ type: 'text', text: 'ไม่พบข้อมูลขั้นตอนนี้ครับ' }], env.LINE_CHANNEL_ACCESS_TOKEN);
     }
-    const replyText = `${service.name}\n\n${service.steps}`;
-    await appendHistory(env, userId, displayText, replyText);
-    return replyToLINE(
-      event.replyToken,
-      [{ type: 'text', text: replyText }],
-      env.LINE_CHANNEL_ACCESS_TOKEN
-    );
+    const result = await respondServiceIntent(env, service, 'STEPS', displayText);
+    await appendExchange(env, userId, displayText, result.reply, result.focus);
+    return replyToLINE(event.replyToken, result.messages, env.LINE_CHANNEL_ACCESS_TOKEN);
   }
 
   // data: "service_nav:{service_id}" — สร้าง Flex Message นำทางแบบเดียวกับการบอกทางตึกปกติ
@@ -454,12 +532,27 @@ async function handlePostback(event, env) {
     if (!building) {
       return replyToLINE(event.replyToken, [{ type: 'text', text: 'ไม่พบข้อมูลอาคารนี้ครับ' }], env.LINE_CHANNEL_ACCESS_TOKEN);
     }
-    await appendHistory(env, userId, displayText, `เปิดเส้นทางไป ${building.name_th} ให้แล้วครับ`);
-    return replyToLINE(
-      event.replyToken,
-      [await generateBuildingCard(env, building, withDestId(env.LIFF_URL, building.building_id))],
-      env.LINE_CHANNEL_ACCESS_TOKEN
-    );
+    // focus ยังเป็น "บริการ" ไม่ใช่ "อาคาร" — ผู้ใช้กดขอเส้นทางเพราะกำลังจะไปทำเรื่องนี้
+    // ถ้าเปลี่ยน focus เป็นอาคาร คำถามถัดไปอย่าง "ต้องเตรียมอะไรบ้าง" จะหลุดเรื่องทันที
+    // (นี่คือจุดที่บทสนทนาขาดตอนในเคสใบเช็คเกรด)
+    await appendExchange(env, userId, displayText, `เปิดเส้นทางไป ${building.name_th} ให้แล้วครับ`, serviceFocus(service.service_id));
+
+    const info = normalizeService(service);
+    const card = await generateBuildingCard(env, building, withDestId(env.LIFF_URL, building.building_id));
+    // แปะทางกลับไปดูขั้นตอนไว้บนการ์ดเลย — เดิมพอตอบการ์ดอาคารแล้ว ปุ่ม "ดูขั้นตอนทั้งหมด"
+    // ที่อยู่กับข้อความก่อนหน้าก็เลื่อนหายไปจากจอ ทางเข้าถึงข้อมูลจึงขาดตรงนี้
+    if (info.procedure.length && card.contents.footer) {
+      card.contents.footer.contents.unshift(
+        { type: 'separator', margin: 'none', color: FLEX_TOKENS.line },
+        {
+          type: 'box', layout: 'vertical', paddingAll: '14px',
+          action: { type: 'postback', label: 'ดูขั้นตอน', data: `svc:${service.service_id}:STEPS`, displayText: `ขั้นตอน${service.name}` },
+          contents: [{ type: 'text', text: `ดูขั้นตอน${info.documents.length ? 'และเอกสารที่ต้องเตรียม' : ''}`, size: 'sm', weight: 'bold', color: FLEX_TOKENS.brand, align: 'center', wrap: true }],
+        },
+      );
+    }
+
+    return replyToLINE(event.replyToken, [card], env.LINE_CHANNEL_ACCESS_TOKEN);
   }
 
   // data: "rooms_confirm:{draftId}" / "rooms_cancel:{draftId}" — ผลอ่านห้องสอบจากรูป
@@ -577,12 +670,41 @@ async function handleEvent(event, env) {
     );
   }
 
-  // MCP-inspired Context Layer — จับคู่ building/service ก่อนเสมอ (CONTEXT.md)
+  // ---------------------------------------------------------------------------
+  // เส้นทางตัดสินใจของข้อความทั่วไป
+  //
+  // เดิมมีสองชั้น: match alias ได้ -> ตอบทันที / ไม่ได้ -> โยนให้ AI
+  // ซึ่งแปลว่าคำถามต่อยอดที่ไม่มีชื่อเรื่องอยู่ในประโยค ("ขอขั้นตอนการยื่น") ตกไป AI ทุกครั้ง
+  // แล้ว AI ก็ไม่เคยได้รับข้อมูลขั้นตอนติดไปด้วย จึงตอบว่า "ยังไม่มีข้อมูลในระบบ" ทั้งที่มีครบ
+  //
+  // ตอนนี้แยกเป็นสองแกนที่ประกอบกันได้: "ถามเรื่องอะไร" (entity) กับ "ถามด้านไหน" (intent)
+  // และจำเรื่องล่าสุดไว้ 15 นาที เพื่อให้ประโยคที่มีแต่ intent ผูกกลับไปหาเรื่องเดิมได้
+  // ---------------------------------------------------------------------------
   const context = await retrieveContext(userMessage, env);
+  const intent = detectFollowUpIntent(userMessage);
+  const conversation = await loadConversation(env, userId);
+  const focus = activeFocus(conversation);
 
-  // Fast-path: match ชัดเจนอยู่แล้วจาก BASELINE_DATA ไม่ต้องรอ AI เลย — ตัด latency/timeout risk
-  // สำหรับ intent ที่ตอบได้ตรงๆ อยู่แล้ว — บันทึกลง CHAT_HISTORY_RAM ด้วย (เดิมไม่บันทึก ทำให้
-  // คำถามต่อยอดของผู้ใช้ เช่น "ขอรายละเอียด" หลุดไปเจอ AI ที่ไม่รู้บริบทอะไรเลย)
+  // 1. รู้ทั้งเรื่องและด้านที่ถาม -> ตอบด้านนั้นของเรื่องนั้นตรงๆ ("ขั้นตอนขอใบเช็คเกรด")
+  if (context && context.service && intent) {
+    const result = await respondServiceIntent(env, context.service, intent, userMessage);
+    await appendExchange(env, userId, userMessage, result.reply, result.focus);
+    return replyToLINE(event.replyToken, result.messages, env.LINE_CHANNEL_ACCESS_TOKEN);
+  }
+
+  // 2. รู้เรื่อง แต่ไม่ได้ระบุด้าน -> การ์ดสรุปพร้อมปุ่มต่อยอดของด้านที่มีข้อมูลจริง
+  if (context && context.service) {
+    const info = normalizeService(context.service);
+    const replySummary = `${info.name}: ${info.short_answer || ''}`;
+    await appendExchange(env, userId, userMessage, replySummary, serviceFocus(info.id));
+    return replyToLINE(
+      event.replyToken,
+      [generateServiceSummaryMessage(context.service)],
+      env.LINE_CHANNEL_ACCESS_TOKEN
+    );
+  }
+
+  // 3. ถามถึงอาคาร -> การ์ดอาคาร (เส้นทางเดิม ไม่เปลี่ยนพฤติกรรม)
   if (context && context.building) {
     // ถามเจาะจงเรื่องที่จอดรถ + ตึกนี้ผูก zone ไว้แล้ว -> พาไปหน้ารายงาน/เช็คสถานะ zone นั้นตรงๆ
     // (ข้าม nearest-zone lookup ฝั่ง LIFF ไปเลย) ไม่งั้น fallback เป็นหน้านำทางปกติเหมือนเดิม
@@ -592,55 +714,79 @@ async function handleEvent(event, env) {
       : withDestId(env.LIFF_URL, context.building.building_id);
     const replyPhrase = pickBuildingFoundPhrase(context.building.name_th);
 
-    await appendHistory(env, userId, userMessage, replyPhrase);
+    await appendExchange(env, userId, userMessage, replyPhrase, buildingFocus(context.building.building_id));
     return replyToLINE(
       event.replyToken,
       [
-        {
-          type: 'text',
-          text: replyPhrase,
-          quickReply: QUICK_REPLY_ITEMS
-        },
+        { type: 'text', text: replyPhrase, quickReply: QUICK_REPLY_ITEMS },
         await generateBuildingCard(env, context.building, liffUrl)
       ],
       env.LINE_CHANNEL_ACCESS_TOKEN
     );
   }
-  if (context && context.service) {
-    const replySummary = `${context.service.name}: ${context.service.short_answer || ''}`;
-    await appendHistory(env, userId, userMessage, replySummary);
-    return replyToLINE(
-      event.replyToken,
-      [generateServiceSummaryMessage(context.service)],
-      env.LINE_CHANNEL_ACCESS_TOKEN
-    );
-  }
 
-  // --- 1. ดึงประวัติแชทเดิมจาก Cloudflare KV (CHAT_HISTORY_RAM) ---
-  let history = [];
-  try {
-    const storedHistory = await env.CHAT_HISTORY_RAM.get(userId);
-    if (storedHistory) {
-      history = JSON.parse(storedHistory);
+  // 4. ไม่ได้เอ่ยชื่อเรื่อง แต่ถามด้านที่ชัดเจน และเรายังจำได้ว่าเพิ่งคุยบริการอะไรอยู่
+  //    -> นี่คือเคสที่พังในแชทจริง ("ขอขั้นตอนการยื่น" หลังคุยเรื่องใบเช็คเกรด)
+  if (intent && focus && focus.type === 'service') {
+    const service = await getServiceByKey(env, focus.id);
+    if (service) {
+      const result = await respondServiceIntent(env, service, intent, userMessage);
+      await appendExchange(env, userId, userMessage, result.reply, result.focus);
+      return replyToLINE(event.replyToken, result.messages, env.LINE_CHANNEL_ACCESS_TOKEN);
     }
-  } catch (e) {
-    console.error("KV Read Error:", e);
   }
 
-  // --- 2. ส่งประวัติเดิม + ข้อความใหม่ ไปให้ Workers AI ---
-  const { aiResponseText, newHistory } = await callWorkersAI(userMessage, history, env);
+  // 5. ถามต่อแบบกว้างๆ ("ขอรายละเอียดเพิ่ม") ระหว่างคุยบริการอยู่ -> ยกข้อมูลที่มีทั้งหมดให้
+  if (focus && focus.type === 'service' && isContinuation(userMessage)) {
+    const service = await getServiceByKey(env, focus.id);
+    if (service) {
+      const info = normalizeService(service);
+      const text = fullSummary(info);
+      await appendExchange(env, userId, userMessage, text, serviceFocus(info.id));
+      return replyToLINE(
+        event.replyToken,
+        [{ type: 'text', text, quickReply: serviceQuickReply(info) }],
+        env.LINE_CHANNEL_ACCESS_TOKEN
+      );
+    }
+  }
 
-  // --- 3. บันทึกประวัติใหม่ลง Cloudflare KV (CHAT_HISTORY_RAM) ---
-  try {
-    await env.CHAT_HISTORY_RAM.put(userId, JSON.stringify(newHistory), { expirationTtl: 3600 });
-  } catch (e) {
-    console.error("KV Write Error:", e);
+  // 6. รู้ว่าอยากรู้ด้านไหน แต่ไม่รู้ว่าเรื่องไหน -> ถามกลับพร้อมรายชื่อให้กด
+  //    ปุ่มพา intent เดิมไปด้วย กดแล้วได้คำตอบที่ถามไว้ทันที ไม่ต้องพิมพ์ใหม่
+  if (intent && intent !== 'LOCATION') {
+    const services = await listServices(env);
+    if (services.length) {
+      const text = `อยากทราบ${INTENT_LABEL[intent] || 'รายละเอียด'}ของเรื่องไหนครับ เลือกได้เลย`;
+      await appendExchange(env, userId, userMessage, text, undefined);
+      await logUnanswered(env, { message: userMessage, intent, focusId: null, reason: 'NO_MATCH' });
+      return replyToLINE(
+        event.replyToken,
+        [{ type: 'text', text, quickReply: serviceChoiceQuickReply(services, intent) }],
+        env.LINE_CHANNEL_ACCESS_TOKEN
+      );
+    }
+  }
+
+  // 7. คุยทั่วไป -> ส่งให้ AI พร้อมแนบข้อมูลจริงของเรื่องที่กำลังคุยอยู่ (ถ้ามี)
+  //    AI จะได้ทำสิ่งที่มันเก่ง (เรียบเรียงให้อ่านง่าย) แทนที่จะถูกถามเรื่องที่ไม่มีข้อมูลให้เลย
+  let grounding = null;
+  if (focus && focus.type === 'service') {
+    const service = await getServiceByKey(env, focus.id);
+    if (service) grounding = groundingText(normalizeService(service));
+  }
+
+  const { aiResponseText, newHistory } = await callWorkersAI(userMessage, conversation.messages, env, grounding);
+
+  conversation.messages = newHistory;
+  await saveConversation(env, userId, conversation);
+
+  if (!grounding) {
+    await logUnanswered(env, { message: userMessage, intent, focusId: null, reason: 'NO_MATCH' });
   }
 
   // ถึงตรงนี้ context ไม่ match building/service แล้ว (เช็คไปแล้วด้านบน) — ตอบด้วยข้อความ AI ตรงๆ
   // ไม่มี fallback แต่งข้อมูลตึกเพิ่มอีกแล้ว (ของเดิม hardcode VKB=คณะวิศวกรรมศาสตร์ ผิดตั้งแต่ VKB
   // ในฐานข้อมูลจริงเปลี่ยนเป็นเวียงคำ) — BASELINE_DATA ครอบคลุมจริงแล้ว ถ้าไม่ match คือไม่มีข้อมูลจริง
-  // SYSTEM_INSTRUCTION ข้อ 4 สั่งให้ AI ตอบตรงๆ ว่าไม่มีข้อมูลอยู่แล้ว ไม่ต้องแต่งการ์ดมาปิดบัง
   const messagesToReply = [
     {
       type: 'text',
