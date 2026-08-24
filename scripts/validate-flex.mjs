@@ -1,6 +1,12 @@
 // ตรวจการ์ดทุกใบตามข้อจำกัดจริงของ LINE Flex Message
-const ROOT='/Users/watcharapolcharoensuk/Desktop/ram-roo-thang-bot-main';
+// หาตำแหน่ง repo จากที่ไฟล์นี้อยู่ ไม่ใช่ path ตายตัวของเครื่องใครคนหนึ่ง — ของเดิมชี้ไปที่
+// โฟลเดอร์บนเครื่อง Mac ของผู้เขียน สคริปต์เลยรันไม่ได้เลยบนเครื่องอื่นและใน CI
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+const ROOT=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const { resultCard, row, menuCard, FLEX_TOKENS } = await import(ROOT+'/worker/src/flex.js');
+const { statusFlexMessage } = await import(ROOT+'/worker/src/health.js');
+const { generateMainMenuFlex } = await import(ROOT+'/worker/src/line.js');
 
 const SIZE=['xxs','xs','sm','md','lg','xl','xxl','3xl','4xl','5xl','full'];
 const MARGIN=['none','xs','sm','md','lg','xl','xxl'];
@@ -79,6 +85,21 @@ check('การ์ดยืนยันห้องสอบ (12 วิชา)'
   actions:[{label:'บันทึกห้องสอบ',action:{type:'postback',label:'บันทึก',data:'rooms_confirm:'+crypto.randomUUID(),displayText:'บันทึก'}},
            {label:'ยกเลิก',color:FLEX_TOKENS.inkFaint,action:{type:'postback',label:'ยกเลิก',data:'rooms_cancel:'+crypto.randomUUID(),displayText:'ยกเลิก'}}],
   altText:'อ่านห้องสอบได้ 12 วิชา'}));
+
+// การ์ดสถานะสร้างจาก statusFlexMessage ตัวจริง ไม่ได้ก๊อป layout มาวางซ้ำ — ไม่งั้นแก้การ์ดจริง
+// แล้วสคริปต์นี้ยังตรวจของเก่าผ่านฉลุยอยู่ ทั้งที่ LINE ปฏิเสธการ์ดใบใหม่
+const fakeChecks=(overrides={})=>['config','line_api','database','chat_history','ai','exam_alerts']
+  .map(name=>({name,label:{config:'ตั้งค่าระบบ',line_api:'เชื่อมต่อ LINE',database:'ฐานข้อมูล',
+    chat_history:'ความจำการคุย',ai:'ผู้ช่วย AI',exam_alerts:'แจ้งเตือนสอบ'}[name],
+    status:overrides[name]||'ok',latency_ms:12}));
+for(const [name,status,over] of [['การ์ดสถานะ (ปกติ)','ok',{}],
+                                 ['การ์ดสถานะ (บางส่วน)','degraded',{ai:'degraded'}],
+                                 ['การ์ดสถานะ (ขัดข้อง)','down',{line_api:'down',database:'down'}]]){
+  check(name, statusFlexMessage({status,online:status!=='down',checked_at:new Date().toISOString(),
+    deep:true,checks:fakeChecks(over)}));
+}
+
+check('การ์ดเมนูหลัก (ของจริง)', generateMainMenuFlex('https://liff.line.me/2011201463-2rdSwrwB'));
 
 check('การ์ดเมนู', menuCard({title:'เมนู',subtitle:'ทดสอบ',groups:[{label:'กลุ่ม',items:[
   {label:'ก',action:{type:'message',label:'ก',text:'ก'}},{label:'ข',action:{type:'message',label:'ข',text:'ข'}},

@@ -7,6 +7,7 @@ import { resolveStatusForZone } from './parking.js';
 import { haversineDistanceMeters } from './utils.js';
 import { processExamScheduleImage, confirmRoomImport, cancelRoomImport } from './examroom.js';
 import { resultCard, row, FLEX_TOKENS } from './flex.js';
+import { recordHeartbeat, runHealthChecks, statusFlexMessage } from './health.js';
 
 export async function verifySignature(body, signature, channelSecret) {
   const encoder = new TextEncoder();
@@ -187,8 +188,19 @@ export async function handleWebhookRequest(request, env, ctx) {
     const events = body.events || [];
 
     // ใช้ ctx.waitUntil เพื่อตอบ 200 OK กลับไปหา LINE ทันที ป้องกันปัญหา Webhook Timeout
+    //
+    // heartbeat บันทึกหลังประมวลผลจบ ไม่ใช่ตอนรับ event — เราต้องการรู้ว่า "ตอบผู้ใช้ได้จริง"
+    // ไม่ใช่แค่ "มีคำขอวิ่งเข้ามา" (ตอนบอทพัง คำขอก็ยังวิ่งเข้ามาเหมือนเดิมทุกใบ)
+    //
+    // และต้องมี catch เสมอ: เดิม Promise.all ใน waitUntil ไม่มีใครรับ error เลย พอ handleEvent
+    // ตัวใดตัวหนึ่ง throw จะกลายเป็น unhandled rejection ที่ผู้ใช้เห็นแค่ "บอทไม่ตอบ" เฉยๆ
     ctx.waitUntil(
       Promise.all(events.map(event => handleEvent(event, env)))
+        .then(() => recordHeartbeat(env, 'webhook', `events=${events.length}`))
+        .catch((err) => {
+          console.error('handleEvent ล้มเหลว:', err);
+          return recordHeartbeat(env, 'webhook_error', err && err.message);
+        })
     );
 
     return new Response('OK', { status: 200 });
@@ -233,7 +245,7 @@ const QUICK_REPLY_ITEMS = {
 //
 // ป้ายปุ่มเป็นข้อความล้วนไม่มี emoji เหมือน quick reply — ตัวหนังสือไทยในกล่องแคบๆ อ่านง่ายกว่า
 // เมื่อไม่มีไอคอนแย่งพื้นที่ และการ์ดทั้งใบดูสงบกว่า
-function generateMainMenuFlex(liffUrl) {
+export function generateMainMenuFlex(liffUrl) {
   const base = liffUrl || 'https://line.me';
   const link = (params) => `${base}${base.includes('?') ? '&' : '?'}${params}`;
   const T = FLEX_TOKENS;
@@ -270,6 +282,12 @@ function generateMainMenuFlex(liffUrl) {
           pair(
             tile('บันทึกวิชาสอบ', { type: 'uri', label: 'บันทึกวิชาสอบ', uri: link('mode=profile') }),
             tile('วิธีใช้งาน', { type: 'message', label: 'วิธีใช้งาน', text: 'วิธีใช้งานรามรู้ทาง' }, T.amberSoft, T.ink),
+          ),
+          // ช่องขวาว่างไว้ตั้งใจ — ยังไม่มีฟีเจอร์ที่ห้าที่พร้อมใช้จริง ใส่ปุ่มหลอกไว้ให้เต็มแถว
+          // แล้วกดไปเจอ "Coming Soon" แย่กว่าปล่อยว่าง (เคยทำแบบนั้นกับร้านค้ามาแล้ว)
+          pair(
+            tile('เช็คสถานะระบบ', { type: 'message', label: 'เช็คสถานะ', text: 'เช็คสถานะ' }, T.greenSoft, T.ink),
+            { type: 'box', layout: 'vertical', flex: 1, contents: [{ type: 'filler' }] },
           ),
           {
             type: 'text', margin: 'xl', size: 'xxs', color: T.inkFaint, wrap: true,
@@ -469,6 +487,28 @@ async function handleEvent(event, env) {
     );
   }
 
+  // เช็คสถานะบอท — ตรวจสดทุกครั้ง ไม่อ่านค่าที่ cache ไว้ เพราะคนถามคำถามนี้ตอนสงสัยว่าบอทเสีย
+  // ถ้าตอบด้วยค่าเก่าที่เก็บไว้ก็ตอบผิดพอดีในนาทีที่ควรตอบถูกที่สุด
+  //
+  // deep: true = ยิงถาม LINE API ด้วยว่า access token ยังใช้ได้ไหม ยอมแลกเวลาอีกไม่ถึงวินาที
+  // กับการตอบได้จริงว่า "ส่งข้อความออกได้" ไม่ใช่แค่ "โค้ดยังรันอยู่"
+  if (userMessage.match(/^(เช็[คก]\s*)?(สถานะ(ระบบ|บอท)?|status|ping)$/i)
+      || userMessage.match(/^(บอท)?(ยัง)?ออนไลน์(อยู่)?(ไหม|มั้ย|ป่าว|รึเปล่า|หรือเปล่า)?\??$/)) {
+    let report;
+    try {
+      report = await runHealthChecks(env, { deep: true });
+    } catch (err) {
+      // ตรวจไม่สำเร็จ ≠ ปกติ — ตอบตามจริงว่าตรวจไม่ได้ ดีกว่าเงียบหรือเดาว่าเขียว
+      console.error('health check ล้มเหลว', err);
+      return replyToLINE(event.replyToken, [{
+        type: 'text',
+        text: 'ตอนนี้ตรวจสถานะระบบไม่สำเร็จครับ แต่ข้อความนี้ตอบกลับได้แปลว่าตัวบอทยังทำงานอยู่ ลองพิมพ์ใหม่อีกครั้งนะครับ',
+        quickReply: QUICK_REPLY_ITEMS,
+      }], env.LINE_CHANNEL_ACCESS_TOKEN);
+    }
+    return replyToLINE(event.replyToken, [statusFlexMessage(report)], env.LINE_CHANNEL_ACCESS_TOKEN);
+  }
+
   // วิธีใช้งาน — ปุ่มในการ์ดเมนูส่งข้อความนี้กลับมา ตอบเป็นข้อความสั้นพร้อม quick reply
   if (userMessage.match(/^วิธีใช้งาน/)) {
     return replyToLINE(
@@ -482,6 +522,7 @@ async function handleEvent(event, env) {
           '2. พิมพ์ "เช็คที่จอดรถ" ดูสภาพลานจอดที่คนอื่นรายงานไว้ รายงานเองได้ด้วยตอนอยู่ในลาน',
           '3. พิมพ์ "ตารางสอบ" บันทึกรหัสวิชา ระบบจะดึงวันและคาบสอบจากประกาศให้เอง แล้วเตือนล่วงหน้า 1 วัน',
           '4. ส่งรูปตารางสอบรายบุคคลเข้ามา ระบบจะอ่านห้องสอบให้อัตโนมัติ',
+          '5. พิมพ์ "เช็คสถานะ" ดูว่าตอนนี้ระบบส่วนไหนใช้ได้ปกติบ้าง',
           '',
           'ทุกการใช้งานสะสมเหรียญไปแลกของรางวัลได้ครับ',
         ].join('\n'),

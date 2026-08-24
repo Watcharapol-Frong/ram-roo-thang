@@ -105,6 +105,9 @@ const env = {
   CHAT_HISTORY_RAM: createKV(),
   // token ปลอมสำหรับทดสอบ endpoint แจ้งเตือนสอบในเครื่อง (production ใช้ค่าจาก .secrets.env)
   ADMIN_TOKEN: 'dev-admin-token',
+  // ค่าปลอมสองตัวนี้ทำให้ /api/health ในเครื่องเช็ค "ตั้งค่าระบบ" ผ่านเหมือน production
+  // ส่วน "เชื่อมต่อ LINE" (?deep=1) จะขึ้นขัดข้องตามจริง เพราะ token ปลอมใช้กับ LINE API ไม่ได้
+  LINE_CHANNEL_SECRET: 'dev-fake-secret',
   LINE_CHANNEL_ACCESS_TOKEN: 'dev-fake-token',
   LIFF_URL: `http://localhost:8123/?dev=1&api=http://localhost:${port}`,
 };

@@ -111,7 +111,9 @@ ram-roo-thang-bot/
 │   │   ├── 0001_users_and_coin_ledger.sql
 │   │   ├── 0002_exam_alerts.sql
 │   │   ├── 0003_exam_rooms.sql
-│   │   └── 0004_shop.sql
+│   │   ├── 0004_shop.sql
+│   │   ├── 0005_shop_limits.sql
+│   │   └── 0006_bot_heartbeat.sql
 │   └── src/
 │       ├── index.js               — router (LINE webhook + /api/*) + CORS
 │       ├── line.js                — signature verify, chat history, Flex Messages, reply
@@ -125,6 +127,7 @@ ram-roo-thang-bot/
 │       ├── parking.js             — parking reports: geofence, rate limit, aggregation
 │       ├── building.js            — building lookup
 │       ├── shop.js                — campus shop listing + coin redemption store
+│       ├── health.js              — status checks, heartbeats, /api/health, the status card
 │       └── utils.js               — Haversine distance
 │
 ├── liff/                          — LIFF pages (plain static, no build step)
@@ -148,6 +151,9 @@ ram-roo-thang-bot/
 └── scripts/
     ├── dev-api.mjs                — dev backend (real worker + in-memory KV/D1)
     ├── serve-liff.mjs             — dev static server
+    ├── healthcheck.mjs            — poll /api/health from outside and print a readable summary
+    ├── validate-flex.mjs          — check every Flex card against LINE's real constraints
+    ├── loadtest.mjs               — 200-user journey against production
     ├── seed-kv.sh                 — seed baseline-dataset.json into KV (needs jq)
     ├── build-exam-schedule.py     — convert the exam PDF to JSON (needs pypdf)
     └── google-sheets-apps-script.js— Google Sheets receiver for survey responses
@@ -160,6 +166,7 @@ Every `/api/*` endpoint has CORS enabled, because the LIFF is always on a differ
 | Method | Path | Purpose |
 |---|---|---|
 | POST | `/webhook` | LINE webhook (HMAC signature is verified first, always) |
+| GET | `/api/health[?deep=1]` | Bot status — public, no auth. `x-admin-token` adds failure reasons and last-activity times |
 | GET | `/api/buildings` · `/api/building?building_id=` | Building data |
 | GET | `/api/shops` | Shops and stalls |
 | GET | `/api/parking/zones` · `/api/parking/zone?zone_id=` | Parking zones + latest status |
@@ -268,6 +275,92 @@ curl -X POST https://<worker>/api/admin/exam-alerts \
 `ADMIN_TOKEN` lives in `worker/.secrets.env`. Without it the endpoint always returns 401; the cron
 still works regardless.
 
+## Bot status checks
+
+"Is the bot online?" means two different things, and only the second one matters to a user:
+
+1. **Does the worker answer HTTP?** — a plain ping answers this.
+2. **Can the bot actually reply in chat?** — it can't, if any of its dependencies is broken.
+
+Checking only (1) is how the Aug 22, 2026 outage stayed invisible: the worker was overwritten, every
+secret was gone, `verifySignature` hashed the literal string `"undefined"`, and every LINE webhook got
+a 401. Every URL still returned 200. The bot was silent with nothing anywhere saying so.
+
+So `GET /api/health` checks the things a reply actually needs, and reports three levels — not pass/fail:
+
+| Level | Meaning | HTTP |
+|---|---|---|
+| `ok` | Everything works | 200 |
+| `degraded` | Still replies, but something is missing (e.g. Workers AI is down → building lookup works, chit-chat doesn't) | 200 |
+| `down` | Cannot reply at all (secrets gone, D1 down, LINE token rejected) | 503 |
+
+`degraded` deliberately stays 200. Paging someone at 3am because an AI binding vanished, while the bot
+answers users perfectly well, trains people to ignore the alert.
+
+| Check | Level when broken | What it proves |
+|---|---|---|
+| `config` | down | `LINE_CHANNEL_SECRET` + `LINE_CHANNEL_ACCESS_TOKEN` still exist on the worker |
+| `database` | down | D1 answers `SELECT 1` |
+| `chat_history` | degraded | KV reads work (a `get`, never a `list` — see the quota story above) |
+| `ai` | degraded | The Workers AI binding is present |
+| `exam_alerts` | degraded | The daily cron ran within the last 26 h |
+| `line_api` | down / degraded | `?deep=1` only — calls `/v2/bot/info`: 401 means the token is dead, 5xx means LINE is having a bad day |
+
+`?deep=1` is opt-in because the endpoint is meant to be polled every minute by an uptime monitor, and
+the LINE result is cached for 60 s per isolate anyway. The check doesn't run an actual inference —
+that would burn quota on every ping, and `ai.js` already has a fallback for a failed model call.
+
+The public response carries status and latency only. Failure reasons and last-activity timestamps hint
+at how the system is built and how many people use it, so they need `x-admin-token` — the same token
+as the exam-alert endpoint.
+
+### Heartbeats: proof the bot did real work
+
+Health checks alone still can't tell "nobody messaged the bot today" from "every message failed", so
+the worker records when it last **finished** handling something in `bot_heartbeat` (one row per kind,
+not one per event):
+
+| kind | Written when |
+|---|---|
+| `webhook` | A batch of LINE events was processed to completion |
+| `webhook_error` | `handleEvent` threw |
+| `cron` | The daily exam-alert run finished (including on days with nobody to alert) |
+
+The table needs its migration applied before any of this records anything:
+
+```bash
+cd worker && npx wrangler d1 execute ram-roo-thang --remote --file=migrations/0006_bot_heartbeat.sql
+```
+
+Until then `/api/health` still works — the read is wrapped and simply reports no activity — so a
+missing migration shows up as "ยังไม่เคย" rather than a broken endpoint.
+
+Writes are throttled to one per 5 minutes per isolate, so write volume stays flat instead of scaling
+with chat traffic. Errors are never throttled — the first one is the one worth having. A bad HMAC
+signature is *not* recorded: `/webhook` is a public URL that internet scanners hit, so recording those
+would flag a fault every time a stranger poked the endpoint.
+
+### Checking it from outside
+
+```bash
+node scripts/healthcheck.mjs                               # quick check against production
+node scripts/healthcheck.mjs --deep --token=$ADMIN_TOKEN   # full picture
+node scripts/healthcheck.mjs --watch=60                    # re-check every 60s
+node scripts/healthcheck.mjs --url=http://localhost:8787   # against dev-api.mjs
+```
+
+Exit codes are `0` ok / `1` degraded / `2` down or unreachable, so it drops straight into cron or CI.
+Point any uptime monitor (UptimeRobot, Better Stack, Cloudflare Health Checks) at `GET /api/health`
+and alert on non-200 — `degraded` won't trigger it, `down` will.
+
+### From inside the chat
+
+Users type **"เช็คสถานะ"** (or สถานะ / status / ping / "ออนไลน์ไหม") and get a Flex card with each
+subsystem in plain Thai. It runs the checks live — including the `deep` one — rather than reading a
+cached value, because someone asks this exact question in the minute when a stale answer is most wrong.
+The card names subsystems in user language ("ความจำการคุย"), never binding names or raw errors; those
+stay behind the admin token. The main menu has a **เช็คสถานะระบบ** tile for the same thing.
+
 ## Setup
 
 Assumes you already have a Cloudflare account and a LINE Developers Console channel.
@@ -344,6 +437,9 @@ Open **http://localhost:8123/?dev=1&api=http://localhost:8787**
   swapping KV for in-memory Maps and D1 for `node:sqlite` running the same migration file as
   production — so the UNIQUE constraints that prevent double coin claims are genuinely exercised locally.
 - Data is lost when the process exits, and `/webhook` doesn't work here (needs real LINE + Workers AI).
+- `curl localhost:8787/api/health` works locally too. It reports `degraded` because dev-api has no
+  Workers AI binding, and `?deep=1` reports `down` because the dev LINE token is a fake string — both
+  are the check telling the truth, not a bug.
 - **Restart `dev-api.mjs` after editing worker code** — there is no hot reload.
 - The dev D1 shim runs **every** file in `worker/migrations/` in name order, so new migrations are
   picked up automatically on restart.
@@ -392,6 +488,7 @@ the wrong time. Course codes not present in the timetable are now rejected at in
 | Survey → Google Sheets | ✅ | Live and verified end to end (a test row reached the sheet) |
 | Shop / spending coins | ✅ | One item (LINE sticker, 30 coins). Items live in `shop_items` so pricing can change without a deploy; an admin page is still to come |
 | Proactive Exam Alerts (Cron) | ✅ | Day-before push including the exam room when the student has supplied one |
+| Bot status checks | ✅ | `/api/health` + heartbeats + an in-chat status card; `scripts/healthcheck.mjs` for monitors |
 | Community | ❌ | Not started (ADR-0004 kept it out of the MVP) |
 
 ### Load test results (Aug 24, 2026)

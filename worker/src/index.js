@@ -7,6 +7,7 @@ import { handleListShops, handleListShopItems, handleRedeemItem, handleListRedem
 import { handlePostSchedule, handleGetSchedule, handleDeleteSchedule } from './schedule.js';
 import { handleGetUser, handleGetLedger, handleFeedbackAward, handleSaveCarAward } from './user.js';
 import { handleAdminExamAlerts, runDailyExamAlerts } from './exam.js';
+import { handleHealth, recordHeartbeat } from './health.js';
 
 // LIFF (liff/) เป็น static site คนละ origin กับ worker นี้เสมอ — ต้องมี CORS ให้ /api/* ถึงจะเรียก
 // fetch() จากฝั่ง browser ได้จริง (ไม่มีมาก่อนหน้านี้ ทำให้ทุก endpoint ใต้ /api/ เรียกจาก LIFF ไม่ได้เลย
@@ -39,8 +40,18 @@ export default {
   },
 
   // Cron Trigger (ดู [triggers] ใน wrangler.toml) — เตือนล่วงหน้าว่าพรุ่งนี้มีสอบวิชาอะไร
+  //
+  // บันทึก heartbeat ทุกครั้งที่รันจบ ไม่ว่าจะมีคนต้องเตือนหรือไม่ — วันที่ไม่มีใครสอบพรุ่งนี้
+  // ก็ยังต้องนับว่า cron ทำงาน ไม่งั้น /api/health จะเห็นเป็น "cron หลุด" ทั้งที่มันรันปกติ
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(runDailyExamAlerts(env).catch((err) => console.error('scheduled error', err)));
+    ctx.waitUntil(
+      runDailyExamAlerts(env)
+        .then((result) => recordHeartbeat(env, 'cron', `sent=${result.sent} skipped=${result.skipped} failed=${result.failed}`))
+        .catch((err) => {
+          console.error('scheduled error', err);
+          return recordHeartbeat(env, 'cron_error', err && err.message);
+        })
+    );
   },
 };
 
@@ -51,6 +62,11 @@ async function route(request, env, ctx) {
 
   if (method === 'POST' && pathname === '/webhook') {
     return handleWebhookRequest(request, env, ctx);
+  }
+
+  // เช็คสถานะบอท — GET เพื่อให้ uptime monitor ภายนอกยิงได้ตรงๆ ไม่ต้อง auth
+  if (method === 'GET' && pathname === '/api/health') {
+    return handleHealth(request, env);
   }
 
   if (method === 'POST' && pathname === '/api/parking/report') {
