@@ -1,0 +1,88 @@
+// ตรวจการ์ดทุกใบตามข้อจำกัดจริงของ LINE Flex Message
+const ROOT='/Users/watcharapolcharoensuk/Desktop/ram-roo-thang-bot-main';
+const { resultCard, row, menuCard, FLEX_TOKENS } = await import(ROOT+'/worker/src/flex.js');
+
+const SIZE=['xxs','xs','sm','md','lg','xl','xxl','3xl','4xl','5xl','full'];
+const MARGIN=['none','xs','sm','md','lg','xl','xxl'];
+const errs=[];
+const HEX=/^#[0-9A-Fa-f]{6}$/;
+
+function walk(node, path){
+  if(Array.isArray(node)) return node.forEach((n,i)=>walk(n,`${path}[${i}]`));
+  if(!node || typeof node!=='object') return;
+  const t=node.type;
+  if(!t) errs.push(`${path}: ไม่มี type`);
+  if(t==='text'){
+    if(typeof node.text!=='string'||!node.text.length) errs.push(`${path}: text ว่างหรือไม่ใช่ string`);
+    if(node.size&&!SIZE.includes(node.size)) errs.push(`${path}: size "${node.size}" ไม่ถูกต้อง`);
+    if(node.color&&!HEX.test(node.color)) errs.push(`${path}: color "${node.color}" ต้องเป็น #RRGGBB`);
+    if(node.weight&&!['regular','bold'].includes(node.weight)) errs.push(`${path}: weight ผิด`);
+    if(node.align&&!['start','end','center'].includes(node.align)) errs.push(`${path}: align ผิด`);
+  }
+  if(t==='box'){
+    if(!['vertical','horizontal','baseline'].includes(node.layout)) errs.push(`${path}: layout ผิด`);
+    if(!Array.isArray(node.contents)) errs.push(`${path}: box ต้องมี contents เป็น array`);
+    else if(node.contents.length===0) errs.push(`${path}: box contents ว่าง (LINE ไม่รับ)`);
+    if(node.backgroundColor&&!HEX.test(node.backgroundColor)) errs.push(`${path}: backgroundColor ผิด`);
+  }
+  if(t==='separator'&&node.color&&!HEX.test(node.color)) errs.push(`${path}: separator color ผิด`);
+  if(node.margin&&!MARGIN.includes(node.margin)) errs.push(`${path}: margin "${node.margin}" ไม่ถูกต้อง`);
+  if(node.action){
+    const a=node.action;
+    if(!['uri','postback','message'].includes(a.type)) errs.push(`${path}.action: type ผิด`);
+    if(a.type==='uri'&&!/^https?:\/\/|^line:\/\//.test(a.uri||'')) errs.push(`${path}.action: uri ต้องเป็น http/https`);
+    if(a.type==='postback'&&(!a.data||a.data.length>300)) errs.push(`${path}.action: postback data ว่างหรือยาวเกิน 300`);
+    if(a.label&&a.label.length>20) errs.push(`${path}.action: label ยาวเกิน 20 (${a.label.length})`);
+  }
+  ['contents','header','body','footer','hero'].forEach(k=>{ if(node[k]) walk(node[k], `${path}.${k}`); });
+}
+
+function check(name, msg){
+  const before=errs.length;
+  if(msg.type!=='flex') errs.push(`${name}: type ต้องเป็น flex`);
+  if(!msg.altText) errs.push(`${name}: ไม่มี altText`);
+  else if(msg.altText.length>400) errs.push(`${name}: altText ยาวเกิน 400`);
+  walk(msg.contents, name);
+  const size=JSON.stringify(msg).length;
+  if(size>50000) errs.push(`${name}: ใหญ่เกิน 50KB (${size})`);
+  console.log(`  ${errs.length===before?'OK  ':'FAIL'} ${name.padEnd(24)} ${size} bytes`);
+}
+
+console.log('ตรวจการ์ดทุกแบบที่บอทส่งได้:');
+check('การ์ดอาคาร (มีลานจอด)', resultCard({
+  title:'พบข้อมูลอาคาร', badge:'KLB', headerColor:FLEX_TOKENS.blueSoft,
+  hero:'KLB', heroNote:'อาคารกงไกรลาศ',
+  rows:[row('ที่จอดรถใกล้สุด','อาคารหอประชุมพ่อขุนราม (ปานกลาง)',{strong:true,color:'#D98E04'}),
+        row('ระยะเดินเท้า','ประมาณ 157 ม. (3 นาที)')],
+  note:'* ข้อมูลการนำทางจะปรับตามตำแหน่ง GPS ของคุณโดยอัตโนมัติ',
+  actions:[{label:'เริ่มต้นเดินทาง',action:{type:'uri',label:'เริ่มต้นเดินทาง',uri:'https://liff.line.me/x?dest_id=KLB'}}],
+  altText:'ข้อมูลอาคารกงไกรลาศ'}));
+
+check('การ์ดอาคาร (ไม่มีลานจอด)', resultCard({
+  title:'พบข้อมูลอาคาร', badge:'XYZ', headerColor:FLEX_TOKENS.blueSoft,
+  hero:'XYZ', heroNote:'อาคารทดสอบ', rows:[],
+  note:'* ข้อมูลการนำทางจะปรับตามตำแหน่ง GPS ของคุณโดยอัตโนมัติ',
+  actions:[{label:'เริ่มต้นเดินทาง',action:{type:'uri',label:'เริ่มต้นเดินทาง',uri:'https://liff.line.me/x'}}],
+  altText:'ข้อมูลอาคารทดสอบ'}));
+
+check('การ์ดตารางสอบ', resultCard({
+  title:'ตารางสอบของคุณ', badge:'ตารางสอบ', headerColor:FLEX_TOKENS.blueSoft,
+  hero:'บันทึกวิชาที่จะสอบ', heroNote:'ใส่รหัสวิชา ระบบจะดึงวันและคาบสอบจากประกาศให้เอง',
+  rows:[row('วันสอบ','ดึงจากประกาศอัตโนมัติ'),row('ห้องสอบ','ส่งรูปตารางสอบให้อ่าน'),row('แจ้งเตือน','ล่วงหน้า 1 วัน')],
+  actions:[{label:'เปิดตารางสอบ',action:{type:'uri',label:'เปิดตารางสอบ',uri:'https://liff.line.me/x?mode=profile'}}],
+  altText:'บันทึกวิชาสอบ'}));
+
+const many=Array.from({length:12},(_,i)=>row(`SUB${1000+i}`,`VKB ${500+i}`,{strong:true,color:FLEX_TOKENS.brand}));
+check('การ์ดยืนยันห้องสอบ (12 วิชา)', resultCard({
+  title:'อ่านห้องสอบจากรูปแล้ว', badge:'12 วิชา', headerColor:FLEX_TOKENS.amberSoft,
+  rows:many, note:'วันสอบใช้ของประกาศมหาวิทยาลัยเสมอ อ่านจากรูปเฉพาะห้องสอบ ตรวจให้ตรงก่อนกดบันทึกนะครับ',
+  actions:[{label:'บันทึกห้องสอบ',action:{type:'postback',label:'บันทึก',data:'rooms_confirm:'+crypto.randomUUID(),displayText:'บันทึก'}},
+           {label:'ยกเลิก',color:FLEX_TOKENS.inkFaint,action:{type:'postback',label:'ยกเลิก',data:'rooms_cancel:'+crypto.randomUUID(),displayText:'ยกเลิก'}}],
+  altText:'อ่านห้องสอบได้ 12 วิชา'}));
+
+check('การ์ดเมนู', menuCard({title:'เมนู',subtitle:'ทดสอบ',groups:[{label:'กลุ่ม',items:[
+  {label:'ก',action:{type:'message',label:'ก',text:'ก'}},{label:'ข',action:{type:'message',label:'ข',text:'ข'}},
+  {label:'ค',action:{type:'message',label:'ค',text:'ค'}}]}],altText:'เมนู'}));
+
+console.log(errs.length ? `\n❌ พบปัญหา ${errs.length} จุด:\n` + errs.map(e=>'   '+e).join('\n')
+                        : '\n✅ ผ่านทุกใบ ไม่มีอะไรที่ LINE จะปฏิเสธ');

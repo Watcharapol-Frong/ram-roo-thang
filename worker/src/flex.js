@@ -126,8 +126,10 @@ export function resultCard({
   rows.forEach((r, i) => body.push(i === 0 && !hero ? { ...r, margin: 'none' } : r));
 
   if (note) {
-    if (rows.length) body.push(hairline());
-    body.push({ type: 'text', text: note, size: 'xxs', color: T.inkFaint, wrap: true, margin: rows.length ? 'md' : 'none' });
+    // คั่นเสมอถ้ามีอะไรอยู่ข้างบน — เคสอาคารที่ไม่ได้ผูกลานจอดไว้จะไม่มีแถวเลย
+    // ปล่อยไว้หมายเหตุจะไปติดกับชื่ออาคารจนอ่านเหมือนเป็นประโยคเดียวกัน
+    if (body.length) body.push(hairline());
+    body.push({ type: 'text', text: note, size: 'xxs', color: T.inkFaint, wrap: true, margin: 'md' });
   }
 
   const bubble = {
