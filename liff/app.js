@@ -20,7 +20,7 @@ const GOOGLE_MAPS_MAP_ID_2D = '3b904d628ff6dcdec4f81588';
 // (ดู scripts/google-sheets-apps-script.js สำหรับโค้ดฝั่ง Sheets และวิธี deploy)
 // เว้นว่างไว้ = ไม่ส่งไปไหน เก็บลง localStorage ของเครื่องคนตอบอย่างเดียว ซึ่งเท่ากับเก็บผลไม่ได้จริง
 // เพราะข้อมูลติดอยู่ในเครื่องแต่ละคน ต้องใส่ค่านี้ก่อนเปิดให้คนทดสอบ ไม่งั้นได้ผลกลับมา 0 ชุด
-const FEEDBACK_ENDPOINT_URL = '';
+const FEEDBACK_ENDPOINT_URL = 'https://script.google.com/macros/s/AKfycbz9VcJ0srqYNHchZhkzMYkEzg0sS0hL5P9mONRNaybEoVEZhTKLZ16k0c0AAoQ3_gEo/exec';
 
 // Dev Mode (?dev=1) — เปิดทดสอบบนเบราว์เซอร์ปกติได้โดยไม่ต้องเปิดผ่านแอป LINE
 // ปกติ liff.init จะเด้งไปหน้า LINE Login ทำให้เทสยาก โหมดนี้จึง stub liff ทิ้งไปเลย
@@ -1345,9 +1345,16 @@ async function renderFeedbackView() {
           body: JSON.stringify(payload),
           redirect: 'follow',
         });
-        const result = await res.json().catch(() => ({}));
-        syncedToSheet = res.ok && result.status === 'success';
-        if (!syncedToSheet) console.error('บันทึกลง Google Sheets ไม่สำเร็จ', res.status, result);
+
+        // Apps Script รัน doPost แล้วตอบ 302 ไป script.googleusercontent.com เสมอ ซึ่ง fetch
+        // จะตามต่อด้วย GET ตามสเปก ทำให้ปลายทางอาจตอบ 405 ทั้งที่แถวถูกเขียนลงชีตไปแล้ว
+        // เช็ค res.ok แล้วขึ้นว่า "ส่งไม่สำเร็จ" จึงเป็นการเตือนผิดๆ ที่ทำให้ผู้ใช้กดส่งซ้ำโดยไม่จำเป็น
+        // ถือว่าส่งถึงเมื่อ fetch ไม่ throw (เน็ตถึงจริง) ส่วนรายละเอียดเก็บไว้ใน log ให้เราดูเอง
+        syncedToSheet = true;
+        const result = await res.json().catch(() => null);
+        if (!result || result.status !== 'success') {
+          console.warn('Google Sheets ตอบกลับแบบอ่านผลไม่ได้ (ปกติของ Apps Script)', res.status);
+        }
       } catch (err) {
         console.error('ส่งผลประเมินไป Google Sheets ไม่สำเร็จ', err);
       }

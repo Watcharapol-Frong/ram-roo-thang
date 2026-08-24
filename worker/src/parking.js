@@ -7,7 +7,7 @@ import {
   getParkingZoneByKey,
   listParkingZones,
   putParkingReport,
-  listParkingReportsForZone,
+  getLatestParkingReport,
   getLastReportedAt,
   setLastReportedAt,
 } from './data.js';
@@ -16,10 +16,11 @@ import { awardParkingReport } from './user.js';
 const RATE_LIMIT_MINUTES = 30;
 const GEOFENCE_RADIUS_METERS = 150;
 const AGGREGATION_WINDOW_MINUTES = 30;
-// รายงานที่พ้น aggregation window ไปแล้วไม่มีประโยชน์อีกต่อไป (ไม่ถูกใช้ตัดสินสถานะ) — ตั้ง TTL
-// ให้ KV ลบทิ้งเองแทนที่จะสะสมถาวรและทำให้ listParkingReportsForZone ยิ่งช้าลงเรื่อยๆ ตามจำนวน
-// report สะสม คูณ 2 ไว้เป็น buffer กัน clock skew / KV eventual consistency
-const PARKING_REPORT_TTL_SECONDS = AGGREGATION_WINDOW_MINUTES * 60 * 2;
+
+// TTL เท่ากับกรอบเวลารวมผลพอดี — พอหมดอายุ KV ลบให้เอง สถานะก็กลับไปใช้ baseline โดยอัตโนมัติ
+// ไม่ต้องกรองวันที่ในโค้ดอีกชั้น (ของเดิมตั้ง 2 เท่าเพราะเก็บทุกใบไว้แล้วค่อยกรองเอง
+// ถ้าคงไว้แบบนั้นตอนนี้ รายงานอายุ 45 นาทีจะยังโชว์เป็นสถานะสด ทั้งที่เลยกรอบไปแล้ว)
+const PARKING_REPORT_TTL_SECONDS = AGGREGATION_WINDOW_MINUTES * 60;
 
 function jsonResponse(body, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -147,13 +148,11 @@ export async function resolveParkingStatus(env, zoneId) {
 
 export async function resolveStatusForZone(env, zone) {
   const zoneId = zone.zone_id;
-  const reports = await listParkingReportsForZone(env, zoneId);
-  const cutoff = Date.now() - AGGREGATION_WINDOW_MINUTES * 60000;
-  const recentReports = reports.filter((r) => new Date(r.reported_at).getTime() >= cutoff);
 
-  if (recentReports.length > 0) {
-    recentReports.sort((a, b) => new Date(b.reported_at) - new Date(a.reported_at));
-    const latest = recentReports[0];
+  // อ่านคีย์เดียว — รายงานที่หมดกรอบเวลาถูก TTL ลบไปเองแล้ว ไม่ต้องกรองวันที่ซ้ำ
+  // (ของเดิม list ทุกรายงานของลานนั้นมาแล้วค่อยกรอง ทั้งที่ใช้แค่ใบล่าสุดใบเดียว)
+  const latest = await getLatestParkingReport(env, zoneId);
+  if (latest) {
     return {
       zone_id: zoneId,
       status: latest.reported_status,

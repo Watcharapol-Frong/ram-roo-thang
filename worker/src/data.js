@@ -1,74 +1,63 @@
-// KV access: baseline data, parking reports, rate limit, exam schedule
-// ดู MVP-SPEC-for-Dev.md §3 สำหรับ data model, docs/adr/0003 สำหรับ schedule (ไม่มี PII)
+// การเข้าถึงข้อมูล
+//
+// ข้อมูลอ้างอิง (อาคาร ลานจอด บริการ ร้านค้า) ไม่ได้อยู่ใน KV แล้ว — bundle เข้า worker ตรงๆ
+//
+// เหตุผล: มันเป็นข้อมูลอ่านอย่างเดียวที่แทบไม่เปลี่ยนทั้งภาคเรียน แต่เดิมทุกครั้งที่เปิดแผนที่
+// ต้องยิง KV list + get รวมกันเกือบ 80 ครั้ง ซึ่ง "list" ของ KV กินโควตาคนละก้อนกับ read ธรรมดา
+// และหมดเร็วมาก — 24 ส.ค. 2026 โควตา list รายวันหมดตอนบ่าย ทำให้ทุก endpoint ที่อ่านข้อมูล
+// อ้างอิงตอบ 500 ทั้งหมด บอทตอบว่าไม่มีข้อมูลอาคารทั้งที่ข้อมูลอยู่ครบ
+//
+// bundle แล้วได้ทั้งความเร็ว (ไม่มี network hop) ความเสถียร (ไม่มีโควตาให้หมด) และค่าใช้จ่าย 0
+// แลกกับการต้อง deploy ใหม่เมื่อแก้ข้อมูล ซึ่งรับได้เพราะข้อมูลชุดนี้นานๆ เปลี่ยนที
+//
+// KV ยังใช้กับของที่เปลี่ยนตลอดและต้องหมดอายุเอง: PARKING_REPORTS, RATE_LIMIT, CHAT_HISTORY_RAM
 
-async function listByPrefix(kv, prefix) {
-  const results = [];
-  let cursor;
-  let listComplete = false;
+import dataset from '../../data/baseline-dataset.json' with { type: 'json' };
 
-  while (!listComplete) {
-    const page = await kv.list({ prefix, cursor });
-    // ดึงค่าของทุก key ในหน้านี้พร้อมกัน (ไม่ await ทีละตัว) กันช้าเป็นเส้นตรงตามจำนวน key
-    const values = await Promise.all(page.keys.map((key) => kv.get(key.name)));
-    for (const raw of values) {
-      if (raw) results.push(JSON.parse(raw));
-    }
-    listComplete = page.list_complete;
-    cursor = page.cursor;
-  }
+const BUILDINGS = dataset.buildings || [];
+const PARKING_ZONES = dataset.parking_zones || [];
+const SERVICES = dataset.services || [];
+const SHOPS = dataset.shops || [];
 
-  return results;
-}
+const byId = (list, key) => new Map(list.map((item) => [item[key], item]));
+const BUILDING_BY_ID = byId(BUILDINGS, 'building_id');
+const ZONE_BY_ID = byId(PARKING_ZONES, 'zone_id');
+const SERVICE_BY_ID = byId(SERVICES, 'service_id');
 
-// --- BASELINE_DATA (MVP-SPEC-for-Dev.md §3.1) ---
+export async function listBuildings() { return BUILDINGS; }
+export async function listParkingZones() { return PARKING_ZONES; }
+export async function listServices() { return SERVICES; }
+export async function listShops() { return SHOPS; }
 
 export async function getBuildingByKey(env, buildingId) {
-  const raw = await env.BASELINE_DATA.get(`building:${buildingId}`);
-  return raw ? JSON.parse(raw) : null;
+  return BUILDING_BY_ID.get(buildingId) || null;
 }
-
 export async function getParkingZoneByKey(env, zoneId) {
-  const raw = await env.BASELINE_DATA.get(`parking_zone:${zoneId}`);
-  return raw ? JSON.parse(raw) : null;
+  return ZONE_BY_ID.get(zoneId) || null;
 }
-
-export async function listBuildings(env) {
-  return listByPrefix(env.BASELINE_DATA, 'building:');
-}
-
-export async function listParkingZones(env) {
-  return listByPrefix(env.BASELINE_DATA, 'parking_zone:');
-}
-
-// --- shops (ร้านค้า/ซุ้ม — ข้อมูลนิ่งที่ทีมสำรวจเอง ดู data/ru_master.geojson) ---
-// ต่างจาก poi ใน docs/adr/0004 ตรงที่ไม่ใช่ของที่ผู้ใช้ส่งเข้ามาเอง จึงไม่ต้องมีระบบ moderation
-// (ADR-0004 ตัด "community POI" ออกเพราะยังไม่มีคนตรวจ ไม่ได้ตัดร้านค้าที่ทีมกรอกเองออกไปด้วย)
-
-export async function listShops(env) {
-  return listByPrefix(env.BASELINE_DATA, 'shop:');
-}
-
-// --- services (บริการ/ขั้นตอนราชการ — team กรอกเอง เหมือน building/parking_zone) ---
-// docs/adr/0004-service-faq-vs-community-poi.md
-
 export async function getServiceByKey(env, serviceId) {
-  const raw = await env.BASELINE_DATA.get(`service:${serviceId}`);
-  return raw ? JSON.parse(raw) : null;
+  return SERVICE_BY_ID.get(serviceId) || null;
 }
 
-export async function listServices(env) {
-  return listByPrefix(env.BASELINE_DATA, 'service:');
-}
-
-// --- PARKING_REPORTS (MVP-SPEC-for-Dev.md §3.2) ---
-
+// --- PARKING_REPORTS ---
+//
+// เก็บ "รายงานล่าสุดของแต่ละลาน" คีย์เดียวต่อลาน ไม่ใช่คีย์ละหนึ่งรายงาน
+// เพราะการคิดสถานะใช้แค่รายงานล่าสุดในกรอบเวลาเท่านั้น เก็บทีละใบแล้วต้อง list ทุกครั้งที่
+// มีคนเปิดแผนที่ ซึ่งเปลืองโควตาที่หมดง่ายที่สุดของ KV โดยไม่ได้ใช้ข้อมูลที่ list มาเลยนอกจากใบล่าสุด
+//
+// TTL = กรอบเวลารวมผล พอหมดอายุก็กลับไปใช้ baseline เองโดยไม่ต้องกรองวันที่ในโค้ด
 export async function putParkingReport(env, report, ttlSeconds) {
-  const key = `report:${report.zone_id}:${report.reported_at}`;
-  await env.PARKING_REPORTS.put(key, JSON.stringify(report), { expirationTtl: ttlSeconds });
+  await env.PARKING_REPORTS.put(`latest:${report.zone_id}`, JSON.stringify(report), { expirationTtl: ttlSeconds });
 }
 
-export async function listParkingReportsForZone(env, zoneId) {
-  return listByPrefix(env.PARKING_REPORTS, `report:${zoneId}:`);
+export async function getLatestParkingReport(env, zoneId) {
+  const raw = await env.PARKING_REPORTS.get(`latest:${zoneId}`);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
 }
 
 // --- RATE_LIMIT (MVP-SPEC-for-Dev.md §3.3) ---
