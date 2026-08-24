@@ -245,39 +245,47 @@ dropped before the user ever sees it.
 arrived — otherwise sending a registration slip late in the term would wipe every room the student had
 typed in by hand.
 
-### Three ways to get a room onto a course
+### Two ways to get a room onto a course
 
 | Way | Where | `room_source` |
 |---|---|---|
 | Photo of the personal exam schedule | LINE chat | `OCR` |
-| Typed in when adding the course | Profile → the room field that appears once a course is picked | `MANUAL` |
-| Typed in afterwards | Profile → swipe a course card left → pencil | `MANUAL` |
+| Typed into the card | Profile → tap the room line on any course card | `MANUAL` |
 
-### Adding a course: pick the code, then optionally the room
+### Adding a course is one tap, and nothing is written to explain it
 
 Nobody remembers all four digits of a course code, and a code that isn't in the announcement is
-rejected on submit — so the field is a picker, not a free-text box. Typing two characters lists
-matching codes with each one's exam date and morning/afternoon period; prefix matches come first
-(typing `LAW1` should lead with `LAW1001`, not something with `LAW1` buried mid-code). Courses already
-in the schedule are tagged **เพิ่มแล้ว** but stay selectable, because re-picking one is how you attach
-a room to it.
+rejected anyway — so the field is a picker, not a free-text box. Typing two characters lists matching
+codes with each one's exam date and morning/afternoon period; prefix matches come first (typing `LAW1`
+leads with `LAW1001`, not something with `LAW1` buried mid-code).
 
-**Only the course code is required, and the form shows that rather than explaining it.** The room
-field doesn't exist until a course is picked; then it appears labelled with that course code and an
-**ไม่บังคับ** tag, focus moves into it, and the placeholder says you can press เพิ่ม without it. A
-permanently visible second field would read as two things to fill in, when at registration time
-nobody knows their room yet.
+**Tapping a suggestion saves it immediately.** There is no add button and no confirm step: choosing a
+specific course from a list is already a deliberate act, and the button only stood between the user
+and the thing they had just chosen. The input clears and keeps focus, so the keyboard never drops and
+the next course can be typed straight away — which is the actual job when copying nine courses off a
+registration slip.
 
-The room applies only when a single course code is entered. Pasting several at once hides the field
-and clears anything typed in it, rather than stamping one room onto every course in the paste.
+The one exception is pasting several codes at once, where tapping can't express "all of these". Then a
+button appears labelled with a bare count (`เพิ่ม 9`) and disappears again afterwards.
 
-Editing and deleting both live behind a left swipe on the card, which reveals a pencil and a trash
-button. The card face itself carries only **Go** — the one thing anyone taps in a hurry — so nothing
-competes with it. The pencil opens an inline panel with the room field, Save, and Close; opening it
-closes the swipe so the action strip doesn't sit behind the panel. Saving an empty room field clears
-the room rather than being rejected, so a typo can be undone.
+### The card is the feedback, and the place to type the room
 
-A swipe is invisible until someone tells you it's there, so one line of hint text sits above the list.
+Every outcome ends the same way: **the relevant card flashes green** and the list scrolls to it. New
+course, a course that was already there, a room saved — one signal, no sentence explaining which of
+those just happened, because the card that lit up already says it. A failed save shakes the card in
+red instead.
+
+The room line on each card is a button. Tapping it turns that line into an input in place — same
+position, no panel, no jump — and Enter or tapping away saves it; Esc cancels. Empty saves as cleared,
+so a typo can be undone. It is the same control whether a room exists yet or not, so there is nothing
+to learn twice.
+
+The card face carries only **Go**. Swiping left reveals delete, and only delete. On a device's first
+visit the top card slides itself open and snaps back once, which teaches the gesture without a line of
+hint text under the form.
+
+Toasts survive in exactly two cases, both of which leave nothing visible on screen: every pasted code
+was rejected, and some of a pasted batch were skipped.
 
 **Nothing is saved without confirmation.** Results go into `room_import_drafts` (30-minute TTL) and a
 Flex card with Save/Cancel buttons. OCR can be wrong, and wrong here means someone walks to the wrong
