@@ -1,27 +1,27 @@
--- ร้านค้าแลกเหรียญ
+-- Coin redemption store.
 --
--- รายละเอียดสินค้าอยู่ในตาราง ไม่ฮาร์ดโค้ดในโค้ด เพราะหน้าแอดมินจะมาแก้ทีหลัง
--- และช่วง beta ต้องปรับราคา/ปิดขายได้โดยไม่ต้อง deploy ใหม่
+-- Item details live in the table rather than hardcoded, because an admin page will edit them later
+-- and during the beta we need to change prices or pull an item without redeploying.
 CREATE TABLE IF NOT EXISTS shop_items (
   id          TEXT PRIMARY KEY,
   name        TEXT NOT NULL,
   description TEXT,
   price_coins INTEGER NOT NULL,
-  stock       INTEGER,                       -- NULL = ไม่จำกัดจำนวน
+  stock       INTEGER,                       -- NULL = unlimited stock
   active      INTEGER NOT NULL DEFAULT 1,
   sort_order  INTEGER NOT NULL DEFAULT 0,
   created_at  TEXT NOT NULL,
   updated_at  TEXT NOT NULL
 );
 
--- การแลกแต่ละครั้ง — ผูกกับแถวใน coin_ledger ผ่าน ref_id = redemptions.id
--- status: PENDING (รอส่งของ) -> FULFILLED (ส่งแล้ว) | CANCELLED (คืนเหรียญแล้ว)
+-- One row per redemption, linked to its coin_ledger entry through ref_id = redemptions.id.
+-- status: PENDING (awaiting delivery) -> FULFILLED (delivered) | CANCELLED (coins refunded)
 CREATE TABLE IF NOT EXISTS redemptions (
   id           TEXT PRIMARY KEY,
   user_id      TEXT NOT NULL REFERENCES users(user_id),
   item_id      TEXT NOT NULL REFERENCES shop_items(id),
-  item_name    TEXT NOT NULL,                -- เก็บชื่อ ณ เวลาที่แลก เผื่อสินค้าถูกแก้ชื่อทีหลัง
-  price_coins  INTEGER NOT NULL,             -- เก็บราคา ณ เวลาที่แลกด้วยเหตุผลเดียวกัน
+  item_name    TEXT NOT NULL,                -- name as of redemption time, in case the item is renamed later
+  price_coins  INTEGER NOT NULL,             -- price as of redemption time, for the same reason
   status       TEXT NOT NULL DEFAULT 'PENDING',
   created_at   TEXT NOT NULL,
   fulfilled_at TEXT

@@ -1,10 +1,11 @@
--- ผู้ใช้ + บัญชีเหรียญ (แทนที่ USER_PROFILES KV เดิม)
+-- Users and their coin balance (replaces the old USER_PROFILES KV namespace).
 --
--- ledger คือความจริงของยอดเหรียญ ส่วน users.coins เป็นยอดสรุปที่คำนวณไว้ล่วงหน้าเพื่อไม่ต้อง
--- SUM ทุกครั้งที่เปิดหน้าโปรไฟล์ ถ้าสองอันไม่ตรงกันเมื่อไรให้เชื่อ ledger แล้วคำนวณใหม่
+-- The ledger is the source of truth for the balance; users.coins is a materialized total so we
+-- don't SUM the whole ledger every time someone opens their profile. If the two ever disagree,
+-- trust the ledger and recalculate.
 
 CREATE TABLE IF NOT EXISTS users (
-  user_id     TEXT PRIMARY KEY,          -- LINE userId เท่านั้น ไม่เก็บ PII อื่น
+  user_id     TEXT PRIMARY KEY,          -- LINE userId only, no other PII
   coins       INTEGER NOT NULL DEFAULT 0,
   created_at  TEXT NOT NULL,
   updated_at  TEXT NOT NULL
@@ -13,26 +14,28 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS coin_ledger (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id     TEXT NOT NULL REFERENCES users(user_id),
-  delta       INTEGER NOT NULL,          -- บวก = ได้รับ, ลบ = ใช้ไป
+  delta       INTEGER NOT NULL,          -- positive = earned, negative = spent
   reason      TEXT NOT NULL,             -- PARKING_REPORT | FEEDBACK | SAVE_CAR | SHOP_REDEEM
-  ref_id      TEXT NOT NULL,             -- ตัวกันรับซ้ำ (ดู UNIQUE ข้างล่าง)
-  balance_after INTEGER NOT NULL,        -- ยอดหลังรายการนี้ ไว้ตรวจย้อนหลังว่ายอดเพี้ยนตรงไหน
+  ref_id      TEXT NOT NULL,             -- double-claim guard (see the UNIQUE index below)
+  balance_after INTEGER NOT NULL,        -- balance after this entry, so a drift can be traced back
   created_at  TEXT NOT NULL
 );
 
--- หัวใจของการกันรับซ้ำ — ให้ฐานข้อมูลปฏิเสธเอง ไม่ต้องเขียน if ในโค้ดแล้วหวังว่าจะครบทุกทาง
---   FEEDBACK       ref_id = 'once'        -> ครั้งเดียวตลอดชีพ
---   SAVE_CAR       ref_id = '2026-08-23'  -> วันละครั้ง (วันที่ตามเวลาไทย)
---   PARKING_REPORT ref_id = id ของรายงาน  -> 1 รายงาน 1 ครั้ง
---   SHOP_REDEEM    ref_id = id การแลก     -> กดรัวก็หักครั้งเดียว
+-- This is what prevents double claims: the database rejects them, rather than an if-statement in
+-- application code that we hope covers every entry point.
+--   FEEDBACK       ref_id = 'once'         -> claimable once, ever
+--   SAVE_CAR       ref_id = '2026-08-23'   -> once per day (Bangkok date)
+--   PARKING_REPORT ref_id = report id      -> one report, one grant
+--   SHOP_REDEEM    ref_id = redemption id  -> tapping repeatedly still deducts once
 CREATE UNIQUE INDEX IF NOT EXISTS idx_coin_ledger_dedupe
   ON coin_ledger (user_id, reason, ref_id);
 
 CREATE INDEX IF NOT EXISTS idx_coin_ledger_user_time
   ON coin_ledger (user_id, created_at DESC);
 
--- ตารางสอบที่ผู้ใช้บันทึกไว้ (แทนที่ STUDENT_SCHEDULES KV เดิม)
--- UNIQUE กันเพิ่มวิชาซ้ำ ซึ่งของเดิมบน KV ทำไม่ได้เพราะ key เป็น uuid สุ่มทุกครั้ง
+-- Courses the student saved (replaces the old STUDENT_SCHEDULES KV namespace).
+-- The UNIQUE constraint prevents duplicate courses, which KV could not do because every key was a
+-- freshly generated uuid.
 CREATE TABLE IF NOT EXISTS user_courses (
   id           TEXT PRIMARY KEY,
   user_id      TEXT NOT NULL REFERENCES users(user_id),

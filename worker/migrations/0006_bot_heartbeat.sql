@@ -1,12 +1,13 @@
--- ร่องรอยว่าบอท "ทำงานจริง" ครั้งล่าสุดเมื่อไหร่ — คนละเรื่องกับ "worker ตอบ HTTP ได้"
+-- Evidence that the bot actually did work recently, which is a different question from whether the
+-- worker answers HTTP.
 --
--- เคสที่ทำให้ต้องมีตารางนี้: secret หายไปจาก worker แล้ว webhook ตอบ 401/500 ทุกใบ
--- ตัว worker ยัง healthy ทุกอย่าง แต่บอทเงียบสนิท — ping เฉยๆ จับไม่ได้ ต้องดูว่ามี event
--- จาก LINE เข้ามาแล้วประมวลผลจบครั้งล่าสุดเมื่อไหร่ถึงจะรู้
+-- The incident that made this necessary: the secrets vanished from the worker, so every webhook was
+-- answered 401/500. The worker itself looked perfectly healthy while the bot was completely silent.
+-- A plain ping cannot catch that; you have to know when a LINE event was last processed end to end.
 --
--- หนึ่งแถวต่อชนิดเหตุการณ์ (webhook / cron / webhook_error) ไม่ใช่หนึ่งแถวต่อครั้ง
--- เพราะเราต้องการแค่ "ล่าสุดเมื่อไหร่" ไม่ได้ต้องการ log ย้อนหลัง และ append ทุก event
--- คือเขียน D1 ทุกข้อความที่ผู้ใช้พิมพ์เข้ามาโดยไม่ได้ใช้ประโยชน์
+-- One row per event kind (webhook / cron / webhook_error), not one row per occurrence, because we
+-- only need "when did this last happen". Appending every event would mean writing to D1 for every
+-- message anyone sends, for data we never read back.
 CREATE TABLE IF NOT EXISTS bot_heartbeat (
   kind    TEXT PRIMARY KEY,
   last_at TEXT NOT NULL,

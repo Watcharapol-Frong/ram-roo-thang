@@ -1,9 +1,11 @@
-// เก็บคำถามที่ระบบตอบไม่ได้ ไว้ดูว่าควรเติมข้อมูลอะไรต่อ
+// Records questions the system could not answer, so we can see what data is still missing.
 //
-// ที่ผ่านมาเรารู้ว่าบอทตอบไม่ได้ก็ต่อเมื่อมีคนแคปหน้าจอมาให้ดูเท่านั้น ซึ่งแปลว่าเคสที่ผู้ใช้
-// เจอแล้วเงียบๆ เลิกใช้ไป เราไม่มีทางรู้เลย ตารางนี้ทำให้เห็นเองโดยไม่ต้องรอ feedback
+// Until now we only learned the bot had failed when someone sent us a screenshot, which means
+// every user who hit a gap and quietly gave up was invisible to us. This surfaces the gaps on
+// their own, without waiting for feedback.
 //
-// เขียนเฉพาะตอนตอบไม่ได้จริงๆ ปริมาณจึงน้อย ไม่กระทบโควตา D1 (ต่างจากการ log ทุกข้อความ)
+// Only written when we genuinely had no answer, so the volume stays small and D1 quota is not
+// a concern (unlike logging every message).
 
 import { maskPII } from './ai.js';
 
@@ -24,15 +26,15 @@ export async function logUnanswered(env, { message, intent = null, focusId = nul
       new Date().toISOString()
     ).run();
   } catch (err) {
-    // ตกบันทึกไม่ใช่เหตุผลที่จะทำให้ผู้ใช้ไม่ได้รับคำตอบ — กลืนทิ้งเสมอ
+        // Failing to record this is never a reason to withhold an answer — always swallow it.
     console.error('logUnanswered ไม่สำเร็จ', err);
   }
 }
 
-// GET /api/admin/unanswered?limit=100 — ต้องมี x-admin-token
+// GET /api/admin/unanswered?limit=100 — requires x-admin-token
 //
-// จัดกลุ่มตามข้อความที่ซ้ำกันให้เลย เพราะสิ่งที่อยากรู้คือ "คำถามแบบไหนถูกถามบ่อยแล้วเราตอบไม่ได้"
-// ไม่ใช่รายการดิบเรียงตามเวลา
+// Grouped by identical text on purpose: what we want to know is "which kind of question keeps
+// coming up that we cannot answer", not a raw feed ordered by time.
 export async function handleAdminUnanswered(request, env) {
   const token = request.headers.get('x-admin-token');
   if (!env.ADMIN_TOKEN || token !== env.ADMIN_TOKEN) {

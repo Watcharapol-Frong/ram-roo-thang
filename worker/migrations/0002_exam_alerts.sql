@@ -1,14 +1,15 @@
--- บันทึกว่าเคยส่งแจ้งเตือนสอบไปแล้ว
+-- Record of exam alerts already sent.
 --
--- Cron อาจถูกเรียกซ้ำ (Cloudflare ไม่รับประกัน exactly-once) และเรายิงเองได้จาก endpoint ทดสอบด้วย
--- ถ้าไม่กันไว้ผู้ใช้จะโดนข้อความเดิมซ้ำ ซึ่งนอกจากน่ารำคาญแล้วยังกิน quota ข้อความของ LINE OA ฟรีๆ
--- ใช้วิธีเดียวกับ coin_ledger คือให้ UNIQUE ปฏิเสธเอง ไม่ต้องเขียน if เช็ค
+-- Cloudflare crons are not exactly-once, and we can also fire the job by hand from the admin
+-- endpoint. Without this guard a student would get the same message twice, which is annoying and
+-- burns the LINE Official Account's limited message quota for nothing.
+-- Same approach as coin_ledger: let UNIQUE reject the duplicate instead of checking in code.
 CREATE TABLE IF NOT EXISTS exam_alerts_sent (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id    TEXT NOT NULL,
-  exam_date  TEXT NOT NULL,          -- วันสอบที่เตือนถึง (YYYY-MM-DD)
+  exam_date  TEXT NOT NULL,          -- the exam date being announced (YYYY-MM-DD)
   kind       TEXT NOT NULL,          -- DAY_BEFORE
-  courses    TEXT NOT NULL,          -- รหัสวิชาที่อยู่ในข้อความ คั่นด้วย , ไว้ตรวจย้อนหลัง
+  courses    TEXT NOT NULL,          -- comma-separated course codes in the message, for auditing
   sent_at    TEXT NOT NULL,
   UNIQUE (user_id, exam_date, kind)
 );

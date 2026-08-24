@@ -1,5 +1,5 @@
 // GET /api/building?building_id=..., GET /api/buildings
-// MVP-SPEC-for-Dev.md §6.3-6.4 — เพิ่มหลังจากฉบับแรก เพราะ LIFF (browser) อ่าน Cloudflare KV ตรงๆ ไม่ได้
+// MVP-SPEC-for-Dev.md §6.3-6.4 — added after the first draft, because the LIFF page runs in a browser
 
 import { getBuildingByKey, getParkingZoneByKey, listBuildings } from './data.js';
 import { resolveStatusForZone } from './parking.js';
@@ -20,12 +20,12 @@ export async function handleGetBuilding(request, env) {
 
   const building = await getBuildingByKey(env, buildingId);
   if (!building) {
-    // MVP-SPEC §8: building_id ไม่พบ -> ตอบสุภาพ อย่า hallucinate
+        // MVP-SPEC §8: unknown building_id -> answer politely, never hallucinate
     return jsonResponse({ error: 'ไม่พบข้อมูลอาคารนี้' }, 404);
   }
 
-  // อ่าน zone ครั้งเดียวแล้วส่ง object ต่อให้ resolveStatusForZone (เดิมเรียก resolveParkingStatus
-  // ด้วย zoneId ทำให้ BASELINE_DATA ถูกอ่านซ้ำสองรอบต่อ 1 request)
+    // Read the zone once and pass the object to resolveStatusForZone. The old code passed a zoneId,
+    // which made BASELINE_DATA get read twice per request.
   const zoneId = building.nearest_parking_zone_id;
   const parkingZone = zoneId ? await getParkingZoneByKey(env, zoneId) : null;
   const parkingStatus = parkingZone ? await resolveStatusForZone(env, parkingZone) : null;

@@ -1,6 +1,6 @@
 const EARTH_RADIUS_METERS = 6371000;
 
-// Haversine formula — ใช้คำนวณระยะทางเดียวกับที่ทำ Navigation (CONTEXT.md "Geofence Validation")
+// Haversine formula — the same distance calculation navigation uses (CONTEXT.md "Geofence Validation")
 export function haversineDistanceMeters(lat1, lng1, lat2, lng2) {
   const toRad = (deg) => (deg * Math.PI) / 180;
   const dLat = toRad(lat2 - lat1);

@@ -1,12 +1,12 @@
--- จำกัดจำนวนครั้งที่แลกได้ต่อคน
+-- How many times one person may redeem an item.
 --
--- สติกเกอร์ตั้งไว้ 1 เพราะเป็นของจริงที่มีต้นทุนต่อชิ้น ปล่อยให้แลกซ้ำได้คือเปิดช่องให้คนเดียว
--- กวาดของไปหมด NULL = ไม่จำกัด สำหรับของที่แจกได้เรื่อยๆ ในอนาคต
+-- The sticker is set to 1 because it is a real item with a per-unit cost; allowing repeats would let
+-- one person take the whole stock. NULL means unlimited, for future items we can give away freely.
 ALTER TABLE shop_items ADD COLUMN max_per_user INTEGER;
 
 UPDATE shop_items SET max_per_user = 1, updated_at = '2026-08-24T00:00:00.000Z'
  WHERE id = 'STICKER_LINE_01';
 
--- ข้อมูลที่ต้องส่งให้ผู้ใช้ตอนจัดของเสร็จ (เช่นลิงก์รับสติกเกอร์)
--- เก็บแยกจาก item เพราะเป็นค่าเฉพาะรายการแลก ไม่ใช่ค่าของสินค้า
+-- What to send the student once the item is fulfilled (a sticker claim link, for example).
+-- Kept on the redemption rather than the item because it is specific to that one redemption.
 ALTER TABLE redemptions ADD COLUMN fulfillment_note TEXT;

@@ -1,15 +1,16 @@
-// จับ "เจตนาของคำถาม" แยกออกจาก "เรื่องที่ถาม"
+// Works out what a question is asking *for*, separately from what it is asking *about*.
 //
-// ปัญหาที่แก้: retrieveContext() ใน ai.js เทียบเฉพาะชื่อเรื่อง (alias) กับข้อความปัจจุบัน
-// คำถามต่อยอดอย่าง "ขอขั้นตอนการยื่น" ไม่มีชื่อเรื่องอยู่ในประโยคเลย จึง match ไม่ได้สักครั้ง
-// แล้วตกไป AI ซึ่งไม่เคยได้รับ steps ติดไปด้วย -> ตอบว่า "ยังไม่มีข้อมูลในระบบ" ทั้งที่มีครบ
+// The problem this fixes: retrieveContext() in ai.js only matches topic names (aliases)
+// against the current message. A follow-up like "what are the steps to submit it" contains no
+// topic name at all, so it never matched, fell through to the AI without the steps attached,
+// and the AI answered "no data in the system" while the data was sitting right there.
 //
-// คำถามต่อยอดของงานราชการมีไม่กี่แบบ และแยกออกด้วย keyword ล้วนได้แม่นกว่าให้ LLM เดา
-// ทั้งเร็วกว่า ไม่เสียโควตา และไม่มีทางแต่งคำตอบ — เอา intent ตัวนี้ไปคู่กับเรื่องที่จำไว้
-// (ดู conversation.js) แล้วตอบจากข้อมูลจริงตรงๆ
+// Follow-up questions about paperwork come in only a few shapes, and keywords separate them
+// more reliably than asking an LLM to guess — faster, no quota, and no way to invent an
+// answer. Pair this intent with the remembered topic (conversation.js) and answer from data.
 //
-// เรียงจากเจาะจงที่สุดไปกว้างที่สุด ตัวแรกที่ match ชนะ — "ต้องเตรียมเอกสารอะไรไปยื่นบ้าง"
-// ต้องได้ DOCUMENTS ไม่ใช่ STEPS ทั้งที่มีคำว่า "ยื่น" อยู่ด้วย
+// Ordered most specific first; the first match wins. "which documents do I need to submit"
+// must come out as DOCUMENTS, not STEPS, even though it contains the word "submit".
 const INTENT_PATTERNS = [
   ['DOCUMENTS', /เตรียมอะไร|ต้องเตรียม|ต้องใช้อะไร|ใช้อะไรบ้าง|เอกสาร|หลักฐาน|สำเนา|พกอะไร|เตรียมตัว|ต้องมีอะไร/],
   ['FEE',       /ค่าใช้จ่าย|ค่าธรรมเนียม|กี่บาท|ราคา|เสียเงิน|เสียค่า|ฟรีไหม|ฟรีมั้ย|จ่ายเท่าไหร่|เท่าไหร่/],
@@ -21,7 +22,7 @@ const INTENT_PATTERNS = [
   ['STEPS',     /ขั้นตอน|ทำยังไง|ทำอย่างไร|ยื่นยังไง|ยื่นอย่างไร|ขอยังไง|ขออย่างไร|สมัครยังไง|วิธีการ|วิธีทำ|วิธีขอ|กระบวนการ|ต้องทำอะไร|เริ่มยังไง|ทำไงต่อ|แล้วไงต่อ/],
 ];
 
-// รายละเอียดต่อยอดที่ผู้ใช้ถามได้ ใช้ชื่อเดียวกันทั้งระบบ (intent -> field ใน serviceinfo.js)
+// The follow-up details a user can ask for. Same names throughout (intent -> field in serviceinfo.js).
 export const FOLLOW_UP_INTENTS = INTENT_PATTERNS.map(([intent]) => intent);
 
 export function detectFollowUpIntent(message) {
@@ -33,8 +34,8 @@ export function detectFollowUpIntent(message) {
   return null;
 }
 
-// คำถามสั้นๆ ที่แปลว่า "เอาต่อจากเมื่อกี้" โดยไม่ได้ระบุว่าอยากรู้ด้านไหน
-// ("มีอะไรอีกไหม", "ขอรายละเอียด") — ถือเป็นการต่อยอดของเรื่องเดิม ให้ตอบด้วยข้อมูลชุดเต็ม
+// Short questions meaning "carry on from what we were just discussing" without naming which
+// aspect — treated as a follow-up on the same topic, answered with the full summary.
 const CONTINUATION = /^(ขอ)?(รายละเอียด|ข้อมูล)(เพิ่ม|เติม)?|มีอะไรอีก|อย่างอื่น|ต่อ$|แล้วไง|เพิ่มเติม/;
 
 export function isContinuation(message) {
