@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const { resultCard, row, menuCard, FLEX_TOKENS } = await import(ROOT+'/worker/src/flex.js');
 const { statusFlexMessage } = await import(ROOT+'/worker/src/health.js');
-const { generateMainMenuFlex, generateRoomConfirmFlex } = await import(ROOT+'/worker/src/line.js');
+const { generateMainMenuFlex, generateRoomConfirmFlex, generateScheduleFlexMessage } = await import(ROOT+'/worker/src/line.js');
 
 const SIZE=['xxs','xs','sm','md','lg','xl','xxl','3xl','4xl','5xl','full'];
 const MARGIN=['none','xs','sm','md','lg','xl','xxl'];
@@ -71,12 +71,7 @@ check('การ์ดอาคาร (ไม่มีลานจอด)', resu
   actions:[{label:'เริ่มต้นเดินทาง',action:{type:'uri',label:'เริ่มต้นเดินทาง',uri:'https://liff.line.me/x'}}],
   altText:'ข้อมูลอาคารทดสอบ'}));
 
-check('การ์ดตารางสอบ', resultCard({
-  title:'ตารางสอบของคุณ', badge:'ตารางสอบ', headerColor:FLEX_TOKENS.blueSoft,
-  hero:'บันทึกวิชาที่จะสอบ', heroNote:'ใส่รหัสวิชา ระบบจะดึงวันและคาบสอบจากประกาศให้เอง',
-  rows:[row('วันสอบ','ดึงจากประกาศอัตโนมัติ'),row('ห้องสอบ','ส่งรูปตารางสอบให้อ่าน'),row('แจ้งเตือน','ล่วงหน้า 1 วัน')],
-  actions:[{label:'เปิดตารางสอบ',action:{type:'uri',label:'เปิดตารางสอบ',uri:'https://liff.line.me/x?mode=profile'}}],
-  altText:'บันทึกวิชาสอบ'}));
+check('การ์ดตารางสอบ (ของจริง)', generateScheduleFlexMessage('https://liff.line.me/2011201463-2rdSwrwB'));
 
 // การ์ดยืนยันผลอ่านเอกสาร — สร้างจากฟังก์ชันจริง ครอบทุกแบบของเอกสารที่รับได้
 // (ใบลงทะเบียนไม่มีห้องเลย / ตารางสอบมีห้องครบ / อ่านได้บางส่วน / ยาวเกินจนต้องตัด)

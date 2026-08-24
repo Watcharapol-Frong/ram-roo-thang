@@ -1859,6 +1859,9 @@ function renderScheduleForm(container, userId) {
         />
       </form>
 
+      <!-- ปัดซ้ายเป็นท่าที่มองไม่เห็นถ้าไม่มีใครบอก — เขียนไว้บรรทัดเดียวดีกว่าปล่อยให้คนหาปุ่มแก้ไขไม่เจอ -->
+      <p class="schedule-swipe-hint">ปัดการ์ดไปทางซ้ายเพื่อแก้ไขห้องสอบหรือลบวิชา</p>
+
       <div id="exam-table-container">
         <div class="schedule-empty">กำลังโหลดตารางสอบ...</div>
       </div>
@@ -2012,7 +2015,15 @@ async function refreshScheduleList(userId) {
       const info = getCourseExamInfo(s.course_code, s);
       return `
         <div class="exam-swipe-wrapper" id="row-${escapeXml(s.schedule_id)}">
+          <!-- ปัดการ์ดไปทางซ้ายเพื่อเปิดสองปุ่มนี้ — แถวหน้าเหลือแค่ปุ่ม Go อย่างเดียว
+               ให้สายตาไปอยู่ที่ "ไปห้องสอบ" ซึ่งเป็นสิ่งที่คนกดบ่อยที่สุดในหน้านี้ -->
           <div class="exam-behind-actions">
+            <button type="button" class="btn-edit-circle" data-id="${escapeXml(s.schedule_id)}" title="แก้ไขห้องสอบ" aria-label="แก้ไขห้องสอบ">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 20h9"></path>
+                <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path>
+              </svg>
+            </button>
             <button type="button" class="btn-del-circle" data-id="${escapeXml(s.schedule_id)}" data-code="${escapeXml(s.course_code)}" title="ลบวิชานี้" aria-label="ลบ">
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M3 6h18"></path>
@@ -2031,12 +2042,6 @@ async function refreshScheduleList(userId) {
               <button type="button" class="btn-go-circle" data-dest="${escapeXml(info.building_id)}" title="นำทางไปห้องสอบ">
                 <span>Go</span>
               </button>` : ''}
-              <button type="button" class="btn-edit-circle" data-id="${escapeXml(s.schedule_id)}" title="แก้ไขห้องสอบ" aria-label="แก้ไขห้องสอบ">
-                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M12 20h9"></path>
-                  <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path>
-                </svg>
-              </button>
             </div>
           </div>
 
@@ -2053,7 +2058,7 @@ async function refreshScheduleList(userId) {
             />
             <div class="exam-edit-actions">
               <button type="button" class="btn-room-save" data-id="${escapeXml(s.schedule_id)}" data-code="${escapeXml(s.course_code)}">บันทึกห้องสอบ</button>
-              <button type="button" class="btn-row-delete" data-id="${escapeXml(s.schedule_id)}" data-code="${escapeXml(s.course_code)}">ลบวิชานี้</button>
+              <button type="button" class="btn-edit-close" data-id="${escapeXml(s.schedule_id)}">ปิด</button>
             </div>
           </div>
         </div>
@@ -2095,6 +2100,8 @@ async function refreshScheduleList(userId) {
         if (activeSwiped && activeSwiped !== row) {
           activeSwiped.classList.remove('is-swiped');
         }
+        // ปัดใบใหม่ = เลิกสนใจใบที่กำลังแก้อยู่ ปิดแผงทิ้งไม่ให้ค้างอยู่หลายใบ
+        container.querySelectorAll('.exam-edit-panel').forEach((panel) => { panel.hidden = true; });
         row.classList.add('is-swiped');
         activeSwiped = row;
       }
@@ -2156,7 +2163,7 @@ async function refreshScheduleList(userId) {
     });
   });
 
-  // ปุ่มดินสอ — เปิด/ปิดแผงแก้ไขของการ์ดใบนั้น
+  // ปุ่มดินสอ (อยู่หลัง swipe) — เปิดแผงแก้ไขของการ์ดใบนั้น
   container.querySelectorAll('.btn-edit-circle').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -2168,14 +2175,21 @@ async function refreshScheduleList(userId) {
         if (other !== panel) other.hidden = true;
       });
 
-      panel.hidden = !panel.hidden;
-      if (!panel.hidden) {
-        // แผงเปิดค้างพร้อมกับแถวที่ถูก swipe ค้างไว้จะเห็นแถบแดงยาวลงมาทั้งใบ ปิดทิ้งไปเลย
-        const content = panel.parentElement.querySelector('.exam-item-content');
-        if (content) content.classList.remove('is-swiped');
-        const input = panel.querySelector('.exam-room-input');
-        if (input) input.focus();
-      }
+      panel.hidden = false;
+      // ปิดสถานะ swipe ทันที ไม่งั้นแถบปุ่มด้านหลังจะค้างยาวลงมาคลุมแผงแก้ไขทั้งใบ
+      const content = panel.parentElement.querySelector('.exam-item-content');
+      if (content) content.classList.remove('is-swiped');
+      const input = panel.querySelector('.exam-room-input');
+      if (input) input.focus();
+    });
+  });
+
+  // ปิดแผงโดยไม่บันทึก
+  container.querySelectorAll('.btn-edit-close').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const panel = document.getElementById(`edit-${btn.dataset.id}`);
+      if (panel) panel.hidden = true;
     });
   });
 
@@ -2207,13 +2221,6 @@ async function refreshScheduleList(userId) {
     });
   });
 
-  // ปุ่มลบในแผงแก้ไข — ทางลบที่มองเห็นได้โดยไม่ต้องรู้ว่ามี swipe ซ่อนอยู่
-  container.querySelectorAll('.btn-row-delete').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      deleteCourse(btn.dataset.id, btn.dataset.code);
-    });
-  });
 }
 
 // ซูมออกไกลๆ ป้ายชิปจะทับกันเป็นพืด ซ่อนไปเลยดีกว่า เหลือแต่รูปทรงอาคาร

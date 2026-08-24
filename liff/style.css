@@ -1189,17 +1189,20 @@ body {
   transform: scale(0.95);
 }
 
-/* ปุ่มลบวงกลมสีแดงที่ซ่อนอยู่ด้านหลัง (Slide to reveal) */
+/* ปุ่มแก้ไข + ลบ ที่ซ่อนอยู่ด้านหลัง (Slide to reveal)
+   พื้นหลังเป็นสีกลาง ไม่ใช่สีแดงเหมือนตอนมีแต่ปุ่มลบ — ไม่งั้นแถบทั้งแถบจะอ่านว่า "โซนลบ"
+   ทั้งที่ครึ่งหนึ่งของมันคือปุ่มแก้ไข */
 .exam-behind-actions {
   position: absolute;
   top: 0;
   right: 0;
   bottom: 0;
-  width: 64px;
+  width: 118px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #fee2e2;
+  gap: 10px;
+  background: #eef2f7;
   border-top-right-radius: 14px;
   border-bottom-right-radius: 14px;
   z-index: 1;
@@ -1241,7 +1244,7 @@ body {
 }
 
 .exam-item-content.is-swiped {
-  transform: translateX(-64px);
+  transform: translateX(-118px);
 }
 
 .exam-col-code {
@@ -1291,26 +1294,26 @@ body {
   gap: 6px;
 }
 
-/* ปุ่มดินสอ (แก้ห้องสอบ) — เล็กและเป็น ghost เพราะเป็นการกระทำรอง
-   ถ้าทำใหญ่เท่าปุ่ม Go จะแย่งความสนใจจากปุ่มที่คนกดบ่อยกว่ามาก */
+/* ปุ่มดินสอ (แก้ห้องสอบ) — อยู่หลัง swipe คู่กับปุ่มลบ ขนาดเท่ากันทั้งคู่
+   สีเทาเข้มไม่ใช่สีแดง เพื่อให้แยกออกทันทีว่าอันไหนลบ อันไหนแค่แก้ */
 .btn-edit-circle {
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
-  background: #f1f5f9;
-  color: #64748b;
+  background: #475569;
+  color: #ffffff;
   border: none;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: transform 0.15s, background-color 0.15s, color 0.15s;
+  box-shadow: 0 2px 6px rgba(71, 85, 105, 0.3);
+  transition: transform 0.15s, background-color 0.15s;
 }
 
 .btn-edit-circle:active {
-  transform: scale(0.92);
-  background: #e2e8f0;
-  color: #334155;
+  transform: scale(0.9);
+  background: #334155;
 }
 
 /* ห้องสอบที่ยังว่าง — จางลงให้อ่านออกว่า "ยังไม่มี" ไม่ใช่ข้อมูลจริงที่กรอกไว้แล้ว */
@@ -1359,7 +1362,7 @@ body {
 }
 
 .btn-room-save,
-.btn-row-delete {
+.btn-edit-close {
   flex: 1;
   padding: 9px 12px;
   border: none;
@@ -1386,17 +1389,23 @@ body {
   cursor: not-allowed;
 }
 
-/* ลบเป็นปุ่มโครงสีแดง ไม่ใช่ปุ่มทึบ — ทึบเท่าปุ่มบันทึกเมื่อไหร่ คนจะกดพลาดเมื่อนั้น */
-.btn-row-delete {
+.btn-edit-close {
   flex: 0 0 auto;
   background: #ffffff;
-  color: #dc2626;
-  border: 1.5px solid #fecaca;
+  color: #64748b;
+  border: 1.5px solid var(--border);
 }
 
-.btn-row-delete:active {
-  background: #fee2e2;
+.btn-edit-close:active {
+  background: #f1f5f9;
   transform: scale(0.98);
+}
+
+/* คำใบ้ว่าปัดการ์ดได้ — จางที่สุดในหน้า อ่านเจอตอนกวาดตาหาปุ่มแก้ไขก็พอ */
+.schedule-swipe-hint {
+  margin: 12px 2px 0;
+  font-size: 0.75rem;
+  color: #a0a6b1;
 }
 
 /* ปุ่มนำทางวงกลมสีเขียวเขียนว่า 'Go' */

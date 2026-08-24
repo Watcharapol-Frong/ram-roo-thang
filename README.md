@@ -250,16 +250,19 @@ typed in by hand.
 |---|---|---|
 | Photo of the personal exam schedule | LINE chat | `OCR` |
 | Typed in when adding the course | Profile → the optional room field under the course code | `MANUAL` |
-| Typed in afterwards | Profile → the pencil button on a course card | `MANUAL` |
+| Typed in afterwards | Profile → swipe a course card left → pencil | `MANUAL` |
 
 The room field when adding is deliberately optional and styled lighter than the course-code field —
 most students add courses long before rooms exist. It applies only when a single course code is
 entered; pasting several codes at once ignores it rather than stamping one room onto all of them.
 
-Every course card carries a pencil button that opens an inline panel with the room field, a save
-button, and a delete button. Delete is also still available by swiping the card left, but that gesture
-is invisible until you know it exists — the panel is the discoverable path. Saving an empty room field
-clears the room rather than being rejected, so a typo can be undone.
+Editing and deleting both live behind a left swipe on the card, which reveals a pencil and a trash
+button. The card face itself carries only **Go** — the one thing anyone taps in a hurry — so nothing
+competes with it. The pencil opens an inline panel with the room field, Save, and Close; opening it
+closes the swipe so the action strip doesn't sit behind the panel. Saving an empty room field clears
+the room rather than being rejected, so a typo can be undone.
+
+A swipe is invisible until someone tells you it's there, so one line of hint text sits above the list.
 
 **Nothing is saved without confirmation.** Results go into `room_import_drafts` (30-minute TTL) and a
 Flex card with Save/Cancel buttons. OCR can be wrong, and wrong here means someone walks to the wrong
