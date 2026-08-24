@@ -1820,6 +1820,47 @@ function getCourseExamInfo(courseCode, saved) {
   };
 }
 
+// รหัสวิชาทั้ง 2,865 ตัวเรียงไว้ครั้งเดียว — กรองใหม่ทุกตัวอักษรที่พิมพ์ แต่ไม่ต้อง sort ใหม่ทุกครั้ง
+let courseCodeIndex = null;
+function courseCodes() {
+  if (!courseCodeIndex) {
+    courseCodeIndex = Object.keys((examLookupCache && examLookupCache.courses) || {}).sort();
+  }
+  return courseCodeIndex;
+}
+
+// รหัสที่ผู้ใช้บันทึกไว้แล้ว — ใช้ติดป้ายในรายการแนะนำ ไม่ได้ใช้กรองออก
+// (ยังเลือกซ้ำได้ เพราะการเลือกวิชาที่มีอยู่แล้วคือวิธีเติมห้องสอบให้มันไปในตัว)
+let savedCourseCodes = new Set();
+
+const CODE_SUGGEST_MAX = 8;
+const CODE_SUGGEST_MIN_QUERY = 2;
+
+// ตรงตั้งแต่ตัวแรกมาก่อนเสมอ — พิมพ์ "LAW1" คนคาดหวัง LAW1001 ไม่ใช่วิชาที่บังเอิญมี LAW1 อยู่กลางรหัส
+function matchCourseCodes(query) {
+  const q = String(query).toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (q.length < CODE_SUGGEST_MIN_QUERY) return [];
+
+  const startsWith = [];
+  const contains = [];
+  for (const code of courseCodes()) {
+    if (code.startsWith(q)) startsWith.push(code);
+    else if (code.includes(q)) contains.push(code);
+  }
+  return startsWith.concat(contains).slice(0, CODE_SUGGEST_MAX);
+}
+
+// บรรทัดรองในรายการแนะนำ — บอกวันสอบไปเลยตั้งแต่ตอนเลือก จะได้รู้ทันทีว่าเป็นวิชาที่ตั้งใจหรือเปล่า
+// ย่อคาบเป็น "เช้า/บ่าย" ไม่ใส่เวลาเต็ม เพราะบรรทัดนี้แคบและเวลาเต็มอยู่ในการ์ดด้านล่างอยู่แล้ว
+function examSummaryShort(code) {
+  const value = (examLookupCache && examLookupCache.courses) ? examLookupCache.courses[code] : null;
+  if (!value) return 'คณะจัดสอบเอง';
+  const periods = value.slice(10).split('')
+    .map((p) => (p === 'A' ? 'เช้า' : p === 'B' ? 'บ่าย' : `คาบ ${p}`))
+    .join(' / ');
+  return `${formatThaiExamDate(value.slice(0, 10))} · ${periods}`;
+}
+
 function renderScheduleForm(container, userId) {
   container.innerHTML = `
     <div class="schedule-flat-section">
@@ -1829,35 +1870,52 @@ function renderScheduleForm(container, userId) {
       </div>
       
       <form id="course-add-form" class="course-add-form">
-        <div class="course-input-wrapper">
+        <div class="course-input-shell">
+          <div class="course-input-wrapper">
+            <input
+              type="text"
+              id="course-input"
+              class="course-input"
+              placeholder="พิมพ์รหัสวิชา เช่น LAW1"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="characters"
+              role="combobox"
+              aria-expanded="false"
+              aria-autocomplete="list"
+              aria-controls="course-suggest"
+              required
+            />
+            <button type="submit" id="course-add-btn" class="course-add-btn" aria-label="เพิ่มวิชา">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
+              <span>เพิ่ม</span>
+            </button>
+          </div>
+          <!-- รายการรหัสวิชาที่ตรงกับที่พิมพ์ — จำเป็นเพราะไม่มีใครจำรหัสครบทั้ง 4 หลัก
+               และรหัสที่ไม่มีในประกาศจะถูกปฏิเสธตอนกดเพิ่มอยู่แล้ว เลือกจากรายการจึงพลาดยากกว่าพิมพ์เอง -->
+          <ul id="course-suggest" class="course-suggest" role="listbox" hidden></ul>
+        </div>
+
+        <!-- ห้องสอบโผล่หลังจากเลือกวิชาได้แล้วเท่านั้น
+             เหตุผล: สิ่งที่บังคับมีอย่างเดียวคือรหัสวิชา ถ้าโชว์ช่องห้องค้างไว้ตั้งแต่แรก
+             ฟอร์มจะดูเหมือนมีสองช่องต้องกรอก ทั้งที่ตอนลงทะเบียนยังไม่มีใครรู้ห้องสอบเลย -->
+        <div id="course-room-row" class="course-room-row" hidden>
+          <label class="course-room-label" for="room-input">
+            ห้องสอบของ <strong id="course-room-code"></strong>
+            <span class="course-room-optional">ไม่บังคับ</span>
+          </label>
           <input
             type="text"
-            id="course-input"
-            class="course-input"
-            placeholder="เพิ่มรหัสวิชา เช่น LAW1001"
+            id="room-input"
+            class="course-room-input"
+            placeholder="เช่น VKB 501 — ยังไม่รู้ก็กดเพิ่มได้เลย"
             autocomplete="off"
-            autocorrect="off"
-            autocapitalize="characters"
-            required
+            maxlength="40"
           />
-          <button type="submit" id="course-add-btn" class="course-add-btn" aria-label="เพิ่มวิชา">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-              <line x1="12" y1="5" x2="12" y2="19"></line>
-              <line x1="5" y1="12" x2="19" y2="12"></line>
-            </svg>
-            <span>เพิ่ม</span>
-          </button>
         </div>
-        <!-- ห้องสอบไม่บังคับ และใช้ได้เฉพาะตอนเพิ่มทีละวิชา — วางไว้แถวล่างให้ชัดว่าเป็นของเสริม
-             ไม่ใช่ช่องที่ต้องกรอกก่อนถึงจะกดเพิ่มได้ (มหาวิทยาลัยประกาศห้องทีหลังการลงทะเบียนนาน) -->
-        <input
-          type="text"
-          id="room-input"
-          class="course-room-input"
-          placeholder="ห้องสอบ (ถ้ามี) เช่น VKB 501 — เว้นว่างได้"
-          autocomplete="off"
-          maxlength="40"
-        />
       </form>
 
       <!-- ปัดซ้ายเป็นท่าที่มองไม่เห็นถ้าไม่มีใครบอก — เขียนไว้บรรทัดเดียวดีกว่าปล่อยให้คนหาปุ่มแก้ไขไม่เจอ -->
@@ -1871,8 +1929,99 @@ function renderScheduleForm(container, userId) {
 
   const inputEl = document.getElementById('course-input');
   const roomEl = document.getElementById('room-input');
+  const roomRow = document.getElementById('course-room-row');
+  const roomCodeEl = document.getElementById('course-room-code');
+  const suggestEl = document.getElementById('course-suggest');
   const addForm = document.getElementById('course-add-form');
   const addBtn = document.getElementById('course-add-btn');
+
+  let suggestions = [];
+  let suggestTimer = null;
+
+  // แยกข้อความในช่องเป็นรหัสวิชา — ใช้กฎเดียวกับตอนบันทึกจริง เพื่อให้ "สิ่งที่เห็น" กับ
+  // "สิ่งที่จะถูกบันทึก" ตรงกันเสมอ (วางหลายรหัสพร้อมกันยังทำได้เหมือนเดิม)
+  const parseCodes = (raw) => String(raw || '')
+    .toUpperCase()
+    .split(/[\s,;\n]+/)
+    .map((c) => c.replace(/[^A-Z0-9]/g, ''))
+    .filter((c) => c.length >= 3);
+
+  const closeSuggest = () => {
+    suggestions = [];
+    suggestEl.hidden = true;
+    suggestEl.innerHTML = '';
+    inputEl.setAttribute('aria-expanded', 'false');
+  };
+
+  // แถวห้องสอบขึ้นเฉพาะตอนที่รู้แล้วว่าจะเพิ่มวิชาไหน — ทั้งตอนเลือกจากรายการและตอนพิมพ์รหัสเต็มเอง
+  // ปิดเมื่อไหร่ล้างค่าทิ้งด้วย ไม่งั้นห้องที่พิมพ์ค้างไว้จะไปติดกับวิชาอื่นที่พิมพ์ทีหลัง
+  const syncRoomRow = () => {
+    const table = (examLookupCache && examLookupCache.courses) || {};
+    const codes = parseCodes(inputEl.value);
+    const single = codes.length === 1 && codes[0] in table ? codes[0] : null;
+
+    if (single) {
+      roomCodeEl.textContent = single;
+      roomRow.hidden = false;
+    } else {
+      roomRow.hidden = true;
+      roomEl.value = '';
+    }
+  };
+
+  const renderSuggest = () => {
+    const raw = inputEl.value.trim();
+    // วางมาหลายรหัสพร้อมกันไม่ต้องแนะนำอะไร — ตอนนั้นผู้ใช้ก๊อปรายการมาทั้งชุดแล้ว
+    if (parseCodes(raw).length > 1) return closeSuggest();
+
+    suggestions = matchCourseCodes(raw);
+    const query = raw.toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+    if (query.length < CODE_SUGGEST_MIN_QUERY) return closeSuggest();
+
+    suggestEl.hidden = false;
+    inputEl.setAttribute('aria-expanded', 'true');
+
+    if (!suggestions.length) {
+      suggestEl.innerHTML = `<li class="course-suggest-empty">ไม่พบรหัสที่ขึ้นต้นด้วย ${escapeXml(query)} ในตารางสอบภาค ${escapeXml(examLookupCache ? examLookupCache.term : '')}</li>`;
+      return;
+    }
+
+    suggestEl.innerHTML = suggestions.map((code, i) => `
+      <li role="option">
+        <button type="button" class="course-suggest-item" data-index="${i}">
+          <span class="course-suggest-code">${escapeXml(code)}</span>
+          <span class="course-suggest-meta">${escapeXml(examSummaryShort(code))}</span>
+          ${savedCourseCodes.has(code) ? '<span class="course-suggest-added">เพิ่มแล้ว</span>' : ''}
+        </button>
+      </li>`).join('');
+  };
+
+  const scheduleSuggest = () => {
+    clearTimeout(suggestTimer);
+    suggestTimer = setTimeout(renderSuggest, SEARCH_DEBOUNCE_MS);
+  };
+
+  inputEl.addEventListener('input', () => { scheduleSuggest(); syncRoomRow(); });
+  inputEl.addEventListener('focus', scheduleSuggest);
+
+  // กัน input เสีย focus ตอนแตะรายการ ไม่งั้น blur จะปิดรายการทิ้งก่อนที่ click จะทำงาน
+  suggestEl.addEventListener('mousedown', (e) => e.preventDefault());
+  inputEl.addEventListener('blur', () => setTimeout(closeSuggest, 120));
+
+  // ผูก listener ตัวเดียวไว้ที่รายการ แทนการผูกใหม่ทุกปุ่มทุกครั้งที่พิมพ์ (แบบเดียวกับช่องค้นหาแผนที่)
+  suggestEl.addEventListener('click', (event) => {
+    const btn = event.target.closest('.course-suggest-item');
+    if (!btn) return;
+    const code = suggestions[Number(btn.dataset.index)];
+    if (!code) return;
+
+    inputEl.value = code;
+    closeSuggest();
+    syncRoomRow();
+    // ย้ายเคอร์เซอร์ไปที่ช่องห้องสอบต่อทันที แต่ไม่บังคับให้กรอก — กดเพิ่มได้เลยถ้ายังไม่รู้ห้อง
+    roomEl.focus();
+  });
 
   // ฟังก์ชันเพิ่มวิชา (รองรับทั้งพิมพ์เดี่ยว หลายวิชา หรือ Paste)
   async function addCourses(rawText, rawRoom) {
@@ -1930,7 +2079,9 @@ function renderScheduleForm(container, userId) {
 
     addBtn.disabled = false;
     inputEl.value = '';
-    if (roomEl && roomApplies) roomEl.value = '';
+    roomEl.value = '';
+    roomRow.hidden = true;
+    closeSuggest();
     inputEl.focus(); // โฟกัสรอพิมพ์วิชาถัดไปต่อเนื่องทันที
 
     if (addedCount > 0 || updatedCount > 0) {
@@ -1955,18 +2106,17 @@ function renderScheduleForm(container, userId) {
   // Submit form
   addForm.addEventListener('submit', (e) => {
     e.preventDefault();
-    addCourses(inputEl.value, roomEl ? roomEl.value : '');
+    closeSuggest();
+    addCourses(inputEl.value, roomEl.value);
   });
 
   // กด Enter ในช่องห้องสอบให้ส่งฟอร์มเหมือนกัน — ไม่งั้นกรอกห้องเสร็จแล้วต้องเอื้อมไปกดปุ่ม
-  if (roomEl) {
-    roomEl.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        addCourses(inputEl.value, roomEl.value);
-      }
-    });
-  }
+  roomEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      addCourses(inputEl.value, roomEl.value);
+    }
+  });
 }
 
 async function refreshScheduleList(userId) {
@@ -2005,6 +2155,7 @@ async function refreshScheduleList(userId) {
   }
 
   if (badgeEl) badgeEl.textContent = schedules.length;
+  savedCourseCodes = new Set(schedules.map((s) => s.course_code));
 
   if (schedules.length === 0) {
     container.innerHTML = '<div class="schedule-empty">ยังไม่มีวิชาในตารางสอบ</div>';

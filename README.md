@@ -250,12 +250,26 @@ typed in by hand.
 | Way | Where | `room_source` |
 |---|---|---|
 | Photo of the personal exam schedule | LINE chat | `OCR` |
-| Typed in when adding the course | Profile → the optional room field under the course code | `MANUAL` |
+| Typed in when adding the course | Profile → the room field that appears once a course is picked | `MANUAL` |
 | Typed in afterwards | Profile → swipe a course card left → pencil | `MANUAL` |
 
-The room field when adding is deliberately optional and styled lighter than the course-code field —
-most students add courses long before rooms exist. It applies only when a single course code is
-entered; pasting several codes at once ignores it rather than stamping one room onto all of them.
+### Adding a course: pick the code, then optionally the room
+
+Nobody remembers all four digits of a course code, and a code that isn't in the announcement is
+rejected on submit — so the field is a picker, not a free-text box. Typing two characters lists
+matching codes with each one's exam date and morning/afternoon period; prefix matches come first
+(typing `LAW1` should lead with `LAW1001`, not something with `LAW1` buried mid-code). Courses already
+in the schedule are tagged **เพิ่มแล้ว** but stay selectable, because re-picking one is how you attach
+a room to it.
+
+**Only the course code is required, and the form shows that rather than explaining it.** The room
+field doesn't exist until a course is picked; then it appears labelled with that course code and an
+**ไม่บังคับ** tag, focus moves into it, and the placeholder says you can press เพิ่ม without it. A
+permanently visible second field would read as two things to fill in, when at registration time
+nobody knows their room yet.
+
+The room applies only when a single course code is entered. Pasting several at once hides the field
+and clears anything typed in it, rather than stamping one room onto every course in the paste.
 
 Editing and deleting both live behind a left swipe on the card, which reveals a pencil and a trash
 button. The card face itself carries only **Go** — the one thing anyone taps in a hurry — so nothing
