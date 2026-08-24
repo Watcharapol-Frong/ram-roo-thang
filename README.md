@@ -91,7 +91,8 @@ ram-roo-thang-bot/
 │   ├── migrations/
 │   │   ├── 0001_users_and_coin_ledger.sql
 │   │   ├── 0002_exam_alerts.sql
-│   │   └── 0003_exam_rooms.sql
+│   │   ├── 0003_exam_rooms.sql
+│   │   └── 0004_shop.sql
 │   └── src/
 │       ├── index.js               — router (LINE webhook + /api/*) + CORS
 │       ├── line.js                — signature verify, chat history, Flex Messages, reply
@@ -99,11 +100,12 @@ ram-roo-thang-bot/
 │       ├── data.js                — KV access
 │       ├── user.js                — users, coins, ledger (D1)
 │       ├── schedule.js            — saved courses (D1)
+│       ├── flex.js                — shared Flex card design system (all bot cards build from here)
 │       ├── exam.js                — proactive exam alerts (cron + manual trigger)
 │       ├── examroom.js            — reads exam rooms from a photo (vision model + validation)
 │       ├── parking.js             — parking reports: geofence, rate limit, aggregation
 │       ├── building.js            — building lookup
-│       ├── shop.js                — shop/stall listing
+│       ├── shop.js                — campus shop listing + coin redemption store
 │       └── utils.js               — Haversine distance
 │
 ├── liff/                          — LIFF pages (plain static, no build step)
@@ -148,6 +150,9 @@ Every `/api/*` endpoint has CORS enabled, because the LIFF is always on a differ
 | GET | `/api/user/ledger?user_id=&limit=` | Full coin transaction history |
 | POST | `/api/user/feedback` · `/api/user/save-car` | Claim coins (idempotent) |
 | GET/POST/DELETE | `/api/schedule` | The user's saved courses |
+| GET | `/api/shop/items?user_id=` | Redeemable items + the user's balance |
+| POST | `/api/shop/redeem` | Spend coins on an item |
+| GET | `/api/shop/redemptions?user_id=` | The user's redemption history |
 | POST | `/api/admin/exam-alerts` | Manually trigger exam alerts (requires `x-admin-token`) |
 
 ## LIFF deep links
@@ -366,15 +371,37 @@ the wrong time. Course codes not present in the timetable are now rejected at in
 | Exam schedule dataset | ✅ | 2,865 courses with dates + periods; rooms supplied by students via chat photo OCR |
 | User database + coins | ✅ | D1 + ledger, double-claim prevention enforced by the database |
 | Survey → Google Sheets | ⚠️ | Code is ready but `FEEDBACK_ENDPOINT_URL` is unset, so no responses are collected yet |
-| Shop / spending coins | ❌ | Page is Coming Soon. The spend path is supported in the backend; we just need to decide what's redeemable |
+| Shop / spending coins | ✅ | One item (LINE sticker, 30 coins). Items live in `shop_items` so pricing can change without a deploy; an admin page is still to come |
 | Proactive Exam Alerts (Cron) | ✅ | Day-before push including the exam room when the student has supplied one |
 | Community | ❌ | Not started (ADR-0004 kept it out of the MVP) |
+
+### Load test results (Aug 24, 2026)
+
+200 simulated users running the full journey (open app → map data → profile → add 3 courses →
+claim feedback coins → shop → redeem) against **production**, 40 concurrent:
+
+| | |
+|---|---|
+| Requests | 2,200 |
+| Failures | **0 (0.00%)** |
+| Throughput | 90 req/s |
+| Wall time | 24s |
+
+Slowest endpoint was `GET /api/buildings` (p95 1.8s, max 5.7s) — it does ~36 sequential KV reads.
+Moving that to a static JSON file, like `exam-lookup.json`, is the obvious next optimization.
+
+For context, the target scenario is 200 users spread over 30 minutes ≈ 0.11 users/sec. This test ran
+at 8.2 users/sec — roughly **75× the expected peak** — and still didn't drop a request. D1 writes for
+the whole run were ~1,400 rows against a 100,000/day quota.
+
+Reproduce: `node scripts/loadtest.mjs 200 40` (test users are prefixed `LOADTEST_`; delete them from
+D1 afterwards).
 
 ### Before demo day
 
 - [ ] Set `ADMIN_TOKEN` in `worker/.secrets.env` so the alerts can be demoed manually
 - [ ] Check the LINE OA message quota against the expected beta volume
 - [ ] Set `FEEDBACK_ENDPOINT_URL` after deploying the Google Apps Script
-- [ ] Real load test with 100–200 concurrent users — this has never been done
+- [x] Load test — 200 users × 11 requests against production, 0 failures (see below)
 - [ ] Seed real parking reports before the event (requires people physically checking in)
 - [ ] Prepare a QR code pointing at the LINE OA (not the LIFF directly — users must go through chat first)
