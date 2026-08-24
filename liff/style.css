@@ -1114,10 +1114,6 @@ body {
   cursor: not-allowed;
 }
 
-.course-add-btn[hidden] {
-  display: none;
-}
-
 /* กล่องครอบช่องรหัสวิชา — ต้องเป็น relative เพื่อให้รายการแนะนำลอยทับการ์ดด้านล่างได้
    ถ้าปล่อยให้มันดันเนื้อหาลง รายการวิชาจะกระโดดทุกครั้งที่พิมพ์ */
 .course-input-shell {
@@ -1183,21 +1179,78 @@ body {
   text-overflow: ellipsis;
 }
 
-/* วิชาที่อยู่ในตารางแล้ว — ถูกจางๆ กับทั้งแถวที่หรี่ลง แทนป้ายข้อความ "เพิ่มแล้ว" */
-.course-suggest-item.is-added {
-  opacity: 0.55;
-}
-
-.course-suggest-check {
+.course-suggest-added {
   flex-shrink: 0;
-  font-size: 0.9rem;
+  font-size: 0.66rem;
   font-weight: 700;
   color: #2e7d32;
+  background: #e8f5e9;
+  padding: 3px 7px;
+  border-radius: 999px;
 }
 
 .course-suggest-empty {
   padding: 10px 12px;
   font-size: 0.8rem;
+  color: #a0a6b1;
+}
+
+/* แถวห้องสอบ — โผล่หลังเลือกวิชาแล้วเท่านั้น */
+.course-room-row {
+  margin-top: 10px;
+}
+
+.course-room-row[hidden] {
+  display: none;
+}
+
+.course-room-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 2px 6px;
+  font-size: 0.78rem;
+  color: #718096;
+}
+
+.course-room-label strong {
+  color: #1a202c;
+  font-weight: 800;
+}
+
+/* ป้าย "ไม่บังคับ" ติดกับ label ตรงๆ — เขียนไว้ในที่ที่สายตาอยู่ตอนกำลังจะกรอก
+   ดีกว่าไปอธิบายไว้ใต้ฟอร์มซึ่งไม่มีใครอ่านตอนนั้น */
+.course-room-optional {
+  font-size: 0.66rem;
+  font-weight: 700;
+  color: #8a94a6;
+  background: #f1f5f9;
+  padding: 3px 7px;
+  border-radius: 999px;
+}
+
+/* ช่องห้องสอบตอนเพิ่มวิชา — ไม่บังคับกรอก จึงทำให้เบากว่าช่องรหัสวิชาชัดเจน
+   (ไม่มีกรอบหนา ไม่มีสีเน้น) เพื่อไม่ให้ดูเหมือนช่องที่ต้องกรอกก่อนถึงจะกดเพิ่มได้ */
+.course-room-input {
+  width: 100%;
+  padding: 9px 14px;
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  background: #fbfcfd;
+  font-size: 0.88rem;
+  font-family: inherit;
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+}
+
+.course-room-input:focus {
+  background: #ffffff;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(6, 199, 85, 0.12);
+}
+
+.course-room-input::placeholder {
   color: #a0a6b1;
 }
 
@@ -1250,18 +1303,20 @@ body {
   transform: scale(0.95);
 }
 
-/* ปุ่มลบที่ซ่อนอยู่ด้านหลัง (Slide to reveal) — เหลือปุ่มเดียวแล้ว
-   เพราะห้องสอบแก้ได้ที่บรรทัดในการ์ดโดยตรง ไม่ต้องปัดมาหาปุ่มดินสออีก */
+/* ปุ่มแก้ไข + ลบ ที่ซ่อนอยู่ด้านหลัง (Slide to reveal)
+   พื้นหลังเป็นสีกลาง ไม่ใช่สีแดงเหมือนตอนมีแต่ปุ่มลบ — ไม่งั้นแถบทั้งแถบจะอ่านว่า "โซนลบ"
+   ทั้งที่ครึ่งหนึ่งของมันคือปุ่มแก้ไข */
 .exam-behind-actions {
   position: absolute;
   top: 0;
   right: 0;
   bottom: 0;
-  width: 64px;
+  width: 118px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #fee2e2;
+  gap: 10px;
+  background: #eef2f7;
   border-top-right-radius: 14px;
   border-bottom-right-radius: 14px;
   z-index: 1;
@@ -1303,7 +1358,7 @@ body {
 }
 
 .exam-item-content.is-swiped {
-  transform: translateX(-64px);
+  transform: translateX(-118px);
 }
 
 .exam-col-code {
@@ -1338,49 +1393,12 @@ body {
   font-weight: normal;
 }
 
-/* บรรทัดห้องสอบเป็นปุ่ม — รีเซ็ตหน้าตาปุ่มให้เหมือนข้อความเดิมเป๊ะ
-   แล้วบอกว่าแตะได้ด้วยเส้นประจางๆ ใต้ข้อความ ไม่ต้องมีไอคอนหรือคำว่า "แก้ไข" */
-.exam-room-line {
-  display: block;
-  width: 100%;
-  padding: 0;
-  border: none;
-  background: none;
-  font-family: inherit;
+.exam-location {
   font-size: 0.76rem;
   color: #718096;
-  text-align: left;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  cursor: pointer;
-  border-bottom: 1px dashed transparent;
-}
-
-.exam-room-line:active {
-  color: var(--accent-dark);
-}
-
-.exam-room-line.is-missing {
-  color: #a0a6b1;
-  font-style: italic;
-  border-bottom-color: #dfe4ea;
-  align-self: flex-start;
-  width: auto;
-}
-
-/* ช่องกรอกห้องสอบที่แทนที่บรรทัดเดิมตอนแตะ — สูงเท่าบรรทัดเดิมเพื่อไม่ให้การ์ดกระตุก */
-.exam-room-input-inline {
-  width: 100%;
-  margin: -3px 0;
-  padding: 3px 6px;
-  border: 1.5px solid var(--accent);
-  border-radius: 7px;
-  background: #ffffff;
-  font-family: inherit;
-  font-size: 0.76rem;
-  color: var(--text);
-  outline: none;
 }
 
 .exam-col-action {
@@ -1390,6 +1408,119 @@ body {
   gap: 6px;
 }
 
+/* ปุ่มดินสอ (แก้ห้องสอบ) — อยู่หลัง swipe คู่กับปุ่มลบ ขนาดเท่ากันทั้งคู่
+   สีเทาเข้มไม่ใช่สีแดง เพื่อให้แยกออกทันทีว่าอันไหนลบ อันไหนแค่แก้ */
+.btn-edit-circle {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #475569;
+  color: #ffffff;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(71, 85, 105, 0.3);
+  transition: transform 0.15s, background-color 0.15s;
+}
+
+.btn-edit-circle:active {
+  transform: scale(0.9);
+  background: #334155;
+}
+
+/* ห้องสอบที่ยังว่าง — จางลงให้อ่านออกว่า "ยังไม่มี" ไม่ใช่ข้อมูลจริงที่กรอกไว้แล้ว */
+.exam-location.is-missing {
+  color: #a0a6b1;
+  font-style: italic;
+}
+
+/* แผงแก้ไขในการ์ด (ซ่อนด้วย [hidden] จนกว่าจะกดดินสอ) */
+.exam-edit-panel {
+  position: relative;
+  z-index: 2;
+  background: #f8fafc;
+  border-top: 1px solid #edf2f7;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.exam-edit-panel[hidden] {
+  display: none;
+}
+
+.exam-room-input {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1.5px solid var(--border);
+  border-radius: 9px;
+  background: #ffffff;
+  font-size: 0.88rem;
+  font-family: inherit;
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.exam-room-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(6, 199, 85, 0.12);
+}
+
+.exam-edit-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-room-save,
+.btn-edit-close {
+  flex: 1;
+  padding: 9px 12px;
+  border: none;
+  border-radius: 9px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  transition: transform 0.1s, background-color 0.15s;
+}
+
+.btn-room-save {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.btn-room-save:active {
+  background: var(--accent-dark);
+  transform: scale(0.98);
+}
+
+.btn-room-save:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-edit-close {
+  flex: 0 0 auto;
+  background: #ffffff;
+  color: #64748b;
+  border: 1.5px solid var(--border);
+}
+
+.btn-edit-close:active {
+  background: #f1f5f9;
+  transform: scale(0.98);
+}
+
+/* คำใบ้ว่าปัดการ์ดได้ — จางที่สุดในหน้า อ่านเจอตอนกวาดตาหาปุ่มแก้ไขก็พอ */
+.schedule-swipe-hint {
+  margin: 12px 2px 0;
+  font-size: 0.75rem;
+  color: #a0a6b1;
+}
 
 /* ปุ่มนำทางวงกลมสีเขียวเขียนว่า 'Go' */
 .btn-go-circle {
@@ -1414,73 +1545,6 @@ body {
 .btn-go-circle:active {
   transform: scale(0.92);
   background: var(--accent-dark);
-}
-
-/* --- สัญญาณเดียวของหน้านี้: การ์ดวาบ --- */
-/* ค้างสีเขียวไว้ครึ่งแรกก่อนค่อยจาง — ถ้าเริ่มจางตั้งแต่เฟรมแรก คนที่กำลังมองที่ช่องพิมพ์อยู่
-   จะเหลือบมาไม่ทันเห็นอะไรเลย ทั้งที่นี่คือสัญญาณเดียวที่บอกว่าบันทึกสำเร็จ */
-@keyframes card-flash {
-  0%, 45% { background-color: #c7f0d8; border-color: #5cc98d; }
-  100%    { background-color: #ffffff; border-color: #edf2f7; }
-}
-
-/* พื้นของแถวหน้าต้องวาบด้วย ไม่ใช่แค่ตัว wrapper — .exam-item-content ทึบและซ้อนอยู่ข้างบน
-   (z-index 2 เพราะต้องเลื่อนทับปุ่มลบตอน swipe) ถ้าไม่แตะตัวนี้จะเห็นแค่ขอบเปลี่ยนสี */
-@keyframes card-flash-face {
-  0%, 45% { background-color: #c7f0d8; }
-  100%    { background-color: #ffffff; }
-}
-
-.exam-swipe-wrapper.is-flash .exam-item-content {
-  animation: card-flash-face 1.6s ease-out;
-}
-
-/* รหัสวิชาเข้มขึ้นพร้อมกัน — ตัวที่คนกวาดตาหาคือรหัส ไม่ใช่พื้นการ์ด */
-@keyframes card-flash-code {
-  0%, 45% { color: #16794a; }
-  100%    { color: #1a202c; }
-}
-
-.exam-swipe-wrapper.is-flash .exam-col-code {
-  animation: card-flash-code 1.6s ease-out;
-}
-
-@keyframes card-shake {
-  0%, 100% { transform: translateX(0); }
-  25%      { transform: translateX(-5px); }
-  75%      { transform: translateX(5px); }
-}
-
-.exam-swipe-wrapper.is-flash {
-  animation: card-flash 1.6s ease-out;
-}
-
-.exam-swipe-wrapper.is-flash-error {
-  animation: card-shake 0.3s ease-in-out;
-  border-color: #fca5a5;
-}
-
-/* แง้มปุ่มหลังการ์ดให้เห็นแล้วเด้งกลับ — สอนท่าปัดครั้งแรกโดยไม่ต้องมีตัวหนังสือ */
-@keyframes swipe-hint {
-  0%, 100% { transform: translateX(0); }
-  35%, 65% { transform: translateX(-52px); }
-}
-
-.exam-item-content.is-hinting {
-  animation: swipe-hint 1.6s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .exam-swipe-wrapper.is-flash,
-  .exam-swipe-wrapper.is-flash .exam-item-content,
-  .exam-swipe-wrapper.is-flash .exam-col-code,
-  .exam-swipe-wrapper.is-flash-error,
-  .exam-item-content.is-hinting {
-    animation: none;
-  }
-  .exam-swipe-wrapper.is-flash .exam-item-content {
-    background-color: #c7f0d8;
-  }
 }
 
 .schedule-empty {
