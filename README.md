@@ -33,7 +33,7 @@ The system is **two separate Cloudflare Workers**, deployed with different comma
 
 | Store | Contents | Why here |
 |---|---|---|
-| **D1** `ram-roo-thang` | `users`, `coin_ledger`, `user_courses` | Needs real transactions when granting/spending coins, and needs to be queryable |
+| **D1** `ram-roo-thang` | `users`, `coin_ledger`, `user_courses`, `exam_alerts_sent`, `room_import_drafts` | Needs real transactions when granting/spending coins, and needs to be queryable |
 | **KV** `BASELINE_DATA` | 35 buildings / 8 parking zones / 11 services / 25 shops | Read-only, almost never changes |
 | **KV** `PARKING_REPORTS` | Parking condition reports | Must expire on its own — uses KV TTL |
 | **KV** `RATE_LIMIT` | Last report time per user | Same, uses TTL |
@@ -90,7 +90,8 @@ ram-roo-thang-bot/
 │   ├── .secrets.env.example       — copy to .secrets.env and fill in tokens
 │   ├── migrations/
 │   │   ├── 0001_users_and_coin_ledger.sql
-│   │   └── 0002_exam_alerts.sql
+│   │   ├── 0002_exam_alerts.sql
+│   │   └── 0003_exam_rooms.sql
 │   └── src/
 │       ├── index.js               — router (LINE webhook + /api/*) + CORS
 │       ├── line.js                — signature verify, chat history, Flex Messages, reply
@@ -99,6 +100,7 @@ ram-roo-thang-bot/
 │       ├── user.js                — users, coins, ledger (D1)
 │       ├── schedule.js            — saved courses (D1)
 │       ├── exam.js                — proactive exam alerts (cron + manual trigger)
+│       ├── examroom.js            — reads exam rooms from a photo (vision model + validation)
 │       ├── parking.js             — parking reports: geofence, rate limit, aggregation
 │       ├── building.js            — building lookup
 │       ├── shop.js                — shop/stall listing
@@ -178,6 +180,37 @@ Period times (confirmed against the university announcement, Aug 23 2026):
 **A = 09:30–12:00/12:30**, **B = 14:00–16:30**. `PERIOD_TIME` in `worker/src/exam.js` must stay in
 sync with `EXAM_PERIOD_TIME` in `liff/app.js`. An earlier value of 13:30–16:00 for period B was
 wrong — it came from a hardcoded demo table, not the announcement.
+
+### Exam rooms come from the student, via OCR
+
+The university does not publish exam rooms as a dataset — they are assigned per student and released
+close to the exam week through e-Service. So users send a photo of their personal exam schedule into
+the LINE chat and a vision model reads it (`worker/src/examroom.js`).
+
+**The official timetable validates the OCR.** We already know the exam date and period for all 2,865
+courses, so the image is only trusted for the *room*; dates and periods always come from the
+announcement. A course code the model misread or invented simply isn't in the dataset and gets
+dropped before the user ever sees it.
+
+**Nothing is saved without confirmation.** Results go into `room_import_drafts` (30-minute TTL) and a
+Flex card with Save/Cancel buttons. OCR can be wrong, and wrong here means someone walks to the wrong
+exam room — the last decision belongs to the student, not the model.
+
+The prompt explicitly forbids extracting names or student IDs, which appear on these schedules. This
+project stores no PII anywhere else and that shouldn't change here.
+
+Model choice, measured against a mock RU schedule image on Aug 23 2026 — both a clean render and a
+simulated phone photo (1.6° skew, 760px, JPEG q45):
+
+| Model | Correct | Latency |
+|---|---|---|
+| `@cf/mistralai/mistral-small-3.1-24b-instruct` | **5/5** | **6.9s** — chosen |
+| `@cf/google/gemma-4-26b-a4b-it` | 5/5 | 27s — a reasoning model; burns its token budget thinking |
+| `@cf/meta/llama-4-scout-17b-16e-instruct` | 4/5 | 4.6s — read `ECO1003` as `EC01003` |
+| `@cf/aisingapore/gemma-sea-lion-v4-27b-it` | 1/5 | 11s — invented course codes not in the image |
+
+> Note: the Cloudflare dashboard's "vision" filter lists models by *task category*. Mistral Small 3.1
+> and Llama 4 Scout are categorized as Text Generation and don't appear there, but both accept images.
 
 ### Delivery guarantees
 
@@ -330,16 +363,15 @@ the wrong time. Course codes not present in the timetable are now rejected at in
 | Parking | ✅ | 8 zones as polygons, 3-level reports, geofence, aggregation |
 | Find My Car | ✅ | Stored in localStorage — lost when switching devices (by design) |
 | ruMaster dataset | ✅ | 91 places |
-| Exam schedule dataset | ⚠️ | 2,865 courses with dates + periods (times confirmed). **Rooms are still missing** — the university only publishes them close to the exam week, per-student via e-Service |
+| Exam schedule dataset | ✅ | 2,865 courses with dates + periods; rooms supplied by students via chat photo OCR |
 | User database + coins | ✅ | D1 + ledger, double-claim prevention enforced by the database |
 | Survey → Google Sheets | ⚠️ | Code is ready but `FEEDBACK_ENDPOINT_URL` is unset, so no responses are collected yet |
 | Shop / spending coins | ❌ | Page is Coming Soon. The spend path is supported in the backend; we just need to decide what's redeemable |
-| Proactive Exam Alerts (Cron) | ⚠️ | Working end to end, but the message can't name the exam room yet (not in the announcement) |
+| Proactive Exam Alerts (Cron) | ✅ | Day-before push including the exam room when the student has supplied one |
 | Community | ❌ | Not started (ADR-0004 kept it out of the MVP) |
 
 ### Before demo day
 
-- [ ] Decide how users supply their exam room (rooms are per-student and published late — see the OCR feasibility note below)
 - [ ] Set `ADMIN_TOKEN` in `worker/.secrets.env` so the alerts can be demoed manually
 - [ ] Check the LINE OA message quota against the expected beta volume
 - [ ] Set `FEEDBACK_ENDPOINT_URL` after deploying the Google Apps Script

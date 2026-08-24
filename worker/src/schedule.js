@@ -54,7 +54,7 @@ export async function handleGetSchedule(request, env) {
   if (!userId) return jsonResponse({ error: 'ต้องระบุ user_id' }, 400);
 
   const { results } = await env.DB.prepare(
-    'SELECT id, course_code, created_at FROM user_courses WHERE user_id = ? ORDER BY course_code'
+    'SELECT id, course_code, created_at, room, room_source FROM user_courses WHERE user_id = ? ORDER BY course_code'
   ).bind(userId).all();
 
   return jsonResponse({
@@ -62,6 +62,8 @@ export async function handleGetSchedule(request, env) {
       schedule_id: r.id,
       course_code: r.course_code,
       created_at: r.created_at,
+      room: r.room || null,
+      room_source: r.room_source || null,
     })),
   });
 }

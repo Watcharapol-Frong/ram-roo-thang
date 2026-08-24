@@ -3,6 +3,7 @@
 
 import { retrieveContext, callWorkersAI } from './ai.js';
 import { getServiceByKey, getBuildingByKey } from './data.js';
+import { processExamScheduleImage, confirmRoomImport, cancelRoomImport } from './examroom.js';
 
 export async function verifySignature(body, signature, channelSecret) {
   const encoder = new TextEncoder();
@@ -273,6 +274,98 @@ async function appendHistory(env, userId, userMessage, modelText) {
   }
 }
 
+const THAI_MONTH_ABBR = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
+                         'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+
+function shortThaiDate(iso) {
+  if (!iso) return '';
+  const [y, m, d] = iso.split('-').map(Number);
+  return `${d} ${THAI_MONTH_ABBR[m - 1]} ${String(y + 543).slice(-2)}`;
+}
+
+// การ์ดสรุปผลอ่านรูป พร้อมปุ่มยืนยัน/ยกเลิก
+//
+// ต้องให้กดยืนยันเสมอ ห้ามบันทึกทันที — OCR ผิดได้ และผิดแปลว่าคนไปผิดห้องสอบ
+// คนที่ตัดสินใจครั้งสุดท้ายต้องเป็นเจ้าของตารางสอบ ไม่ใช่โมเดล
+function generateRoomConfirmFlex(accepted, rejected, draftId) {
+  const rows = accepted.map((item) => ({
+    type: 'box', layout: 'horizontal', spacing: 'sm', margin: 'md',
+    contents: [
+      { type: 'text', text: item.course_code, size: 'sm', weight: 'bold', flex: 4, color: '#111111' },
+      { type: 'text', text: item.room, size: 'sm', flex: 4, align: 'end', color: '#1560ff' },
+      { type: 'text', text: shortThaiDate(item.exam_date), size: 'xxs', flex: 3, align: 'end', color: '#888888', gravity: 'center' },
+    ],
+  }));
+
+  const notes = [];
+  if (rejected.length) {
+    notes.push({
+      type: 'text', wrap: true, size: 'xxs', color: '#c0392b', margin: 'md',
+      text: `อ่านไม่ผ่าน ${rejected.length} รายการ (ไม่พบรหัสในตารางสอบของมหาวิทยาลัย) กรอกเองในแอปได้`,
+    });
+  }
+  notes.push({
+    type: 'text', wrap: true, size: 'xxs', color: '#888888', margin: 'md',
+    text: 'วันสอบใช้ของประกาศมหาวิทยาลัยเสมอ อ่านจากรูปเฉพาะห้องสอบ ตรวจให้ตรงก่อนกดบันทึกนะครับ',
+  });
+
+  return {
+    type: 'flex',
+    altText: `อ่านห้องสอบได้ ${accepted.length} วิชา กดยืนยันเพื่อบันทึก`,
+    contents: {
+      type: 'bubble',
+      body: {
+        type: 'box', layout: 'vertical',
+        contents: [
+          { type: 'text', text: 'อ่านห้องสอบจากรูปแล้ว', weight: 'bold', size: 'md' },
+          { type: 'text', text: `${accepted.length} วิชา`, size: 'xs', color: '#888888', margin: 'xs' },
+          { type: 'separator', margin: 'lg' },
+          ...rows,
+          ...notes,
+        ],
+      },
+      footer: {
+        type: 'box', layout: 'horizontal', spacing: 'sm',
+        contents: [
+          { type: 'button', style: 'secondary', height: 'sm',
+            action: { type: 'postback', label: 'ยกเลิก', data: `rooms_cancel:${draftId}`, displayText: 'ยกเลิก' } },
+          { type: 'button', style: 'primary', height: 'sm', color: '#1560ff',
+            action: { type: 'postback', label: 'บันทึก', data: `rooms_confirm:${draftId}`, displayText: 'บันทึกห้องสอบ' } },
+        ],
+      },
+    },
+  };
+}
+
+// ผู้ใช้ส่งรูปเข้ามา — ถือว่าเป็นรูปตารางสอบเสมอ เพราะเป็นกรณีเดียวที่บอทรับรูป
+async function handleImageMessage(event, env) {
+  const userId = event.source && event.source.userId;
+  const token = env.LINE_CHANNEL_ACCESS_TOKEN;
+  if (userId) await showLoadingAnimation(userId, token);
+
+  try {
+    const { accepted, rejected, draftId } = await processExamScheduleImage(env, userId, event.message.id);
+
+    if (!draftId) {
+      const why = rejected.length
+        ? 'อ่านรหัสวิชาได้แต่ไม่ตรงกับตารางสอบของมหาวิทยาลัยเลยครับ'
+        : 'อ่านตารางจากรูปนี้ไม่ออกครับ';
+      return replyToLINE(event.replyToken, [{
+        type: 'text',
+        text: `${why}\n\nลองถ่ายใหม่ให้เห็นทั้งตารางและตัวหนังสือชัดๆ หรือกรอกห้องสอบเองในแอปก็ได้ครับ`,
+      }], token);
+    }
+
+    return replyToLINE(event.replyToken, [generateRoomConfirmFlex(accepted, rejected, draftId)], token);
+  } catch (err) {
+    console.error('อ่านรูปตารางสอบไม่สำเร็จ', err);
+    return replyToLINE(event.replyToken, [{
+      type: 'text',
+      text: 'ตอนนี้อ่านรูปไม่สำเร็จครับ ลองส่งใหม่อีกครั้ง หรือกรอกห้องสอบเองในแอปได้เลย',
+    }], token);
+  }
+}
+
 // ปุ่ม quick reply ใน generateServiceSummaryMessage ส่ง postback data มาที่นี่
 // steps/building เป็นข้อมูลที่ทีมกรอกไว้ล่วงหน้าเท่านั้น ไม่ใช่สิ่งที่ AI แต่งเอง
 async function handlePostback(event, env) {
@@ -319,6 +412,27 @@ async function handlePostback(event, env) {
     );
   }
 
+  // data: "rooms_confirm:{draftId}" / "rooms_cancel:{draftId}" — ผลอ่านห้องสอบจากรูป
+  if (action === 'rooms_confirm' && serviceId) {
+    const result = await confirmRoomImport(env, userId, serviceId);
+    if (!result.ok) {
+      const text = result.reason === 'EXPIRED'
+        ? 'รายการนี้หมดอายุแล้วครับ (เก็บไว้ 30 นาที) ส่งรูปใหม่อีกครั้งได้เลย'
+        : 'ไม่พบรายการนี้แล้วครับ อาจกดไปแล้วหรือยกเลิกไปก่อนหน้านี้';
+      return replyToLINE(event.replyToken, [{ type: 'text', text }], env.LINE_CHANNEL_ACCESS_TOKEN);
+    }
+    const lines = result.items.map((i) => `• ${i.course_code}  ${i.room}`).join('\n');
+    return replyToLINE(event.replyToken, [{
+      type: 'text',
+      text: `บันทึกห้องสอบ ${result.saved} วิชาแล้วครับ\n\n${lines}\n\nจะเตือนพร้อมห้องสอบให้ล่วงหน้า 1 วันครับ`,
+    }], env.LINE_CHANNEL_ACCESS_TOKEN);
+  }
+
+  if (action === 'rooms_cancel' && serviceId) {
+    await cancelRoomImport(env, userId, serviceId);
+    return replyToLINE(event.replyToken, [{ type: 'text', text: 'ยกเลิกแล้วครับ ไม่ได้บันทึกอะไรลงไป' }], env.LINE_CHANNEL_ACCESS_TOKEN);
+  }
+
   return null;
 }
 
@@ -327,7 +441,12 @@ async function handleEvent(event, env) {
     return handlePostback(event, env);
   }
 
-  if (event.type !== 'message' || event.message.type !== 'text') return null;
+  if (event.type !== 'message') return null;
+
+  // รูป = ตารางสอบที่ผู้ใช้ส่งมาให้อ่านห้องสอบ (ดู worker/src/examroom.js)
+  if (event.message.type === 'image') return handleImageMessage(event, env);
+
+  if (event.message.type !== 'text') return null;
 
   const userMessage = event.message.text;
   const userId = event.source.userId;

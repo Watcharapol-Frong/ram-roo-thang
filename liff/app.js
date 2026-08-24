@@ -1603,7 +1603,17 @@ function formatThaiExamDate(iso) {
 // คืนข้อมูลสอบของวิชาหนึ่ง — ต้องเรียก loadExamLookup() ให้เสร็จก่อน
 // อาคาร/ห้องสอบยังไม่มีในระบบ (ประกาศตารางสอบไม่ได้ระบุไว้ รอไฟล์ผังห้องสอบแยก)
 // จึงคืน building_id เป็น null เสมอ ฝั่ง UI ต้องซ่อนปุ่มนำทางเมื่อยังไม่มีอาคาร
-function getCourseExamInfo(courseCode) {
+// "VKB 501" -> "VKB" สำหรับกดปุ่มนำทางไปอาคารนั้น
+//
+// ใช้ buildingCodeFromName ตัวเดิมไม่ได้ เพราะมันเผื่อชื่ออาคารที่มีเลขเป็นส่วนหนึ่งของรหัส
+// อย่าง "ECB 2" ไว้ด้วย พอใส่ชื่อห้องเข้าไปจะกินเลขห้องตัวแรกมาเป็นรหัส ("VKB 501" -> "VKB5")
+function buildingCodeFromRoom(room) {
+  if (!room) return null;
+  const match = String(room).trim().match(/^([A-Z]{2,4})\b/);
+  return match ? match[1] : null;
+}
+
+function getCourseExamInfo(courseCode, saved) {
   const code = (courseCode || '').toUpperCase().trim();
   const table = examLookupCache && examLookupCache.courses;
   if (!table || !(code in table)) {
@@ -1618,12 +1628,15 @@ function getCourseExamInfo(courseCode) {
 
   const isoDate = value.slice(0, 10);
   const periods = value.slice(10).split('');
+  // ห้องสอบมาจากรูปตารางสอบที่ผู้ใช้ส่งเข้าแชท (worker/src/examroom.js) ไม่ใช่จากประกาศ
+  // เพราะมหาวิทยาลัยประกาศห้องเป็นรายบุคคลใกล้สัปดาห์สอบ ดึงเองไม่ได้
+  const room = saved && saved.room ? saved.room : null;
   return {
     known: true,
     date_th: formatThaiExamDate(isoDate),
     time_th: periods.map((p) => EXAM_PERIOD_TIME[p] || `คาบ ${p}`).join(' และ '),
-    building_id: null,
-    location_th: 'รอประกาศห้องสอบ',
+    building_id: buildingCodeFromRoom(room),
+    location_th: room ? `ห้อง ${room}` : 'ส่งรูปตารางสอบในแชทเพื่อเพิ่มห้องสอบ',
   };
 }
 
@@ -1783,7 +1796,7 @@ async function refreshScheduleList(userId) {
 
   const rowsHTML = schedules
     .map((s) => {
-      const info = getCourseExamInfo(s.course_code);
+      const info = getCourseExamInfo(s.course_code, s);
       return `
         <div class="exam-swipe-wrapper" id="row-${escapeXml(s.schedule_id)}">
           <div class="exam-behind-actions">

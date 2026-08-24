@@ -54,8 +54,8 @@ function formatAlertMessage(examDate, items, liffUrl) {
 
   const lines = sorted.map((it) => {
     const time = it.periods.map((p) => PERIOD_TIME[p] || `คาบ ${p}`).join(' และ ');
-    // ห้องสอบยังไม่มีในประกาศ — บอกตามจริง ไม่เดา
-    return `• ${it.code}\n  ${time}`;
+    // ห้องสอบมีเฉพาะคนที่ส่งรูปตารางสอบมาให้อ่าน (ดู examroom.js) ไม่มีก็ไม่ต้องเดา
+    return it.room ? `• ${it.code}  ห้อง ${it.room}\n  ${time}` : `• ${it.code}\n  ${time}`;
   });
 
   const count = sorted.length === 1 ? '1 วิชา' : `${sorted.length} วิชา`;
@@ -68,7 +68,9 @@ function formatAlertMessage(examDate, items, liffUrl) {
     '',
     // เตือนกฎเข้าสายทุกครั้ง เพราะเป็นข้อที่พลาดแล้วเสียหายที่สุด — สายเกิน 30 นาทีคือหมดสิทธิ์สอบ
     'อย่าลืมไปถึงก่อนเวลา เข้าสายเกิน 30 นาทีหลังเริ่มสอบจะเข้าห้องไม่ได้นะครับ',
-    'ห้องสอบเช็กจากตารางสอบรายบุคคลใน e-Service ของมหาวิทยาลัยอีกทีนะครับ',
+    sorted.every((it) => it.room)
+      ? 'ห้องสอบมาจากรูปที่ส่งมา เช็กกับ e-Service อีกทีให้ชัวร์นะครับ'
+      : 'ห้องสอบเช็กจากตารางสอบรายบุคคลใน e-Service หรือส่งรูปตารางสอบมาให้อ่านได้ครับ',
     profileUrl ? `\nดูตารางสอบทั้งหมด\n${profileUrl}` : '',
   ].join('\n').trimEnd();
 }
@@ -82,7 +84,7 @@ export async function collectAlerts(env, examDate) {
   // จำนวนแถวระดับ (ผู้ใช้ x วิชาที่บันทึก) ซึ่งเล็กมาก ดึงมากรองใน JS ง่ายกว่าและไม่ต้องกังวล
   // เพดานจำนวน bound parameter ของ IN (...) ที่อาจมีเป็นร้อยรหัสต่อวันสอบ
   const { results } = await env.DB.prepare(
-    'SELECT user_id, course_code FROM user_courses'
+    'SELECT user_id, course_code, room FROM user_courses'
   ).all();
 
   const byUser = new Map();
@@ -90,7 +92,7 @@ export async function collectAlerts(env, examDate) {
     const periods = examCourses.get(row.course_code);
     if (!periods) continue;
     if (!byUser.has(row.user_id)) byUser.set(row.user_id, []);
-    byUser.get(row.user_id).push({ code: row.course_code, periods });
+    byUser.get(row.user_id).push({ code: row.course_code, periods, room: row.room });
   }
 
   return [...byUser.entries()].map(([userId, items]) => ({
