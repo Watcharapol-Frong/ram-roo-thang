@@ -7,6 +7,7 @@ import { handleListShops, handleListShopItems, handleRedeemItem, handleListRedem
 import { handlePostSchedule, handleGetSchedule, handleDeleteSchedule, handlePatchScheduleRoom } from './schedule.js';
 import { handleGetUser, handleGetLedger, handleFeedbackAward, handleSaveCarAward } from './user.js';
 import { handleAdminExamAlerts, runDailyExamAlerts } from './exam.js';
+import { handleAdminDailyDigest, runDailyDigest } from './daily.js';
 import { handleHealth, recordHeartbeat } from './health.js';
 import { handleAdminUnanswered } from './analytics.js';
 
@@ -44,13 +45,18 @@ export default {
   //
   // บันทึก heartbeat ทุกครั้งที่รันจบ ไม่ว่าจะมีคนต้องเตือนหรือไม่ — วันที่ไม่มีใครสอบพรุ่งนี้
   // ก็ยังต้องนับว่า cron ทำงาน ไม่งั้น /api/health จะเห็นเป็น "cron หลุด" ทั้งที่มันรันปกติ
+  // cron สองตัวใช้ handler เดียวกัน แยกงานด้วย event.cron (ดู [triggers] ใน wrangler.toml)
+  //   0 0  * * * = 07:00 น. สรุปวันนี้ ทั้งเรียนและสอบ
+  //   0 11 * * * = 18:00 น. เตือนล่วงหน้าว่าพรุ่งนี้มีสอบ
   async scheduled(event, env, ctx) {
+    const morning = event.cron === '0 0 * * *';
+    const label = morning ? 'cron_digest' : 'cron';
     ctx.waitUntil(
-      runDailyExamAlerts(env)
-        .then((result) => recordHeartbeat(env, 'cron', `sent=${result.sent} skipped=${result.skipped} failed=${result.failed}`))
+      (morning ? runDailyDigest(env) : runDailyExamAlerts(env))
+        .then((result) => recordHeartbeat(env, label, `sent=${result.sent} skipped=${result.skipped} failed=${result.failed}`))
         .catch((err) => {
-          console.error('scheduled error', err);
-          return recordHeartbeat(env, 'cron_error', err && err.message);
+          console.error('scheduled error', event.cron, err);
+          return recordHeartbeat(env, `${label}_error`, err && err.message);
         })
     );
   },
@@ -103,6 +109,9 @@ async function route(request, env, ctx) {
   // คำถามที่บอทตอบไม่ได้ — ใช้ดูว่าควรเติมข้อมูล/alias อะไรต่อ
   if (method === 'GET' && pathname === '/api/admin/unanswered') {
     return handleAdminUnanswered(request, env);
+  }
+  if (method === 'POST' && pathname === '/api/admin/daily-digest') {
+    return handleAdminDailyDigest(request, env);
   }
   if (method === 'POST' && pathname === '/api/admin/exam-alerts') {
     return handleAdminExamAlerts(request, env);
