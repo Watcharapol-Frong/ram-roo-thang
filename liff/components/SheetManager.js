@@ -261,6 +261,46 @@
     if (slot) slot.innerHTML = '';
   }
 
+  // popup ยืนยันแบบเต็มจอ — ใช้แทน window.confirm ของเบราว์เซอร์
+  //
+  // window.confirm ใน LINE in-app browser หน้าตาเป็นกล่องระบบที่ดูหลุดจากแอปทั้งหมด
+  // และบางเครื่องก็ถูกบล็อก ทำให้ผู้ใช้กดแลกไม่ได้เลยโดยไม่มีอะไรบอก
+  function showConfirm({ title, body, note, confirmLabel, cancelLabel, onConfirm }) {
+    const existing = document.getElementById('app-confirm');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'app-confirm';
+    overlay.className = 'confirm-overlay';
+    overlay.innerHTML = `
+      <div class="confirm-box" role="dialog" aria-modal="true">
+        <h3 class="confirm-title"></h3>
+        <p class="confirm-body"></p>
+        ${note ? '<p class="confirm-note"></p>' : ''}
+        <div class="confirm-actions">
+          <button type="button" class="confirm-cancel"></button>
+          <button type="button" class="confirm-ok"></button>
+        </div>
+      </div>
+    `;
+    // ใส่ข้อความผ่าน textContent ไม่ใช่ innerHTML — ชื่อสินค้ามาจากฐานข้อมูลที่แอดมินแก้ได้
+    overlay.querySelector('.confirm-title').textContent = title || 'ยืนยัน';
+    overlay.querySelector('.confirm-body').textContent = body || '';
+    if (note) overlay.querySelector('.confirm-note').textContent = note;
+    overlay.querySelector('.confirm-cancel').textContent = cancelLabel || 'ยกเลิก';
+    overlay.querySelector('.confirm-ok').textContent = confirmLabel || 'ยืนยัน';
+
+    const close = () => overlay.remove();
+    overlay.querySelector('.confirm-cancel').addEventListener('click', close);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    overlay.querySelector('.confirm-ok').addEventListener('click', () => {
+      close();
+      if (typeof onConfirm === 'function') onConfirm();
+    });
+
+    document.body.appendChild(overlay);
+  }
+
   window.SheetManager = {
     hide,
     setOnClose,
@@ -274,6 +314,7 @@
     showOffCampusSheet,
     showRouteErrorSheet,
     showNotice,
+    showConfirm,
     showGpsWarning,
     hideGpsWarning,
   };

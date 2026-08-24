@@ -3,6 +3,7 @@
 
 import { listShops } from './data.js';
 import { ensureUser, getUserRow } from './user.js';
+import { pushToLINE } from './line.js';
 
 export async function handleListShops(request, env) {
   const shops = await listShops(env);
@@ -29,9 +30,20 @@ export async function handleListShopItems(request, env) {
   const userId = url.searchParams.get('user_id');
 
   const { results } = await env.DB.prepare(
-    `SELECT id, name, description, price_coins, stock FROM shop_items
+    `SELECT id, name, description, price_coins, stock, max_per_user FROM shop_items
       WHERE active = 1 ORDER BY sort_order, name`
   ).all();
+
+  // นับว่าผู้ใช้เคยแลกอะไรไปแล้วกี่ครั้ง เพื่อบอกล่วงหน้าว่าปุ่มไหนกดไม่ได้แล้ว
+  // ไม่นับรายการที่ยกเลิกไป เพราะคืนเหรียญให้แล้ว ต้องแลกใหม่ได้
+  let ownedCount = {};
+  if (userId) {
+    const owned = await env.DB.prepare(
+      `SELECT item_id, COUNT(*) AS n FROM redemptions
+        WHERE user_id = ? AND status != 'CANCELLED' GROUP BY item_id`
+    ).bind(userId).all();
+    for (const r of owned.results || []) ownedCount[r.item_id] = r.n;
+  }
 
   let coins = null;
   if (userId) {
@@ -42,12 +54,17 @@ export async function handleListShopItems(request, env) {
 
   return shopJson({
     coins,
-    items: (results || []).map((item) => ({
-      ...item,
-      // stock = null คือไม่จำกัด ต้องแยกจาก 0 ที่แปลว่าหมดจริง
-      sold_out: item.stock !== null && item.stock <= 0,
-      affordable: coins === null ? null : coins >= item.price_coins,
-    })),
+    items: (results || []).map((item) => {
+      const owned = ownedCount[item.id] || 0;
+      return {
+        ...item,
+        owned,
+        // stock = null คือไม่จำกัด ต้องแยกจาก 0 ที่แปลว่าหมดจริง
+        sold_out: item.stock !== null && item.stock <= 0,
+        limit_reached: item.max_per_user !== null && owned >= item.max_per_user,
+        affordable: coins === null ? null : coins >= item.price_coins,
+      };
+    }),
   });
 }
 
@@ -71,7 +88,7 @@ export async function handleRedeemItem(request, env) {
   if (!userId || !itemId) return shopJson({ error: 'ต้องระบุ user_id และ item_id' }, 400);
 
   const item = await env.DB.prepare(
-    'SELECT id, name, price_coins, stock FROM shop_items WHERE id = ? AND active = 1'
+    'SELECT id, name, price_coins, stock, max_per_user FROM shop_items WHERE id = ? AND active = 1'
   ).bind(itemId).first();
   if (!item) return shopJson({ error: 'ไม่พบสินค้านี้' }, 404);
   if (item.stock !== null && item.stock <= 0) {
@@ -79,6 +96,19 @@ export async function handleRedeemItem(request, env) {
   }
 
   await ensureUser(env, userId);
+
+  // โควตาต่อคน — เช็คก่อนหักเหรียญ ไม่งั้นหักไปแล้วค่อยพบว่าแลกไม่ได้ ต้องมาคืนทีหลัง
+  if (item.max_per_user !== null) {
+    const used = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM redemptions WHERE user_id = ? AND item_id = ? AND status != 'CANCELLED'`
+    ).bind(userId, item.id).first();
+    if (used && used.n >= item.max_per_user) {
+      return shopJson({
+        status: 'LIMIT_REACHED',
+        error: item.max_per_user === 1 ? 'ของชิ้นนี้แลกได้คนละ 1 ครั้งเท่านั้น' : `แลกได้ไม่เกิน ${item.max_per_user} ครั้งต่อคน`,
+      }, 409);
+    }
+  }
 
   const deducted = await env.DB.prepare(
     'UPDATE users SET coins = coins - ?, updated_at = ? WHERE user_id = ? AND coins >= ?'
@@ -141,4 +171,79 @@ export async function handleListRedemptions(request, env) {
   ).bind(userId).all();
 
   return shopJson({ redemptions: results || [] });
+}
+
+// --- ฝั่งแอดมิน: จัดของแล้วแจ้งผู้ใช้ ---
+//
+// แยกออกมาเป็น endpoint เพราะการส่งของจริง (สติกเกอร์) ทำอัตโนมัติผ่าน Messaging API ไม่ได้
+// API ส่งได้เฉพาะสติกเกอร์ชุดทางการของ LINE เท่านั้น ส่วนการ "มอบ" ชุดสติกเกอร์ให้ผู้ใช้เป็น
+// เจ้าของต้องใช้ Mission Sticker API ซึ่งเปิดให้เฉพาะลูกค้าองค์กรที่ทำสัญญากับ LINE
+// ระบบจึงออกแบบให้คนกดยืนยันการส่ง แล้วบอทเป็นคนแจ้งผู้ใช้ให้ — พอได้สิทธิ์ Mission Sticker
+// เมื่อไร เปลี่ยนเฉพาะขั้นตอนภายในฟังก์ชันนี้ ส่วนที่ผู้ใช้เห็นไม่ต้องแก้เลย
+
+// GET /api/admin/redemptions?status=PENDING — คิวของที่ต้องส่ง
+export async function handleAdminListRedemptions(request, env) {
+  const token = request.headers.get('x-admin-token');
+  if (!env.ADMIN_TOKEN || token !== env.ADMIN_TOKEN) {
+    return shopJson({ error: 'Unauthorized' }, 401);
+  }
+
+  const url = new URL(request.url);
+  const status = url.searchParams.get('status') || 'PENDING';
+  const { results } = await env.DB.prepare(
+    `SELECT id, user_id, item_name, price_coins, status, created_at, fulfilled_at
+       FROM redemptions WHERE status = ? ORDER BY created_at LIMIT 200`
+  ).bind(status).all();
+
+  return shopJson({ status, count: (results || []).length, redemptions: results || [] });
+}
+
+// POST /api/admin/redemptions/fulfill — ทำเครื่องหมายว่าส่งแล้ว + push แจ้งผู้ใช้
+//   body: { redemption_id, note }   note = ข้อความ/ลิงก์รับของที่จะส่งให้ผู้ใช้
+export async function handleAdminFulfill(request, env) {
+  const token = request.headers.get('x-admin-token');
+  if (!env.ADMIN_TOKEN || token !== env.ADMIN_TOKEN) {
+    return shopJson({ error: 'Unauthorized' }, 401);
+  }
+
+  let payload;
+  try {
+    payload = await request.json();
+  } catch {
+    return shopJson({ error: 'Invalid JSON body' }, 400);
+  }
+
+  const { redemption_id: id, note } = payload;
+  if (!id) return shopJson({ error: 'ต้องระบุ redemption_id' }, 400);
+
+  const redemption = await env.DB.prepare(
+    'SELECT id, user_id, item_name, status FROM redemptions WHERE id = ?'
+  ).bind(id).first();
+  if (!redemption) return shopJson({ error: 'ไม่พบรายการแลกนี้' }, 404);
+  if (redemption.status === 'FULFILLED') {
+    return shopJson({ status: 'ALREADY_FULFILLED' });
+  }
+
+  const at = new Date().toISOString();
+  await env.DB.prepare(
+    "UPDATE redemptions SET status = 'FULFILLED', fulfilled_at = ?, fulfillment_note = ? WHERE id = ?"
+  ).bind(at, note || null, id).run();
+
+  // แจ้งผู้ใช้ — ถ้า push พังไม่ต้อง rollback สถานะ เพราะของส่งไปแล้วจริง
+  // แอดมินตามแจ้งเองได้ แต่ห้ามให้รายการกลับไปเป็น PENDING แล้วโดนส่งซ้ำ
+  let notified = false;
+  try {
+    const lines = [
+      `ของรางวัลของคุณพร้อมแล้วครับ`,
+      '',
+      redemption.item_name,
+      ...(note ? ['', note] : []),
+    ];
+    await pushToLINE(redemption.user_id, [{ type: 'text', text: lines.join('\n') }], env.LINE_CHANNEL_ACCESS_TOKEN);
+    notified = true;
+  } catch (err) {
+    console.error('แจ้งผู้ใช้เรื่องของรางวัลไม่สำเร็จ', redemption.user_id, err);
+  }
+
+  return shopJson({ status: 'SUCCESS', notified, redemption_id: id });
 }

@@ -1392,6 +1392,11 @@ async function renderFeedbackView() {
 // renderShopView — หน้าร้านค้า & สิทธิพิเศษ (Coming Soon กลางจอใหญ่ๆ)
 // renderShopView — ร้านค้าแลกเหรียญ ใช้โครงและสไตล์ชุดเดียวกับหน้าโปรไฟล์
 // (profile-flat-container / การ์ดขอบบาง / badge เหรียญ) จะได้ไม่รู้สึกว่าเป็นคนละแอปตอนสลับแท็บ
+//
+// สินค้ากับประวัติอยู่หน้าเดียวกัน สลับด้วยแท็บ ไม่แยกเป็นคนละหน้า เพราะยอดเหรียญด้านบน
+// เป็นบริบทที่ต้องเห็นตลอดทั้งสองมุมมอง
+let shopTab = 'items';
+
 async function renderShopView() {
   const container = getApp();
   container.innerHTML = '<p style="text-align:center;padding:40px 0;color:var(--muted)">กำลังโหลด...</p>';
@@ -1412,26 +1417,6 @@ async function renderShopView() {
   }
 
   const coins = typeof data.coins === 'number' ? data.coins : null;
-  const items = data.items || [];
-
-  const itemsHTML = items.length ? items.map((item) => {
-    const disabled = item.sold_out || item.affordable === false || !userId;
-    const label = item.sold_out ? 'หมดแล้ว'
-      : item.affordable === false ? `ขาดอีก ${item.price_coins - (coins || 0)}`
-      : 'แลก';
-    return `
-      <div class="shop-item">
-        <div class="shop-item-main">
-          <div class="shop-item-name">${escapeXml(item.name)}</div>
-          ${item.description ? `<div class="shop-item-desc">${escapeXml(item.description)}</div>` : ''}
-        </div>
-        <div class="shop-item-side">
-          <div class="shop-item-price">${item.price_coins} เหรียญ</div>
-          <button type="button" class="shop-item-btn" data-item="${escapeXml(item.id)}" ${disabled ? 'disabled' : ''}>${escapeXml(label)}</button>
-        </div>
-      </div>
-    `;
-  }).join('') : '<div class="schedule-empty">ยังไม่มีของให้แลกตอนนี้</div>';
 
   container.innerHTML = `
     <div class="profile-flat-container">
@@ -1440,29 +1425,83 @@ async function renderShopView() {
         <span class="shop-balance-value">${coins === null ? '—' : coins}</span>
       </div>
 
-      <div class="schedule-flat-header-row">
-        <h2>ของรางวัล <span class="badge-beta">Beta</span></h2>
+      <div class="shop-tabs" role="tablist">
+        <button type="button" class="shop-tab${shopTab === 'items' ? ' is-active' : ''}" data-tab="items">ของรางวัล</button>
+        <button type="button" class="shop-tab${shopTab === 'history' ? ' is-active' : ''}" data-tab="history">ประวัติ</button>
       </div>
-      ${itemsHTML}
 
-      <div id="shop-history-slot"></div>
+      <div id="shop-panel"></div>
     </div>
     ${renderBottomNavHTML('shop')}
   `;
 
   bindBottomNavEvents();
 
-  container.querySelectorAll('.shop-item-btn:not([disabled])').forEach((btn) => {
-    btn.addEventListener('click', () => redeemShopItem(btn.dataset.item, btn));
+  container.querySelectorAll('.shop-tab').forEach((tab) => {
+    tab.addEventListener('click', () => {
+      if (shopTab === tab.dataset.tab) return;
+      shopTab = tab.dataset.tab;
+      container.querySelectorAll('.shop-tab').forEach((t) => t.classList.toggle('is-active', t.dataset.tab === shopTab));
+      paintShopPanel(data, coins, userId);
+    });
   });
 
-  if (userId) renderRedemptionHistory(userId);
+  paintShopPanel(data, coins, userId);
 }
 
-// ยืนยันก่อนหักเหรียญเสมอ — กดพลาดแล้วเหรียญหายไปเลยโดยไม่ได้ตั้งใจคือประสบการณ์ที่แย่ที่สุด
-async function redeemShopItem(itemId, btn) {
-  if (!window.confirm('ยืนยันการแลกของรางวัลนี้?\nเหรียญจะถูกหักทันทีและขอคืนไม่ได้')) return;
+function paintShopPanel(data, coins, userId) {
+  const panel = document.getElementById('shop-panel');
+  if (!panel) return;
 
+  if (shopTab === 'history') {
+    panel.innerHTML = '<div class="schedule-empty">กำลังโหลด...</div>';
+    if (userId) renderRedemptionHistory(userId, panel);
+    else panel.innerHTML = '<div class="schedule-empty">เปิดจากแชท LINE เพื่อดูประวัติของคุณ</div>';
+    return;
+  }
+
+  const items = data.items || [];
+  panel.innerHTML = items.length ? items.map((item) => {
+    // เรียงเหตุผลที่กดไม่ได้จาก "แก้ไม่ได้" ไป "แก้ได้" — บอกสิ่งที่ตรงที่สุดกับสถานการณ์เขา
+    const reason = item.sold_out ? 'หมดแล้ว'
+      : item.limit_reached ? 'แลกไปแล้ว'
+      : !userId ? 'เปิดจากแชท'
+      : item.affordable === false ? `ขาดอีก ${item.price_coins - (coins || 0)}`
+      : null;
+    return `
+      <div class="shop-item">
+        <div class="shop-item-main">
+          <div class="shop-item-name">${escapeXml(item.name)}</div>
+          ${item.description ? `<div class="shop-item-desc">${escapeXml(item.description)}</div>` : ''}
+          ${item.max_per_user === 1 ? '<div class="shop-item-limit">จำกัด 1 ครั้งต่อคน</div>' : ''}
+        </div>
+        <div class="shop-item-side">
+          <div class="shop-item-price">${item.price_coins} เหรียญ</div>
+          <button type="button" class="shop-item-btn" data-item="${escapeXml(item.id)}" data-name="${escapeXml(item.name)}" data-price="${item.price_coins}" ${reason ? 'disabled' : ''}>${escapeXml(reason || 'แลก')}</button>
+        </div>
+      </div>
+    `;
+  }).join('') : '<div class="schedule-empty">ยังไม่มีของให้แลกตอนนี้</div>';
+
+  panel.querySelectorAll('.shop-item-btn:not([disabled])').forEach((btn) => {
+    btn.addEventListener('click', () => confirmRedeem(btn));
+  });
+}
+
+// popup ยืนยันก่อนหักเหรียญเสมอ — กดพลาดแล้วเหรียญหายโดยไม่ตั้งใจคือประสบการณ์ที่แย่ที่สุด
+// และของบางชิ้นแลกได้ครั้งเดียวต่อคน พลาดแล้วแก้ไม่ได้เลย
+function confirmRedeem(btn) {
+  const { name, price } = btn.dataset;
+  SheetManager.showConfirm({
+    title: 'ยืนยันการแลก',
+    body: `${name}\nใช้ ${price} เหรียญ`,
+    note: 'เหรียญจะถูกหักทันทีและขอคืนไม่ได้',
+    confirmLabel: 'ยืนยันแลก',
+    onConfirm: () => redeemShopItem(btn.dataset.item, btn),
+  });
+}
+
+async function redeemShopItem(itemId, btn) {
   const original = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'กำลังแลก...';
@@ -1474,48 +1513,61 @@ async function redeemShopItem(itemId, btn) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: userId, item_id: itemId }),
     });
-    showToast(`แลก ${res.redemption.item_name} สำเร็จ ทีมงานจะติดต่อกลับทางแชท`);
+    showToast(`แลก ${res.redemption.item_name} สำเร็จ ทีมงานจะส่งให้ทางแชท`);
+    shopTab = 'history';
     renderShopView();
   } catch (err) {
     const data = err.data || {};
     const message = data.status === 'INSUFFICIENT_COINS'
       ? `เหรียญไม่พอ มีอยู่ ${data.coins} ต้องใช้ ${data.price_coins}`
-      : data.status === 'OUT_OF_STOCK' ? 'ของหมดพอดี'
-      : (data.error || 'แลกไม่สำเร็จ ลองใหม่อีกครั้ง');
+      : data.error || 'แลกไม่สำเร็จ ลองใหม่อีกครั้ง';
     showToast(message);
     btn.disabled = false;
     btn.textContent = original;
   }
 }
 
-async function renderRedemptionHistory(userId) {
-  const slot = document.getElementById('shop-history-slot');
-  if (!slot) return;
+const REDEMPTION_STATUS = {
+  PENDING: { label: 'รอทีมงานส่งให้', color: '#b45309' },
+  FULFILLED: { label: 'ส่งแล้ว', color: '#15803d' },
+  CANCELLED: { label: 'ยกเลิก (คืนเหรียญแล้ว)', color: '#6b7280' },
+};
 
+async function renderRedemptionHistory(userId, panel) {
   let data;
   try {
     data = await fetchJSON(`/api/shop/redemptions?user_id=${encodeURIComponent(userId)}`);
   } catch (_) {
+    panel.innerHTML = '<div class="schedule-empty">โหลดประวัติไม่สำเร็จ</div>';
     return;
   }
-  const list = data.redemptions || [];
-  if (!list.length) return;
 
-  const STATUS_LABEL = { PENDING: 'รอทีมงานส่งให้', FULFILLED: 'ส่งแล้ว', CANCELLED: 'ยกเลิก (คืนเหรียญแล้ว)' };
-  slot.innerHTML = `
-    <div class="schedule-flat-header-row" style="margin-top:22px">
-      <h2>ประวัติการแลก</h2>
-    </div>
-    ${list.map((r) => `
+  const list = data.redemptions || [];
+  if (!list.length) {
+    panel.innerHTML = '<div class="schedule-empty">ยังไม่เคยแลกของรางวัล</div>';
+    return;
+  }
+
+  panel.innerHTML = list.map((r) => {
+    const st = REDEMPTION_STATUS[r.status] || { label: r.status, color: '#6b7280' };
+    return `
       <div class="shop-history-row">
-        <div>
+        <div class="shop-item-main">
           <div class="shop-item-name">${escapeXml(r.item_name)}</div>
-          <div class="shop-item-desc">${escapeXml(STATUS_LABEL[r.status] || r.status)}</div>
+          <div class="shop-item-desc">${escapeXml(formatRedeemedAt(r.created_at))}</div>
+          <div class="shop-item-status" style="color:${st.color}">${escapeXml(st.label)}</div>
         </div>
         <div class="shop-history-price">-${r.price_coins}</div>
       </div>
-    `).join('')}
-  `;
+    `;
+  }).join('');
+}
+
+function formatRedeemedAt(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })
+    + ' ' + d.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
 }
 
 // renderSettingsView — หน้าการตั้งค่า (Minimal Pure Typography)

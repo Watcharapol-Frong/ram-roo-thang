@@ -215,26 +215,71 @@ function pickBuildingFoundPhrase(name) {
 // ห้าม hardcode ชื่อตึกจำเพาะ (เช่น VKB) ในนี้เด็ดขาด — ปุ่มนี้แปะอยู่ท้ายทุกข้อความไม่ว่ากำลัง
 // คุยเรื่องตึกไหนอยู่ ถ้า hardcode ตึกใดตึกหนึ่งไว้ จะพาออกนอกบริบทเดิมทันทีที่กด (เจอบั๊กนี้มาแล้ว
 // ตอน hardcode VKB ไว้ ทั้งที่กำลังคุยเรื่องตึกอื่นอยู่)
+// Quick reply ใต้กล่องพิมพ์ — ไม่ใส่ emoji ในป้าย
+//
+// เหตุผล: LINE จำกัด label ไว้ 20 ตัวอักษร และ emoji กินโควตานั้นไป 2 ตัวต่อดวง
+// พอเป็นภาษาไทยที่ยาวกว่าอังกฤษอยู่แล้วจะเหลือที่ให้คำน้อยจนต้องตัดคำ อ่านยากกว่าเดิม
+// ตัวเลือกในแถบนี้อ่านเร็วอยู่แล้วเพราะสั้นและอยู่ติดกล่องพิมพ์ ไม่ต้องมีไอคอนช่วย
 const QUICK_REPLY_ITEMS = {
   items: [
-    {
-      type: "action",
-      action: {
-        type: "message",
-        label: "📍 ค้นหาอาคาร",
-        text: "ค้นหาอาคาร"
-      }
-    },
-    {
-      type: "action",
-      action: {
-        type: "message",
-        label: "🚗 เช็คที่จอดรถ",
-        text: "เช็คที่จอดรถ"
-      }
-    }
-  ]
+    { type: 'action', action: { type: 'message', label: 'เมนูหลัก', text: 'เมนูหลัก' } },
+    { type: 'action', action: { type: 'message', label: 'ค้นหาอาคาร', text: 'ค้นหาอาคาร' } },
+    { type: 'action', action: { type: 'message', label: 'เช็คที่จอดรถ', text: 'เช็คที่จอดรถ' } },
+    { type: 'action', action: { type: 'message', label: 'ตารางสอบ', text: 'ตารางสอบ' } },
+  ],
 };
+
+// เมนูหลัก — การ์ดรวมทางเข้าทุกฟีเจอร์ ตอบเมื่อผู้ใช้พิมพ์ "เมนู" หรือกด quick reply
+//
+// ป้ายปุ่มเป็นข้อความล้วนไม่มี emoji เหมือน quick reply — ตัวหนังสือไทยในกล่องแคบๆ อ่านง่ายกว่า
+// เมื่อไม่มีไอคอนแย่งพื้นที่ และการ์ดทั้งใบดูสงบกว่า
+function generateMainMenuFlex(liffUrl) {
+  const base = liffUrl || 'https://line.me';
+  const link = (params) => `${base}${base.includes('?') ? '&' : '?'}${params}`;
+  const T = FLEX_TOKENS;
+
+  const tile = (text, action, background = T.blueSoft, color = T.brand) => ({
+    type: 'box', layout: 'vertical', backgroundColor: background, cornerRadius: '10px',
+    paddingAll: '14px', flex: 1, action,
+    contents: [{ type: 'text', text, size: 'sm', weight: 'bold', color, align: 'center', wrap: true }],
+  });
+  const pair = (a, b) => ({ type: 'box', layout: 'horizontal', spacing: 'sm', margin: 'md', contents: [a, b] });
+
+  return {
+    type: 'flex',
+    altText: 'เมนูหลัก รามรู้ทาง',
+    contents: {
+      type: 'bubble',
+      header: {
+        type: 'box', layout: 'vertical', backgroundColor: T.blueSoft, paddingAll: '18px',
+        contents: [
+          { type: 'text', text: 'เมนูหลัก รามรู้ทาง', weight: 'bold', size: 'md', color: T.ink },
+          { type: 'text', text: 'ระบบผู้ช่วยนำทาง ม.รามคำแหง (Beta Pilot)', size: 'xs', color: T.inkSoft, margin: 'xs', wrap: true },
+        ],
+      },
+      body: {
+        type: 'box', layout: 'vertical', paddingAll: '18px',
+        contents: [
+          { type: 'text', text: 'บริการเริ่มต้นทดลองใช้งาน', size: 'xs', weight: 'bold', color: T.inkSoft },
+          // URL ใช้ mode ที่แอปรองรับจริง — แผนที่คือหน้าเริ่มต้นไม่ต้องมี param
+          // และหน้าบันทึกวิชาสอบอยู่ใต้ mode=profile ไม่ใช่ mode=schedule
+          pair(
+            tile('ดูแผนที่', { type: 'uri', label: 'ดูแผนที่', uri: base }),
+            tile('เช็กที่จอดรถ', { type: 'message', label: 'เช็คที่จอดรถ', text: 'เช็คที่จอดรถ' }),
+          ),
+          pair(
+            tile('บันทึกวิชาสอบ', { type: 'uri', label: 'บันทึกวิชาสอบ', uri: link('mode=profile') }),
+            tile('วิธีใช้งาน', { type: 'message', label: 'วิธีใช้งาน', text: 'วิธีใช้งานรามรู้ทาง' }, T.amberSoft, T.ink),
+          ),
+          {
+            type: 'text', margin: 'xl', size: 'xxs', color: T.inkFaint, wrap: true,
+            text: 'ระบบกำลังทดสอบ (Beta) หากเปิดบริการอย่างเป็นทางการจะแจ้งที่นี่เป็นที่แรกครับ',
+          },
+        ],
+      },
+    },
+  };
+}
 
 // บันทึก exchange ลง CHAT_HISTORY_RAM — ใช้ร่วมกันทั้ง fast-path, postback, และ AI path
 // เพื่อให้คำถามต่อยอด (เช่น "ขอรายละเอียด") มี context ว่าเพิ่งคุยอะไรไป ไม่ใช่แค่ AI path
@@ -415,14 +460,32 @@ async function handleEvent(event, env) {
     );
   }
 
-  // เมนู/ช่วยเหลือ — ทักทายสั้นๆ ข้าม AI ไปเลยเหมือนกัน (ลด latency สำหรับ intent ที่ตอบตายตัวได้)
-  if (userMessage.match(/^(เมนู|ช่วยเหลือ|help|menu)$/i)) {
+  // เมนู/ช่วยเหลือ — ตอบการ์ดเมนูหลัก ข้าม AI ไปเลย (ตอบตายตัวได้ ไม่ต้องเสีย latency ไปกับ NLU)
+  if (userMessage.match(/^(เมนูหลัก|เมนู|ช่วยเหลือ|help|menu)$/i)) {
+    return replyToLINE(
+      event.replyToken,
+      [generateMainMenuFlex(env.LIFF_URL)],
+      env.LINE_CHANNEL_ACCESS_TOKEN
+    );
+  }
+
+  // วิธีใช้งาน — ปุ่มในการ์ดเมนูส่งข้อความนี้กลับมา ตอบเป็นข้อความสั้นพร้อม quick reply
+  if (userMessage.match(/^วิธีใช้งาน/)) {
     return replyToLINE(
       event.replyToken,
       [{
         type: 'text',
-        text: 'รามรู้ทางช่วยอะไรได้บ้าง 😊\nถามหาตึก / เช็คที่จอดรถ / บันทึกวิชาสอบ ได้เลยครับ',
-        quickReply: QUICK_REPLY_ITEMS
+        text: [
+          'ใช้งานรามรู้ทางแบบนี้ครับ',
+          '',
+          '1. พิมพ์ชื่อตึกหรือรหัสอาคาร เช่น "ECB" หรือ "ตึกเศรษฐศาสตร์" ระบบจะหาเส้นทางและลานจอดที่ใกล้ที่สุดให้',
+          '2. พิมพ์ "เช็คที่จอดรถ" ดูสภาพลานจอดที่คนอื่นรายงานไว้ รายงานเองได้ด้วยตอนอยู่ในลาน',
+          '3. พิมพ์ "ตารางสอบ" บันทึกรหัสวิชา ระบบจะดึงวันและคาบสอบจากประกาศให้เอง แล้วเตือนล่วงหน้า 1 วัน',
+          '4. ส่งรูปตารางสอบรายบุคคลเข้ามา ระบบจะอ่านห้องสอบให้อัตโนมัติ',
+          '',
+          'ทุกการใช้งานสะสมเหรียญไปแลกของรางวัลได้ครับ',
+        ].join('\n'),
+        quickReply: QUICK_REPLY_ITEMS,
       }],
       env.LINE_CHANNEL_ACCESS_TOKEN
     );

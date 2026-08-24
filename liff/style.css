@@ -1561,3 +1561,74 @@ body.is-searching #action-sheet-slot {
 }
 
 .shop-history-price { font-size: 0.9rem; font-weight: 700; color: #d64545; flex-shrink: 0; }
+
+/* popup ยืนยัน — ใช้แทน window.confirm ที่หน้าตาหลุดจากแอปและบางเครื่องถูกบล็อก */
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.45);
+  animation: confirm-fade 0.15s ease;
+}
+
+@keyframes confirm-fade { from { opacity: 0; } to { opacity: 1; } }
+
+.confirm-box {
+  width: 100%;
+  max-width: 320px;
+  background: #ffffff;
+  border-radius: 18px;
+  padding: 22px 20px 16px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+}
+
+.confirm-title { margin: 0 0 10px; font-size: 1.05rem; font-weight: 800; color: #111827; }
+.confirm-body { margin: 0; font-size: 0.9rem; color: #374151; line-height: 1.55; white-space: pre-line; }
+.confirm-note { margin: 10px 0 0; font-size: 0.78rem; color: #b45309; line-height: 1.5; }
+
+.confirm-actions { display: flex; gap: 10px; margin-top: 20px; }
+
+.confirm-actions button {
+  flex: 1;
+  border: 0;
+  border-radius: 12px;
+  padding: 12px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.confirm-cancel { background: #f1f5f9; color: #475569; }
+.confirm-ok { background: #1560ff; color: #ffffff; }
+.confirm-actions button:active { transform: scale(0.97); }
+
+.shop-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 4px;
+  background: #eef2f7;
+  border-radius: 12px;
+  margin-bottom: 14px;
+}
+
+.shop-tab {
+  flex: 1;
+  border: 0;
+  border-radius: 9px;
+  padding: 9px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #64748b;
+  background: transparent;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.shop-tab.is-active { background: #ffffff; color: #111827; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08); }
+
+.shop-item-limit { font-size: 0.72rem; color: #b45309; margin-top: 4px; font-weight: 600; }
+.shop-item-status { font-size: 0.76rem; font-weight: 700; margin-top: 4px; }
