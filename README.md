@@ -648,7 +648,7 @@ the wrong time. Course codes not present in the timetable are now rejected at in
 | Exam schedule dataset | ✅ | 2,865 courses with dates + periods; rooms supplied by students via chat photo OCR or typed in the app |
 | User database + coins | ✅ | D1 + ledger, double-claim prevention enforced by the database |
 | Survey → Google Sheets | ✅ | Live and verified end to end (a test row reached the sheet) |
-| Shop / spending coins | ✅ | One item (LINE sticker, 30 coins). Items live in `shop_items` so pricing can change without a deploy; an admin page is still to come |
+| Shop / spending coins | ⏸️ | Built and tested, but switched off for the demo: `SHOP_ENABLED = false` in `liff/app.js` plus `active = 0` on every row in `shop_items`. Turn both back on together |
 | Proactive Exam Alerts (Cron) | ✅ | Day-before push including the exam room when the student has supplied one |
 | Bot status checks | ✅ | `/api/health` + heartbeats + an in-chat status card; `scripts/healthcheck.mjs` for monitors |
 | Service Q&A follow-ups | ✅ | Topic memory + per-facet answers; gaps recorded in `unanswered_queries` |

@@ -1396,7 +1396,16 @@ async function renderFeedbackView() {
   });
 }
 
-// renderShopView — หน้าร้านค้า & สิทธิพิเศษ (Coming Soon กลางจอใหญ่ๆ)
+// ปิดร้านค้าชั่วคราวก่อนวันเดโม — ของรางวัลยังจัดหาไม่ทัน
+//
+// ปิดที่ตัวแปรนี้ตัวเดียว ไม่ได้ลบโค้ดร้านค้าทิ้ง เพราะทุกอย่างทำเสร็จและทดสอบผ่านแล้ว
+// (แท็บของรางวัล/ประวัติ, popup ยืนยัน, จำกัด 1 ครั้งต่อคน, คิวส่งของฝั่งแอดมิน)
+// พร้อมเปิดเมื่อไรแค่เปลี่ยนเป็น true แล้วสั่ง UPDATE shop_items SET active = 1
+//
+// ฝั่ง server ปิดคู่กันด้วย (active = 0 ใน D1) — ซ่อนแค่หน้าจอไม่พอ เพราะ POST /api/shop/redeem
+// ยังยิงตรงได้อยู่ ถ้าเปิดทิ้งไว้ผู้ใช้จะเสียเหรียญไปกับของที่ไม่มีใครส่งให้
+const SHOP_ENABLED = false;
+
 // renderShopView — ร้านค้าแลกเหรียญ ใช้โครงและสไตล์ชุดเดียวกับหน้าโปรไฟล์
 // (profile-flat-container / การ์ดขอบบาง / badge เหรียญ) จะได้ไม่รู้สึกว่าเป็นคนละแอปตอนสลับแท็บ
 //
@@ -1406,6 +1415,20 @@ let shopTab = 'items';
 
 async function renderShopView() {
   const container = getApp();
+
+  if (!SHOP_ENABLED) {
+    container.innerHTML = `
+      <div class="coming-soon-container">
+        <div class="coming-soon-badge">Shop</div>
+        <h1 class="coming-soon-title">Coming Soon</h1>
+        <p class="coming-soon-sub">ระบบแลกของรางวัลกำลังจัดเตรียม<br>เหรียญที่สะสมไว้ไม่หายไปไหน ใช้ได้เมื่อเปิดระบบครับ</p>
+      </div>
+      ${renderBottomNavHTML('shop')}
+    `;
+    bindBottomNavEvents();
+    return;
+  }
+
   container.innerHTML = '<p style="text-align:center;padding:40px 0;color:var(--muted)">กำลังโหลด...</p>';
 
   let userId = null;
