@@ -34,8 +34,8 @@ The system is **two separate Cloudflare Workers**, deployed with different comma
 | Store | Contents | Why here |
 |---|---|---|
 | **D1** `ram-roo-thang` | `users`, `coin_ledger`, `user_courses`, `exam_alerts_sent`, `room_import_drafts` | Needs real transactions when granting/spending coins, and needs to be queryable |
-| **KV** `BASELINE_DATA` | 35 buildings / 8 parking zones / 11 services / 25 shops | Read-only, almost never changes |
-| **KV** `PARKING_REPORTS` | Parking condition reports | Must expire on its own — uses KV TTL |
+| **Worker bundle** | 35 buildings / 8 parking zones / 11 services / 25 shops | Read-only and almost never changes — imported straight from `data/baseline-dataset.json` |
+| **KV** `PARKING_REPORTS` | Latest parking report per zone | Must expire on its own — uses KV TTL |
 | **KV** `RATE_LIMIT` | Last report time per user | Same, uses TTL |
 | **KV** `CHAT_HISTORY_RAM` | Bot conversation history | Same, uses TTL |
 | **Static files** | `ru_master.geojson` (91 places), `exam-lookup.json` (2,865 courses) | Static data — served directly by the LIFF worker instead of burning KV read quota |
@@ -49,6 +49,25 @@ The system is **two separate Cloudflare Workers**, deployed with different comma
 2. KV cannot be queried at all, so a ledger (ordered by time, filtered by user, summed) is impossible.
 3. Free-tier write quota: KV allows 1,000 rows/day, D1 allows 100,000 rows/day. A 200-user beta is
    estimated at ~2,200 writes/day.
+
+### Why reference data is bundled and not in KV
+
+**KV `list` is not a cheap read.** It is metered separately from `get` and its free daily allowance
+runs out fast. The old `listByPrefix` helper issued a `list` plus one `get` per key, so a single map
+load cost nearly 80 KV operations.
+
+On Aug 24, 2026 this took production down: the daily quota was exhausted (Cloudflare API code 10048)
+and every endpoint serving building, parking or shop data returned 500. The bot answered "no data for
+that building" while the data itself was perfectly intact.
+
+Reference data is read-only and changes maybe once a term, so it is now imported into the worker
+bundle. No network hop, no quota, no cost — the tradeoff is that changing it requires a redeploy.
+
+Parking reports keep only the newest report per zone (`latest:{zone_id}`) with a TTL equal to the
+aggregation window, so resolving status is a single `get` and expiry is handled by KV rather than by
+filtering timestamps in code.
+
+**Rule of thumb: never put a KV `list` on a request path users hit often.**
 
 D1 is created in the **APAC** region because writes go to a single primary — a US primary would make
 every write from Thailand noticeably slower.
@@ -370,7 +389,7 @@ the wrong time. Course codes not present in the timetable are now rejected at in
 | ruMaster dataset | ✅ | 91 places |
 | Exam schedule dataset | ✅ | 2,865 courses with dates + periods; rooms supplied by students via chat photo OCR |
 | User database + coins | ✅ | D1 + ledger, double-claim prevention enforced by the database |
-| Survey → Google Sheets | ⚠️ | Code is ready but `FEEDBACK_ENDPOINT_URL` is unset, so no responses are collected yet |
+| Survey → Google Sheets | ✅ | Live and verified end to end (a test row reached the sheet) |
 | Shop / spending coins | ✅ | One item (LINE sticker, 30 coins). Items live in `shop_items` so pricing can change without a deploy; an admin page is still to come |
 | Proactive Exam Alerts (Cron) | ✅ | Day-before push including the exam room when the student has supplied one |
 | Community | ❌ | Not started (ADR-0004 kept it out of the MVP) |
@@ -387,8 +406,13 @@ claim feedback coins → shop → redeem) against **production**, 40 concurrent:
 | Throughput | 90 req/s |
 | Wall time | 24s |
 
-Slowest endpoint was `GET /api/buildings` (p95 1.8s, max 5.7s) — it does ~36 sequential KV reads.
-Moving that to a static JSON file, like `exam-lookup.json`, is the obvious next optimization.
+Slowest endpoint was `GET /api/buildings` (p95 1.8s, max 5.7s) — it did ~36 KV operations per call.
+
+**This test had a cost that only showed up later**: it burned through the day's KV `list` quota and
+took production down a few hours afterwards. The measured latency was real, but "0 failures" hid the
+fact that we were spending a scarce quota, not a plentiful one. Reference data has since moved into
+the worker bundle, so the same run today would use no KV at all. Re-run the test after any change
+that adds KV operations to a hot path.
 
 For context, the target scenario is 200 users spread over 30 minutes ≈ 0.11 users/sec. This test ran
 at 8.2 users/sec — roughly **75× the expected peak** — and still didn't drop a request. D1 writes for
@@ -401,7 +425,6 @@ D1 afterwards).
 
 - [ ] Set `ADMIN_TOKEN` in `worker/.secrets.env` so the alerts can be demoed manually
 - [ ] Check the LINE OA message quota against the expected beta volume
-- [ ] Set `FEEDBACK_ENDPOINT_URL` after deploying the Google Apps Script
 - [x] Load test — 200 users × 11 requests against production, 0 failures (see below)
 - [ ] Seed real parking reports before the event (requires people physically checking in)
 - [ ] Prepare a QR code pointing at the LINE OA (not the LIFF directly — users must go through chat first)
