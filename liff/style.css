@@ -6,6 +6,10 @@
   --border: #eaeaea;
   --bg: #f7f7f7;
   --danger: #d9534f;
+
+  /* ระยะที่แถบเมนูล่างกินไปจากขอบจอ (16px offset + ความสูงแถบ + ช่องไฟ)
+     ทุกอย่างที่ลอยอยู่เหนือแถบต้องอ้างค่านี้ ไม่ใช่ต่างคนต่างเดาตัวเลขเอง */
+  --bottom-nav-clearance: 84px;
 }
 
 * {
@@ -983,7 +987,7 @@ body.map-view {
 
 /* --- Bottom Floating Navigation Bar (พื้นหลังขาวอมเทา Frosted Glass) --- */
 body {
-  padding-bottom: 84px; /* เว้นที่ให้ bottom nav bar ไม่ทับเนื้อหา */
+  padding-bottom: var(--bottom-nav-clearance); /* เว้นที่ให้ bottom nav bar ไม่ทับเนื้อหา */
 }
 
 .bottom-nav-bar {
@@ -1556,9 +1560,11 @@ body {
 }
 
 /* --- Floating Toast Notification --- */
+/* toast ลอยเหนือแถบเมนูล่าง ไม่ทับ — ของเดิมตั้ง bottom: 24px ซึ่งอยู่กลางแถบพอดี
+   ข้อความอย่าง "เพิ่ม ACC1102 แล้ว" เลยบังปุ่มเมนูตอนที่ผู้ใช้กำลังกดเพิ่มวิชารัวๆ */
 .profile-toast {
   position: fixed;
-  bottom: 24px;
+  bottom: calc(var(--bottom-nav-clearance) + 8px);
   left: 50%;
   transform: translateX(-50%) translateY(20px);
   background: rgba(26, 30, 36, 0.92);
