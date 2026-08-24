@@ -177,14 +177,19 @@ function main() {
   // dest_id&mode=nav -> เลือกอาคารให้ทันที, zone_id&mode=parking -> เลือกลานจอดให้ทันที
   // ไม่มี param เลย -> Single Canvas Overview (§1) ให้ผู้ใช้แตะเลือกเองจากแผนที่
   // ?car=lat,lng — ลิงก์ที่เพื่อนแชร์ตำแหน่งรถมาให้ เปิดแล้วนำทางไปหารถคันนั้นได้เลย
+  // ?layers=parking — เปิดแผนที่โดยเลือกเฉพาะเลเยอร์ที่ระบุ ใช้กับปุ่ม "เช็กที่จอดรถ" ในเมนู
+  // ของเดิมปุ่มนั้นส่งข้อความกลับมาแล้วบอทตอบว่าไม่มีข้อมูล ซึ่งไม่ตรงกับสิ่งที่ผู้ใช้อยากได้
+  // สิ่งที่เขาต้องการคือ "เห็นลานจอดบนแผนที่" ไม่ใช่ข้อความสรุป
+  const presetLayers = params.get('layers');
+
   if (params.has('car')) {
-    renderMapView({ presetCar: params.get('car') });
+    renderMapView({ presetCar: params.get('car'), presetLayers });
   } else if (params.has('dest_id')) {
-    renderMapView({ presetDestId: params.get('dest_id') });
+    renderMapView({ presetDestId: params.get('dest_id'), presetLayers });
   } else if (mode === 'parking' && params.has('zone_id')) {
-    renderMapView({ presetZoneId: params.get('zone_id') });
+    renderMapView({ presetZoneId: params.get('zone_id'), presetLayers });
   } else {
-    renderMapView({});
+    renderMapView({ presetLayers });
   }
 }
 
@@ -450,8 +455,16 @@ function isWithinCampusBounds({ lat, lng }) {
   return lat >= g.minLat && lat <= g.maxLat && lng >= g.minLng && lng <= g.maxLng;
 }
 
-async function renderMapView({ presetDestId, presetZoneId, presetCar } = {}) {
+async function renderMapView({ presetDestId, presetZoneId, presetCar, presetLayers } = {}) {
   const container = getApp();
+
+  // เลือกเลเยอร์ตามที่ลิงก์ระบุมา ก่อนวาดแผนที่ครั้งแรก — ตั้งทีหลังจะเห็นหมุดทุกชนิดแวบหนึ่ง
+  // ค่าที่ไม่รู้จักถูกทิ้ง และถ้าไม่เหลือเลเยอร์ที่ใช้ได้เลยก็คงค่าเดิมไว้ ดีกว่าโชว์แผนที่เปล่า
+  if (presetLayers) {
+    const valid = new Set(MAP_LAYERS.map((l) => l.id));
+    const wanted = presetLayers.split(',').map((x) => x.trim()).filter((x) => valid.has(x));
+    if (wanted.length) appState.map.activeLayers = new Set(wanted);
+  }
 
   // เฉพาะ view นี้เท่านั้นที่ต้องมี Google Maps — ถ้าโหลดไม่ขึ้นให้เหลือทางไป view อื่นที่ยังใช้ได้
   try {

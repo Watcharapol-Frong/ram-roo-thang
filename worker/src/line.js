@@ -10,6 +10,7 @@ import { logUnanswered } from './analytics.js';
 import { resolveStatusForZone } from './parking.js';
 import { haversineDistanceMeters } from './utils.js';
 import { processExamScheduleImage, confirmRoomImport, cancelRoomImport } from './examroom.js';
+import { detectScheduleQuestion, answerMySchedule } from './myschedule.js';
 import { resultCard, row, FLEX_TOKENS } from './flex.js';
 import { recordHeartbeat, runHealthChecks, statusFlexMessage } from './health.js';
 
@@ -160,13 +161,16 @@ function generateServiceSummaryMessage(service) {
 export function generateScheduleFlexMessage(liffUrl) {
   const uri = liffUrl ? `${liffUrl}${liffUrl.includes('?') ? '&' : '?'}mode=profile` : 'https://line.me';
   return resultCard({
-    title: 'ตารางสอบของคุณ',
+    title: 'ตารางของคุณ',
     headerColor: FLEX_TOKENS.blueSoft,
     hero: 'ส่งรูปเอกสารมาได้เลย',
     heroNote: 'ใบลงทะเบียนเรียนหรือตารางสอบ ระบบอ่านรหัสวิชาให้เอง',
-    rows: [row('หรือพิมพ์เอง', 'ใส่รหัสวิชาในแอป')],
-    actions: [{ label: 'เปิดตารางสอบ', action: { type: 'uri', label: 'เปิดตารางสอบ', uri } }],
-    altText: 'บันทึกวิชาสอบ ส่งรูปเอกสารหรือพิมพ์รหัสวิชาเอง',
+    rows: [
+      row('หรือพิมพ์เอง', 'ใส่รหัสวิชาในแอป'),
+      row('บันทึกครั้งเดียว', 'ได้ทั้งตารางเรียนและตารางสอบ'),
+    ],
+    actions: [{ label: 'เปิดตารางของฉัน', action: { type: 'uri', label: 'เปิดตาราง', uri } }],
+    altText: 'บันทึกวิชา ส่งรูปเอกสารหรือพิมพ์รหัสวิชาเอง',
   });
 }
 
@@ -373,21 +377,19 @@ export function generateMainMenuFlex(liffUrl) {
         type: 'box', layout: 'vertical', paddingAll: '18px',
         contents: [
           { type: 'text', text: 'บริการเริ่มต้นทดลองใช้งาน', size: 'xs', weight: 'bold', color: T.inkSoft },
-          // URL ใช้ mode ที่แอปรองรับจริง — แผนที่คือหน้าเริ่มต้นไม่ต้องมี param
-          // และหน้าบันทึกวิชาสอบอยู่ใต้ mode=profile ไม่ใช่ mode=schedule
+          // Every tile opens the thing itself. "Check parking" used to send a chat message back and
+          // the bot replied that it had no data, which is not what the person wanted — they wanted to
+          // see the parking areas on the map. ?layers=parking opens the map with only that layer on.
+          //
+          // The map is the app's default view, so it needs no parameter, and the course page lives
+          // under mode=profile (there is no mode=schedule).
           pair(
             tile('ดูแผนที่', { type: 'uri', label: 'ดูแผนที่', uri: base }),
-            tile('เช็กที่จอดรถ', { type: 'message', label: 'เช็คที่จอดรถ', text: 'เช็คที่จอดรถ' }),
+            tile('เช็กที่จอดรถ', { type: 'uri', label: 'เช็กที่จอดรถ', uri: link('layers=parking') }),
           ),
           pair(
-            tile('บันทึกวิชาสอบ', { type: 'uri', label: 'บันทึกวิชาสอบ', uri: link('mode=profile') }),
+            tile('บันทึกวิชา', { type: 'message', label: 'บันทึกวิชา', text: 'บันทึกวิชา' }),
             tile('วิธีใช้งาน', { type: 'message', label: 'วิธีใช้งาน', text: 'วิธีใช้งานรามรู้ทาง' }, T.amberSoft, T.ink),
-          ),
-          // ช่องขวาว่างไว้ตั้งใจ — ยังไม่มีฟีเจอร์ที่ห้าที่พร้อมใช้จริง ใส่ปุ่มหลอกไว้ให้เต็มแถว
-          // แล้วกดไปเจอ "Coming Soon" แย่กว่าปล่อยว่าง (เคยทำแบบนั้นกับร้านค้ามาแล้ว)
-          pair(
-            tile('เช็คสถานะระบบ', { type: 'message', label: 'เช็คสถานะ', text: 'เช็คสถานะ' }, T.greenSoft, T.ink),
-            { type: 'box', layout: 'vertical', flex: 1, contents: [{ type: 'filler' }] },
           ),
           {
             type: 'text', margin: 'xl', size: 'xxs', color: T.inkFaint, wrap: true,
@@ -597,12 +599,21 @@ async function handleEvent(event, env) {
      await showLoadingAnimation(userId, env.LINE_CHANNEL_ACCESS_TOKEN);
   }
 
-  // Schedule intent ข้าม AI ไปเลย (MVP-SPEC §1 หมายเหตุความน่าเชื่อถือ) — ไม่ต้องพึ่ง NLU
-  if (userMessage.match(/บันทึกวิชาสอบ|ตารางสอบ/i)) {
+  // Personal schedule questions ("what do I have this week?") are answered from the student's own
+  // saved courses. Checked before the generic keyword below, because "ตารางเรียนสัปดาห์นี้" contains
+  // the word that would otherwise fall through to the generic "how to save courses" card.
+  const scheduleAsk = detectScheduleQuestion(userMessage);
+  if (scheduleAsk) {
+    const messages = await answerMySchedule(env, userId, scheduleAsk);
+    if (messages) return replyToLINE(event.replyToken, messages, env.LINE_CHANNEL_ACCESS_TOKEN);
+  }
+
+  // Skips the AI entirely (MVP-SPEC §1, reliability note) — no NLU needed for a fixed answer.
+  if (userMessage.match(/บันทึกวิชา|ตารางสอบ|ตารางเรียน/i)) {
     return replyToLINE(
       event.replyToken,
       [
-        { type: 'text', text: 'บันทึกวิชาสอบได้สองทางครับ ส่งรูปเอกสารเข้ามาในแชทนี้ หรือพิมพ์รหัสวิชาเองในแอป' },
+        { type: 'text', text: 'บันทึกวิชาได้สองทางครับ ส่งรูปเอกสารเข้ามาในแชทนี้ หรือพิมพ์รหัสวิชาเองในแอป' },
         generateScheduleFlexMessage(env.LIFF_URL)
       ],
       env.LINE_CHANNEL_ACCESS_TOKEN

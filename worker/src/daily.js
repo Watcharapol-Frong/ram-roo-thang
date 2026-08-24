@@ -55,14 +55,16 @@ const CLASS_QUERY = `
 `;
 
 // รวบรวมว่าใครมีอะไรวันนี้บ้าง — แยกจากการส่งจริงเพื่อให้ dry-run เดินโค้ดเส้นทางเดียวกันเป๊ะ
-export async function collectDigests(env, dateIso, dayCode) {
+export async function collectDigests(env, dateIso, dayCode, onlyUserId = null) {
   const byUser = new Map();
   const ensure = (userId) => {
     if (!byUser.has(userId)) byUser.set(userId, { classes: [], exams: [] });
     return byUser.get(userId);
   };
 
-  const classes = await env.DB.prepare(CLASS_QUERY).bind(dayCode).all();
+  const classes = onlyUserId
+    ? await env.DB.prepare(`${CLASS_QUERY} AND uc.user_id = ?`).bind(dayCode, onlyUserId).all()
+    : await env.DB.prepare(CLASS_QUERY).bind(dayCode).all();
   for (const r of classes.results || []) {
     ensure(r.user_id).classes.push({
       code: r.course_code,
@@ -74,7 +76,9 @@ export async function collectDigests(env, dateIso, dayCode) {
   }
 
   // วิชาที่สอบวันนี้ — ห้องสอบมาจาก user_courses.room (ผู้ใช้ส่งรูปหรือกรอกเอง) ไม่ใช่จากประกาศ
-  const saved = await env.DB.prepare('SELECT user_id, course_code, room FROM user_courses').all();
+  const saved = onlyUserId
+    ? await env.DB.prepare('SELECT user_id, course_code, room FROM user_courses WHERE user_id = ?').bind(onlyUserId).all()
+    : await env.DB.prepare('SELECT user_id, course_code, room FROM user_courses').all();
   for (const r of saved.results || []) {
     const value = examLookup.courses[r.course_code];
     if (!value || value.slice(0, 10) !== dateIso) continue;
