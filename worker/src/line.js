@@ -326,29 +326,56 @@ async function appendHistory(env, userId, userMessage, modelText) {
   }
 }
 
-// การ์ดสรุปผลอ่านรูป พร้อมปุ่มยืนยัน/ยกเลิก
+// การ์ดสรุปผลอ่านเอกสาร พร้อมปุ่มยืนยัน/ยกเลิก
 //
 // ต้องให้กดยืนยันเสมอ ห้ามบันทึกทันที — OCR ผิดได้ และผิดแปลว่าคนไปผิดห้องสอบ
 // คนที่ตัดสินใจครั้งสุดท้ายต้องเป็นเจ้าของตารางสอบ ไม่ใช่โมเดล
-function generateRoomConfirmFlex(accepted, rejected, draftId) {
-  const rows = accepted.map((item) =>
-    row(item.course_code, item.room, { strong: true, color: FLEX_TOKENS.brand }));
+//
+// เอกสารที่รับได้มีสองแบบ และการ์ดต้องอ่านรู้เรื่องทั้งคู่:
+//   ใบลงทะเบียนเรียน   -> มีแต่รหัสวิชา ห้องยังว่างทั้งใบ
+//   ตารางสอบรายบุคคล  -> มีห้องสอบมาด้วย
+const CONFIRM_MAX_ROWS = 12;
 
-  const note = rejected.length
-    ? `อ่านไม่ผ่าน ${rejected.length} รายการ เพราะไม่พบรหัสในตารางสอบของมหาวิทยาลัย — วันสอบใช้ของประกาศเสมอ อ่านจากรูปเฉพาะห้องสอบ ตรวจให้ตรงก่อนกดบันทึกนะครับ`
-    : 'วันสอบใช้ของประกาศมหาวิทยาลัยเสมอ อ่านจากรูปเฉพาะห้องสอบ ตรวจให้ตรงก่อนกดบันทึกนะครับ';
+export function generateRoomConfirmFlex(accepted, rejected, draftId) {
+  const withRoom = accepted.filter((item) => item.room).length;
+
+  // ใบลงทะเบียนเต็มเทอมมีได้เกิน 20 วิชา ยาวเกินกว่าจะกวาดตาอ่านในการ์ดใบเดียว
+  // ตัดให้เหลือพอตรวจสายตาแล้วบอกจำนวนที่เหลือ ของครบอยู่ในแอปหลังกดบันทึกอยู่แล้ว
+  const shown = accepted.slice(0, CONFIRM_MAX_ROWS);
+  const rows = shown.map((item) => row(
+    item.course_code,
+    item.room || 'ยังไม่ระบุห้อง',
+    item.room
+      ? { strong: true, color: FLEX_TOKENS.brand }
+      : { color: FLEX_TOKENS.inkFaint },
+  ));
+  if (accepted.length > shown.length) {
+    // ป้ายซ้ายว่างไม่ได้ — LINE ปฏิเสธ text ที่เป็นสตริงว่าง (ดู scripts/validate-flex.mjs)
+    rows.push(row('และอีก', `${accepted.length - shown.length} วิชา`, { color: FLEX_TOKENS.inkFaint }));
+  }
+
+  const notes = [];
+  if (withRoom === 0) {
+    notes.push('เอกสารนี้ไม่มีห้องสอบ บันทึกวิชาไว้ก่อนได้เลย พอห้องประกาศแล้วค่อยส่งรูปตารางสอบมาใหม่ หรือกรอกห้องเองในแอปก็ได้ครับ');
+  } else if (withRoom < accepted.length) {
+    notes.push(`อ่านห้องสอบได้ ${withRoom} จาก ${accepted.length} วิชา ที่เหลือเติมทีหลังได้ครับ`);
+  }
+  if (rejected.length) {
+    notes.push(`ข้าม ${rejected.length} รายการที่ไม่พบรหัสในตารางสอบของมหาวิทยาลัย`);
+  }
+  notes.push('วันสอบใช้ของประกาศมหาวิทยาลัยเสมอ อ่านจากรูปเฉพาะรหัสวิชากับห้องสอบ ตรวจให้ตรงก่อนกดบันทึกนะครับ');
 
   return resultCard({
-    title: 'อ่านห้องสอบจากรูปแล้ว',
+    title: withRoom ? 'อ่านวิชาและห้องสอบแล้ว' : 'อ่านรายวิชาจากเอกสารแล้ว',
     badge: `${accepted.length} วิชา`,
     headerColor: FLEX_TOKENS.amberSoft,
     rows,
-    note,
+    note: notes.join('\n'),
     actions: [
-      { label: 'บันทึกห้องสอบ', action: { type: 'postback', label: 'บันทึก', data: `rooms_confirm:${draftId}`, displayText: 'บันทึกห้องสอบ' } },
+      { label: 'บันทึกลงตารางสอบ', action: { type: 'postback', label: 'บันทึก', data: `rooms_confirm:${draftId}`, displayText: 'บันทึกลงตารางสอบ' } },
       { label: 'ยกเลิก', color: FLEX_TOKENS.inkFaint, action: { type: 'postback', label: 'ยกเลิก', data: `rooms_cancel:${draftId}`, displayText: 'ยกเลิก' } },
     ],
-    altText: `อ่านห้องสอบได้ ${accepted.length} วิชา กดยืนยันเพื่อบันทึก`,
+    altText: `อ่านได้ ${accepted.length} วิชา กดยืนยันเพื่อบันทึก`,
   });
 }
 
@@ -362,12 +389,14 @@ async function handleImageMessage(event, env) {
     const { accepted, rejected, draftId } = await processExamScheduleImage(env, userId, event.message.id);
 
     if (!draftId) {
+      // เหลือแค่สองสาเหตุจริงๆ แล้ว: อ่านรหัสไม่ออกเลย หรืออ่านออกแต่ไม่มีรหัสนั้นในตารางสอบ
+      // (ไม่มีห้องสอบไม่ใช่สาเหตุอีกต่อไป — ใบลงทะเบียนที่ไม่มีคอลัมน์ห้องผ่านได้แล้ว)
       const why = rejected.length
-        ? 'อ่านรหัสวิชาได้แต่ไม่ตรงกับตารางสอบของมหาวิทยาลัยเลยครับ'
-        : 'อ่านตารางจากรูปนี้ไม่ออกครับ';
+        ? `อ่านรหัสวิชาได้ ${rejected.length} รายการ แต่ไม่มีรหัสไหนอยู่ในตารางสอบภาคนี้เลยครับ`
+        : 'อ่านรหัสวิชาจากรูปนี้ไม่ออกเลยครับ';
       return replyToLINE(event.replyToken, [{
         type: 'text',
-        text: `${why}\n\nลองถ่ายใหม่ให้เห็นทั้งตารางและตัวหนังสือชัดๆ หรือกรอกห้องสอบเองในแอปก็ได้ครับ`,
+        text: `${why}\n\nลองถ่ายใหม่ให้เห็นทั้งตารางและตัวหนังสือชัดๆ หรือพิมพ์รหัสวิชาเองในแอปก็ได้ครับ`,
       }], token);
     }
 
@@ -432,10 +461,16 @@ async function handlePostback(event, env) {
         : 'ไม่พบรายการนี้แล้วครับ อาจกดไปแล้วหรือยกเลิกไปก่อนหน้านี้';
       return replyToLINE(event.replyToken, [{ type: 'text', text }], env.LINE_CHANNEL_ACCESS_TOKEN);
     }
-    const lines = result.items.map((i) => `• ${i.course_code}  ${i.room}`).join('\n');
+    const lines = result.items
+      .map((i) => (i.room ? `• ${i.course_code}  ${i.room}` : `• ${i.course_code}`))
+      .join('\n');
+    // บอกให้ชัดว่าอะไรยังขาด และเติมยังไง — ไม่งั้นผู้ใช้ไม่รู้เลยว่าต้องกลับมาทำอะไรอีก
+    const tail = result.withoutRoom
+      ? `\nยังไม่มีห้องสอบ ${result.withoutRoom} วิชา ส่งรูปตารางสอบมาเพิ่มทีหลัง หรือกรอกห้องเองในแอปได้เลยครับ`
+      : '\nจะเตือนพร้อมห้องสอบให้ล่วงหน้า 1 วันครับ';
     return replyToLINE(event.replyToken, [{
       type: 'text',
-      text: `บันทึกห้องสอบ ${result.saved} วิชาแล้วครับ\n\n${lines}\n\nจะเตือนพร้อมห้องสอบให้ล่วงหน้า 1 วันครับ`,
+      text: `บันทึก ${result.saved} วิชาลงตารางสอบแล้วครับ\n\n${lines}\n${tail}`,
     }], env.LINE_CHANNEL_ACCESS_TOKEN);
   }
 

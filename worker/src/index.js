@@ -4,7 +4,7 @@ import { handleWebhookRequest } from './line.js';
 import { handleParkingReport, handleParkingStatus, handleParkingZone, handleParkingZones } from './parking.js';
 import { handleGetBuilding, handleListBuildings } from './building.js';
 import { handleListShops, handleListShopItems, handleRedeemItem, handleListRedemptions, handleAdminListRedemptions, handleAdminFulfill } from './shop.js';
-import { handlePostSchedule, handleGetSchedule, handleDeleteSchedule } from './schedule.js';
+import { handlePostSchedule, handleGetSchedule, handleDeleteSchedule, handlePatchScheduleRoom } from './schedule.js';
 import { handleGetUser, handleGetLedger, handleFeedbackAward, handleSaveCarAward } from './user.js';
 import { handleAdminExamAlerts, runDailyExamAlerts } from './exam.js';
 import { handleHealth, recordHeartbeat } from './health.js';
@@ -124,6 +124,12 @@ async function route(request, env, ctx) {
   }
   if (method === 'POST' && pathname === '/api/user/save-car') {
     return handleSaveCarAward(request, env);
+  }
+
+  // แก้ห้องสอบของวิชาที่บันทึกไว้ — ใช้ POST ไม่ใช่ PATCH เพราะ CORS ของ worker นี้อนุญาต
+  // แค่ GET/POST/DELETE ถ้าเพิ่ม PATCH ต้องไปแก้ preflight ด้วย ไม่คุ้มกับที่ได้มา
+  if (method === 'POST' && pathname === '/api/schedule/room') {
+    return handlePatchScheduleRoom(request, env);
   }
 
   if (pathname === '/api/schedule') {

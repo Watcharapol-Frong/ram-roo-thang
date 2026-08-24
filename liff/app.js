@@ -1787,27 +1787,35 @@ function buildingCodeFromRoom(room) {
 function getCourseExamInfo(courseCode, saved) {
   const code = (courseCode || '').toUpperCase().trim();
   const table = examLookupCache && examLookupCache.courses;
+  // ทุกทางออกต้องมี room ติดไปด้วยเสมอ เพราะแผงแก้ไขเอาค่านี้ไปตั้งเป็นค่าเริ่มต้นในช่องกรอก
+  // ถ้าทางไหนลืมใส่ ช่องจะว่างทั้งที่มีห้องเก็บอยู่ แล้วกดบันทึกทีเดียวห้องเดิมหายไปเลย
+  const savedRoom = (saved && saved.room) || null;
+
   if (!table || !(code in table)) {
-    return { known: false, date_th: 'ไม่พบวิชานี้ในตารางสอบ', time_th: '', building_id: null, location_th: '' };
+    return { known: false, date_th: 'ไม่พบวิชานี้ในตารางสอบ', time_th: '', building_id: buildingCodeFromRoom(savedRoom),
+             location_th: savedRoom ? `ห้อง ${savedRoom}` : '', room: savedRoom };
   }
 
   const value = table[code];
   if (!value) {
     // มีวิชาอยู่จริงแต่ไม่ได้สอบส่วนกลาง — คณะกำหนดวันเวลาเอง
-    return { known: true, date_th: 'คณะจัดสอบเอง', time_th: '', building_id: null, location_th: 'ติดต่อคณะเพื่อดูวันเวลาสอบ' };
+    return { known: true, date_th: 'คณะจัดสอบเอง', time_th: '', building_id: buildingCodeFromRoom(savedRoom),
+             location_th: savedRoom ? `ห้อง ${savedRoom}` : 'ติดต่อคณะเพื่อดูวันเวลาสอบ', room: savedRoom };
   }
 
   const isoDate = value.slice(0, 10);
   const periods = value.slice(10).split('');
   // ห้องสอบมาจากรูปตารางสอบที่ผู้ใช้ส่งเข้าแชท (worker/src/examroom.js) ไม่ใช่จากประกาศ
   // เพราะมหาวิทยาลัยประกาศห้องเป็นรายบุคคลใกล้สัปดาห์สอบ ดึงเองไม่ได้
-  const room = saved && saved.room ? saved.room : null;
+  const room = savedRoom;
   return {
     known: true,
     date_th: formatThaiExamDate(isoDate),
     time_th: periods.map((p) => EXAM_PERIOD_TIME[p] || `คาบ ${p}`).join(' และ '),
     building_id: buildingCodeFromRoom(room),
-    location_th: room ? `ห้อง ${room}` : 'ส่งรูปตารางสอบในแชทเพื่อเพิ่มห้องสอบ',
+    // เดิมเขียนว่า "ส่งรูปตารางสอบในแชท" ซึ่งตอนนี้ไม่ใช่ทางเดียวแล้ว — กรอกเองตรงนี้ได้
+    location_th: room ? `ห้อง ${room}` : 'ยังไม่ระบุห้องสอบ',
+    room,
   };
 }
 
@@ -1839,6 +1847,16 @@ function renderScheduleForm(container, userId) {
             <span>เพิ่ม</span>
           </button>
         </div>
+        <!-- ห้องสอบไม่บังคับ และใช้ได้เฉพาะตอนเพิ่มทีละวิชา — วางไว้แถวล่างให้ชัดว่าเป็นของเสริม
+             ไม่ใช่ช่องที่ต้องกรอกก่อนถึงจะกดเพิ่มได้ (มหาวิทยาลัยประกาศห้องทีหลังการลงทะเบียนนาน) -->
+        <input
+          type="text"
+          id="room-input"
+          class="course-room-input"
+          placeholder="ห้องสอบ (ถ้ามี) เช่น VKB 501 — เว้นว่างได้"
+          autocomplete="off"
+          maxlength="40"
+        />
       </form>
 
       <div id="exam-table-container">
@@ -1848,11 +1866,12 @@ function renderScheduleForm(container, userId) {
   `;
 
   const inputEl = document.getElementById('course-input');
+  const roomEl = document.getElementById('room-input');
   const addForm = document.getElementById('course-add-form');
   const addBtn = document.getElementById('course-add-btn');
 
   // ฟังก์ชันเพิ่มวิชา (รองรับทั้งพิมพ์เดี่ยว หลายวิชา หรือ Paste)
-  async function addCourses(rawText) {
+  async function addCourses(rawText, rawRoom) {
     if (!rawText) return;
     const codes = rawText
       .toUpperCase()
@@ -1874,8 +1893,14 @@ function renderScheduleForm(container, userId) {
       return;
     }
 
+    // ห้องสอบเป็นของเฉพาะวิชา ผูกกับหลายรหัสพร้อมกันไม่ได้ — ถ้าวางมาหลายรหัสก็ไม่แตะห้องเลย
+    // ดีกว่าเดาว่าจะยัดห้องเดียวกันให้ทุกวิชา ซึ่งผิดแน่นอนและผู้ใช้ต้องมาไล่แก้ทีละใบ
+    const room = (rawRoom || '').trim();
+    const roomApplies = Boolean(room) && valid.length === 1;
+
     addBtn.disabled = true;
     let addedCount = 0;
+    let updatedCount = 0;
 
     let duplicateCount = 0;
     for (const code of valid) {
@@ -1886,9 +1911,11 @@ function renderScheduleForm(container, userId) {
           body: JSON.stringify({
             user_id: userId,
             course_code: code,
+            ...(roomApplies ? { room } : {}),
           }),
         });
         if (res.status === 'ALREADY_ADDED') duplicateCount++;
+        else if (res.status === 'UPDATED') updatedCount++;
         else addedCount++;
       } catch (err) {
         // เดิมนับว่าสำเร็จเมื่ออยู่ใน DEV_MODE ทำให้ toast ขึ้น "✓ เพิ่มแล้ว" ทั้งที่ POST คืน 400
@@ -1899,15 +1926,20 @@ function renderScheduleForm(container, userId) {
 
     addBtn.disabled = false;
     inputEl.value = '';
+    if (roomEl && roomApplies) roomEl.value = '';
     inputEl.focus(); // โฟกัสรอพิมพ์วิชาถัดไปต่อเนื่องทันที
 
-    if (addedCount > 0) {
+    if (addedCount > 0 || updatedCount > 0) {
       const notes = [
         unknown.length ? `ข้าม ${unknown.length} รหัสที่ไม่พบ` : '',
         duplicateCount ? `มีอยู่แล้ว ${duplicateCount}` : '',
+        room && !roomApplies ? 'ไม่ได้ใส่ห้องสอบ เพราะใส่ได้ทีละวิชา' : '',
       ].filter(Boolean).join(', ');
       const suffix = notes ? ` (${notes})` : '';
-      showToast(valid.length === 1 ? `✓ เพิ่ม ${valid[0]} แล้ว${suffix}` : `✓ เพิ่มแล้ว ${addedCount} วิชา${suffix}`);
+      const what = updatedCount && !addedCount
+        ? `✓ อัปเดตห้องสอบ ${valid[0]} แล้ว`
+        : (valid.length === 1 ? `✓ เพิ่ม ${valid[0]} แล้ว` : `✓ เพิ่มแล้ว ${addedCount} วิชา`);
+      showToast(`${what}${suffix}`);
       await refreshScheduleList(userId);
     } else if (duplicateCount > 0) {
       showToast(duplicateCount === 1 ? 'วิชานี้อยู่ในตารางแล้ว' : `ทั้ง ${duplicateCount} วิชาอยู่ในตารางแล้ว`);
@@ -1919,8 +1951,18 @@ function renderScheduleForm(container, userId) {
   // Submit form
   addForm.addEventListener('submit', (e) => {
     e.preventDefault();
-    addCourses(inputEl.value);
+    addCourses(inputEl.value, roomEl ? roomEl.value : '');
   });
+
+  // กด Enter ในช่องห้องสอบให้ส่งฟอร์มเหมือนกัน — ไม่งั้นกรอกห้องเสร็จแล้วต้องเอื้อมไปกดปุ่ม
+  if (roomEl) {
+    roomEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        addCourses(inputEl.value, roomEl.value);
+      }
+    });
+  }
 }
 
 async function refreshScheduleList(userId) {
@@ -1982,13 +2024,36 @@ async function refreshScheduleList(userId) {
             <div class="exam-col-code">${escapeXml(s.course_code)}</div>
             <div class="exam-col-info">
               <div class="exam-datetime">${escapeXml(info.date_th)}${info.time_th ? `<span class="exam-time-dot">•</span>${escapeXml(info.time_th)}` : ''}</div>
-              <div class="exam-location">${escapeXml(info.location_th)}</div>
+              <div class="exam-location${info.room ? '' : ' is-missing'}">${escapeXml(info.location_th)}</div>
             </div>
             <div class="exam-col-action">
               ${info.building_id ? `
               <button type="button" class="btn-go-circle" data-dest="${escapeXml(info.building_id)}" title="นำทางไปห้องสอบ">
                 <span>Go</span>
               </button>` : ''}
+              <button type="button" class="btn-edit-circle" data-id="${escapeXml(s.schedule_id)}" title="แก้ไขห้องสอบ" aria-label="แก้ไขห้องสอบ">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 20h9"></path>
+                  <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- แผงแก้ไขซ่อนไว้ในการ์ดเดียวกัน ไม่ใช้ modal — ผู้ใช้ยังเห็นวิชาที่กำลังแก้อยู่ตรงหน้า
+               และไม่ต้องมีชั้น overlay ใหม่มาทับแผนที่/ชีตที่มีอยู่แล้ว -->
+          <div class="exam-edit-panel" id="edit-${escapeXml(s.schedule_id)}" hidden>
+            <input
+              type="text"
+              class="exam-room-input"
+              value="${escapeXml(info.room || '')}"
+              placeholder="ห้องสอบ เช่น VKB 501"
+              maxlength="40"
+              autocomplete="off"
+            />
+            <div class="exam-edit-actions">
+              <button type="button" class="btn-room-save" data-id="${escapeXml(s.schedule_id)}" data-code="${escapeXml(s.course_code)}">บันทึกห้องสอบ</button>
+              <button type="button" class="btn-row-delete" data-id="${escapeXml(s.schedule_id)}" data-code="${escapeXml(s.course_code)}">ลบวิชานี้</button>
             </div>
           </div>
         </div>
@@ -2057,34 +2122,96 @@ async function refreshScheduleList(userId) {
     });
   });
 
-  // ผูก Event ปุ่มลบวงกลมสีแดง
+  // ลบวิชา — เรียกได้จากทั้งปุ่มที่ซ่อนหลัง swipe และปุ่ม "ลบวิชานี้" ในแผงแก้ไข
+  // แยกออกมาเป็นฟังก์ชันเดียวเพื่อไม่ให้สองทางนี้ค่อยๆ ทำงานต่างกันเมื่อมีคนไปแก้ทางใดทางหนึ่ง
+  async function deleteCourse(scheduleId, courseCode) {
+    const row = document.getElementById(`row-${scheduleId}`);
+    if (row) row.classList.add('is-deleting');
+
+    try {
+      await fetchJSON(
+        `/api/schedule?user_id=${encodeURIComponent(userId)}&schedule_id=${encodeURIComponent(scheduleId)}`,
+        { method: 'DELETE' }
+      );
+    } catch (_) {
+      if (DEV_MODE) sessionStorage.setItem('dev_cleared', '1');
+    }
+
+    showToast(`✕ ลบ ${courseCode} แล้ว`);
+    setTimeout(() => {
+      if (row) row.remove();
+      const remaining = container.querySelectorAll('.exam-swipe-wrapper').length;
+      if (badgeEl) badgeEl.textContent = remaining;
+      if (remaining === 0) {
+        container.innerHTML = '<div class="schedule-empty">ยังไม่มีวิชาในตารางสอบ</div>';
+      }
+    }, 200);
+  }
+
+  // ผูก Event ปุ่มลบวงกลมสีแดง (ที่ซ่อนหลัง swipe)
   container.querySelectorAll('.btn-del-circle').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      deleteCourse(btn.dataset.id, btn.dataset.code);
+    });
+  });
+
+  // ปุ่มดินสอ — เปิด/ปิดแผงแก้ไขของการ์ดใบนั้น
+  container.querySelectorAll('.btn-edit-circle').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const panel = document.getElementById(`edit-${btn.dataset.id}`);
+      if (!panel) return;
+
+      // เปิดได้ทีละใบ ไม่งั้นเลื่อนหน้าจอแล้วจำไม่ได้ว่ากำลังแก้ใบไหนอยู่
+      container.querySelectorAll('.exam-edit-panel').forEach((other) => {
+        if (other !== panel) other.hidden = true;
+      });
+
+      panel.hidden = !panel.hidden;
+      if (!panel.hidden) {
+        // แผงเปิดค้างพร้อมกับแถวที่ถูก swipe ค้างไว้จะเห็นแถบแดงยาวลงมาทั้งใบ ปิดทิ้งไปเลย
+        const content = panel.parentElement.querySelector('.exam-item-content');
+        if (content) content.classList.remove('is-swiped');
+        const input = panel.querySelector('.exam-room-input');
+        if (input) input.focus();
+      }
+    });
+  });
+
+  // บันทึกห้องสอบที่กรอกเอง (ค่าว่าง = ล้างห้องทิ้ง)
+  container.querySelectorAll('.btn-room-save').forEach((btn) => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
       const scheduleId = btn.dataset.id;
-      const courseCode = btn.dataset.code;
-      const row = document.getElementById(`row-${scheduleId}`);
+      const panel = document.getElementById(`edit-${scheduleId}`);
+      const input = panel && panel.querySelector('.exam-room-input');
+      if (!input) return;
 
-      if (row) row.classList.add('is-deleting');
-
+      const room = input.value.trim();
+      btn.disabled = true;
       try {
-        await fetchJSON(
-          `/api/schedule?user_id=${encodeURIComponent(userId)}&schedule_id=${encodeURIComponent(scheduleId)}`,
-          { method: 'DELETE' }
-        );
-      } catch (_) {
-        if (DEV_MODE) sessionStorage.setItem('dev_cleared', '1');
+        await fetchJSON('/api/schedule/room', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: userId, schedule_id: scheduleId, room }),
+        });
+        showToast(room ? `✓ บันทึกห้อง ${room} แล้ว` : `✓ ล้างห้องสอบของ ${btn.dataset.code} แล้ว`);
+        // วาดใหม่ทั้งรายการ เพราะห้องที่เปลี่ยนไปทำให้ปุ่มนำทางโผล่/หายด้วย (ดู buildingCodeFromRoom)
+        await refreshScheduleList(userId);
+      } catch (err) {
+        console.error('บันทึกห้องสอบไม่สำเร็จ', err);
+        showToast('✕ บันทึกห้องสอบไม่สำเร็จ ลองใหม่อีกครั้ง');
+        btn.disabled = false;
       }
+    });
+  });
 
-      showToast(`✕ ลบ ${courseCode} แล้ว`);
-      setTimeout(async () => {
-        if (row) row.remove();
-        const remaining = container.querySelectorAll('.exam-swipe-wrapper').length;
-        if (badgeEl) badgeEl.textContent = remaining;
-        if (remaining === 0) {
-          container.innerHTML = '<div class="schedule-empty">ยังไม่มีวิชาในตารางสอบ</div>';
-        }
-      }, 200);
+  // ปุ่มลบในแผงแก้ไข — ทางลบที่มองเห็นได้โดยไม่ต้องรู้ว่ามี swipe ซ่อนอยู่
+  container.querySelectorAll('.btn-row-delete').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      deleteCourse(btn.dataset.id, btn.dataset.code);
     });
   });
 }

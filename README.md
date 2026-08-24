@@ -175,7 +175,8 @@ Every `/api/*` endpoint has CORS enabled, because the LIFF is always on a differ
 | GET | `/api/user?user_id=` | Profile, coin balance, claimed rewards, last 20 ledger entries |
 | GET | `/api/user/ledger?user_id=&limit=` | Full coin transaction history |
 | POST | `/api/user/feedback` · `/api/user/save-car` | Claim coins (idempotent) |
-| GET/POST/DELETE | `/api/schedule` | The user's saved courses |
+| GET/POST/DELETE | `/api/schedule` | The user's saved courses. `POST` takes an optional `room` |
+| POST | `/api/schedule/room` | Set or clear the exam room on a saved course (`room: ""` clears it) |
 | GET | `/api/shop/items?user_id=` | Redeemable items + the user's balance |
 | POST | `/api/shop/redeem` | Spend coins on an item |
 | GET | `/api/shop/redemptions?user_id=` | The user's redemption history |
@@ -215,13 +216,50 @@ wrong — it came from a hardcoded demo table, not the announcement.
 ### Exam rooms come from the student, via OCR
 
 The university does not publish exam rooms as a dataset — they are assigned per student and released
-close to the exam week through e-Service. So users send a photo of their personal exam schedule into
-the LINE chat and a vision model reads it (`worker/src/examroom.js`).
+close to the exam week through e-Service. So users send a photo of a document into the LINE chat and a
+vision model reads it (`worker/src/examroom.js`).
+
+**A room is optional, a course code is not.** Registration happens weeks before rooms are announced,
+so the two documents a student can send carry different amounts of information:
+
+| Document | Contains | Result |
+|---|---|---|
+| Registration slip (ใบลงทะเบียนเรียน) | Course codes and credits, no room column at all | Courses saved, rooms left empty |
+| Personal exam schedule | Course codes and rooms | Courses saved with rooms |
+
+Requiring a room per row is what made the first case fail completely: every row of a registration slip
+was dropped, and the reply said the codes "didn't match the university timetable" — while all nine
+codes in the photo were in it. Wrong outcome *and* wrong reason, so the user just re-shot the photo.
+
+Now the only pass condition is that the course code exists in the timetable. A missing room is data
+that arrives later; a wrong course code is data that was never right.
 
 **The official timetable validates the OCR.** We already know the exam date and period for all 2,865
-courses, so the image is only trusted for the *room*; dates and periods always come from the
-announcement. A course code the model misread or invented simply isn't in the dataset and gets
+courses, so the image is only trusted for the course code and the *room*; dates and periods always come
+from the announcement. A course code the model misread or invented simply isn't in the dataset and gets
 dropped before the user ever sees it.
+
+**An import without rooms never erases rooms already saved.** The upsert uses
+`COALESCE(excluded.room, room)` and only touches `room_source`/`room_updated_at` when a room actually
+arrived — otherwise sending a registration slip late in the term would wipe every room the student had
+typed in by hand.
+
+### Three ways to get a room onto a course
+
+| Way | Where | `room_source` |
+|---|---|---|
+| Photo of the personal exam schedule | LINE chat | `OCR` |
+| Typed in when adding the course | Profile → the optional room field under the course code | `MANUAL` |
+| Typed in afterwards | Profile → the pencil button on a course card | `MANUAL` |
+
+The room field when adding is deliberately optional and styled lighter than the course-code field —
+most students add courses long before rooms exist. It applies only when a single course code is
+entered; pasting several codes at once ignores it rather than stamping one room onto all of them.
+
+Every course card carries a pencil button that opens an inline panel with the room field, a save
+button, and a delete button. Delete is also still available by swiping the card left, but that gesture
+is invisible until you know it exists — the panel is the discoverable path. Saving an empty room field
+clears the room rather than being rejected, so a typo can be undone.
 
 **Nothing is saved without confirmation.** Results go into `room_import_drafts` (30-minute TTL) and a
 Flex card with Save/Cancel buttons. OCR can be wrong, and wrong here means someone walks to the wrong
@@ -483,7 +521,7 @@ the wrong time. Course codes not present in the timetable are now rejected at in
 | Parking | ✅ | 8 zones as polygons, 3-level reports, geofence, aggregation |
 | Find My Car | ✅ | Stored in localStorage — lost when switching devices (by design) |
 | ruMaster dataset | ✅ | 91 places |
-| Exam schedule dataset | ✅ | 2,865 courses with dates + periods; rooms supplied by students via chat photo OCR |
+| Exam schedule dataset | ✅ | 2,865 courses with dates + periods; rooms supplied by students via chat photo OCR or typed in the app |
 | User database + coins | ✅ | D1 + ledger, double-claim prevention enforced by the database |
 | Survey → Google Sheets | ✅ | Live and verified end to end (a test row reached the sheet) |
 | Shop / spending coins | ✅ | One item (LINE sticker, 30 coins). Items live in `shop_items` so pricing can change without a deploy; an admin page is still to come |

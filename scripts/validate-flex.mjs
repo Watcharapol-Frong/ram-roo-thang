@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const { resultCard, row, menuCard, FLEX_TOKENS } = await import(ROOT+'/worker/src/flex.js');
 const { statusFlexMessage } = await import(ROOT+'/worker/src/health.js');
-const { generateMainMenuFlex } = await import(ROOT+'/worker/src/line.js');
+const { generateMainMenuFlex, generateRoomConfirmFlex } = await import(ROOT+'/worker/src/line.js');
 
 const SIZE=['xxs','xs','sm','md','lg','xl','xxl','3xl','4xl','5xl','full'];
 const MARGIN=['none','xs','sm','md','lg','xl','xxl'];
@@ -78,13 +78,20 @@ check('การ์ดตารางสอบ', resultCard({
   actions:[{label:'เปิดตารางสอบ',action:{type:'uri',label:'เปิดตารางสอบ',uri:'https://liff.line.me/x?mode=profile'}}],
   altText:'บันทึกวิชาสอบ'}));
 
-const many=Array.from({length:12},(_,i)=>row(`SUB${1000+i}`,`VKB ${500+i}`,{strong:true,color:FLEX_TOKENS.brand}));
-check('การ์ดยืนยันห้องสอบ (12 วิชา)', resultCard({
-  title:'อ่านห้องสอบจากรูปแล้ว', badge:'12 วิชา', headerColor:FLEX_TOKENS.amberSoft,
-  rows:many, note:'วันสอบใช้ของประกาศมหาวิทยาลัยเสมอ อ่านจากรูปเฉพาะห้องสอบ ตรวจให้ตรงก่อนกดบันทึกนะครับ',
-  actions:[{label:'บันทึกห้องสอบ',action:{type:'postback',label:'บันทึก',data:'rooms_confirm:'+crypto.randomUUID(),displayText:'บันทึก'}},
-           {label:'ยกเลิก',color:FLEX_TOKENS.inkFaint,action:{type:'postback',label:'ยกเลิก',data:'rooms_cancel:'+crypto.randomUUID(),displayText:'ยกเลิก'}}],
-  altText:'อ่านห้องสอบได้ 12 วิชา'}));
+// การ์ดยืนยันผลอ่านเอกสาร — สร้างจากฟังก์ชันจริง ครอบทุกแบบของเอกสารที่รับได้
+// (ใบลงทะเบียนไม่มีห้องเลย / ตารางสอบมีห้องครบ / อ่านได้บางส่วน / ยาวเกินจนต้องตัด)
+const draft=()=>crypto.randomUUID();
+const item=(code,room)=>({course_code:code,room,exam_date:'2026-10-19',periods:['A']});
+check('ยืนยัน: ใบลงทะเบียน 9 วิชา ไม่มีห้อง', generateRoomConfirmFlex(
+  ['LAW1101','LAW1102','LAW1103','LAW1106','LAW2101','LAW2106','LAW2108','LAW2109','LAW2111'].map(c=>item(c,null)),
+  [], draft()));
+check('ยืนยัน: ตารางสอบมีห้องครบ', generateRoomConfirmFlex(
+  Array.from({length:5},(_,i)=>item(`SUB${1000+i}`,`VKB ${500+i}`)), [], draft()));
+check('ยืนยัน: มีห้องบางวิชา + ตกบาง', generateRoomConfirmFlex(
+  [item('LAW1101','VKB 501'),item('LAW1102',null),item('LAW1103',null)],
+  [{code:'EC01003',reason:'ไม่มีรหัสนี้ในตารางสอบของมหาวิทยาลัย'}], draft()));
+check('ยืนยัน: 25 วิชา (ต้องตัดเหลือ 12 + สรุป)', generateRoomConfirmFlex(
+  Array.from({length:25},(_,i)=>item(`SUB${1000+i}`,i%2?`VKB ${500+i}`:null)), [], draft()));
 
 // การ์ดสถานะสร้างจาก statusFlexMessage ตัวจริง ไม่ได้ก๊อป layout มาวางซ้ำ — ไม่งั้นแก้การ์ดจริง
 // แล้วสคริปต์นี้ยังตรวจของเก่าผ่านฉลุยอยู่ ทั้งที่ LINE ปฏิเสธการ์ดใบใหม่
