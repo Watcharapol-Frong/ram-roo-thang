@@ -92,8 +92,12 @@ export function buildDigestCard(digest, liffUrl) {
 
   const rows = items.map((item) => {
     const place = item.place || (item.kind === 'สอบ' ? 'รอห้องสอบ' : '');
+    // ตัด " น." ออกจากคอลัมน์เวลาในลิสต์นี้เท่านั้น — ค่ายังมาจาก period_times ที่เดียวเหมือนเดิม
+    // แต่ "09:00 - 12:00 น.  สอบ" ยาวเกินคอลัมน์ซ้าย (flex 4) แล้วโดน LINE ตัดกลางคำเป็น
+    // "09:00 - 12:00 น…" ซึ่งอ่านแล้วเหมือนระบบพัง ในลิสต์ที่ทุกแถวเป็นเวลาอยู่แล้วไม่ต้องมีหน่วยกำกับ
+    const compactTime = String(item.time).replace(/\s*น\.\s*$/, '');
     const line = row(
-      `${item.time}  ${item.kind}`,
+      `${compactTime}  ${item.kind}`,
       place ? `${item.code}  ${place}` : item.code,
       { strong: item.kind === 'สอบ', color: item.kind === 'สอบ' ? FLEX_TOKENS.red : FLEX_TOKENS.ink },
     );
