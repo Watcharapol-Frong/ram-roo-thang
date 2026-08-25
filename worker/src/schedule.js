@@ -10,6 +10,7 @@
 // เก็บไว้ที่เดียวจะได้ไม่มีวันหลุดจากกันตอนมหาวิทยาลัยประกาศตารางใหม่
 
 import { ensureUser } from './user.js';
+import { jsonResponse } from './shared.js';
 
 // ห้องสอบยาวสุดที่เจอจริงคือระดับ "VKB 1501" — เผื่อไว้ 40 ตัวก็เกินพอ
 // จำกัดไว้เพราะช่องนี้ผู้ใช้พิมพ์เองอิสระ ไม่มีชุดข้อมูลให้ตรวจว่าห้องนั้นมีจริงไหม
@@ -23,13 +24,6 @@ function normalizeRoom(value) {
   if (value === undefined || value === null) return null;
   const room = String(value).trim().replace(/\s+/g, ' ');
   return room.slice(0, ROOM_MAX_LENGTH);
-}
-
-function jsonResponse(body, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  });
 }
 
 export async function handlePostSchedule(request, env) {

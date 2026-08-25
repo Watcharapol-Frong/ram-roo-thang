@@ -12,6 +12,7 @@ import {
   setLastReportedAt,
 } from './data.js';
 import { awardParkingReport } from './user.js';
+import { jsonResponse } from './shared.js';
 
 const RATE_LIMIT_MINUTES = 30;
 const GEOFENCE_RADIUS_METERS = 150;
@@ -21,13 +22,6 @@ const AGGREGATION_WINDOW_MINUTES = 30;
 // ไม่ต้องกรองวันที่ในโค้ดอีกชั้น (ของเดิมตั้ง 2 เท่าเพราะเก็บทุกใบไว้แล้วค่อยกรองเอง
 // ถ้าคงไว้แบบนั้นตอนนี้ รายงานอายุ 45 นาทีจะยังโชว์เป็นสถานะสด ทั้งที่เลยกรอบไปแล้ว)
 const PARKING_REPORT_TTL_SECONDS = AGGREGATION_WINDOW_MINUTES * 60;
-
-function jsonResponse(body, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  });
-}
 
 export async function handleParkingReport(request, env) {
   let payload;

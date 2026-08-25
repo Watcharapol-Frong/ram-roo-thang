@@ -53,6 +53,16 @@ function createD1() {
     db.exec(readFileSync(path.join(migrationsDir, file), 'utf8'));
   }
 
+  // ข้อมูลตั้งต้นก้อนใหญ่ (ตารางเรียน 3,404 แถว) อยู่ใน data/seed/ ไม่ใช่ migrations/
+  // โหลดเฉพาะเมื่อสั่ง SEED=1 เพราะปกติงานฝั่ง LIFF ไม่ได้ใช้ และการ replay ทุกครั้งที่บูต
+  // ทำให้รอนานโดยไม่ได้อะไร — ต้องทดสอบสรุปประจำวันเมื่อไรค่อยเปิด
+  if (process.env.SEED === '1') {
+    const seedDir = path.join(ROOT_DIR, 'data/seed');
+    for (const file of readdirSync(seedDir).filter((f) => f.endsWith('.sql')).sort()) {
+      db.exec(readFileSync(path.join(seedDir, file), 'utf8'));
+    }
+  }
+
   const wrap = (sql, params = []) => ({
     bind: (...args) => wrap(sql, args),
     async run() {

@@ -22,9 +22,6 @@ const INTENT_PATTERNS = [
   ['STEPS',     /ขั้นตอน|ทำยังไง|ทำอย่างไร|ยื่นยังไง|ยื่นอย่างไร|ขอยังไง|ขออย่างไร|สมัครยังไง|วิธีการ|วิธีทำ|วิธีขอ|กระบวนการ|ต้องทำอะไร|เริ่มยังไง|ทำไงต่อ|แล้วไงต่อ/],
 ];
 
-// The follow-up details a user can ask for. Same names throughout (intent -> field in serviceinfo.js).
-export const FOLLOW_UP_INTENTS = INTENT_PATTERNS.map(([intent]) => intent);
-
 export function detectFollowUpIntent(message) {
   const text = String(message || '').toLowerCase();
   if (!text.trim()) return null;

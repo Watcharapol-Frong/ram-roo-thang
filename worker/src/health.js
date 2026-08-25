@@ -15,6 +15,7 @@
 // แยกแบบนี้เพราะ "AI ล่ม" กับ "บอทตายทั้งตัว" ไม่ควรทำให้คนดูตื่นเท่ากัน
 
 import { resultCard, row, FLEX_TOKENS } from './flex.js';
+import { isAdminRequest, bangkokNow } from './shared.js';
 
 const SEVERITY = { ok: 0, degraded: 1, down: 2 };
 const worst = (a, b) => (SEVERITY[b] > SEVERITY[a] ? b : a);
@@ -221,7 +222,7 @@ export async function runHealthChecks(env, { deep = false } = {}) {
 export async function handleHealth(request, env) {
   const url = new URL(request.url);
   const deep = url.searchParams.get('deep') === '1';
-  const isAdmin = Boolean(env.ADMIN_TOKEN) && request.headers.get('x-admin-token') === env.ADMIN_TOKEN;
+  const isAdmin = isAdminRequest(request, env);
 
   const report = await runHealthChecks(env, { deep });
   const body = isAdmin ? report : {
@@ -243,7 +244,7 @@ export async function handleHealth(request, env) {
 // --- การ์ดในแชท ------------------------------------------------------------
 
 function bangkokTimeText(iso) {
-  const d = new Date(new Date(iso).getTime() + 7 * 3600 * 1000);
+  const d = bangkokNow(new Date(iso).getTime());
   const pad = (n) => String(n).padStart(2, '0');
   return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} น.`;
 }

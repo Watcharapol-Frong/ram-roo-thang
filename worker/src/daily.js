@@ -10,36 +10,18 @@
 import examLookup from '../../data/exam-lookup.json' with { type: 'json' };
 import { pushToLINE } from './line.js';
 import { resultCard, row, FLEX_TOKENS } from './flex.js';
+import { bangkokDate, bangkokDayCode, dayCodeForDate, formatThaiDate, THAI_DAY_NAME,
+         buildingCodeFromRoom, jsonResponse, requireAdmin, isIsoDate, liffLink, liffDestLink,
+         PUSH_BATCH_SIZE, isRetriablePushError } from './shared.js';
 
-const EXAM_PERIOD_TIME = { A: '09:00 - 12:00', B: '14:00 - 16:30' };
+// เวลาของแต่ละคาบมาจาก data/exam-lookup.json ซึ่งเป็นไฟล์เดียวกับที่เก็บวันสอบทุกวิชา
+// และทั้ง worker กับ LIFF โหลดไฟล์นี้อยู่แล้วทั้งคู่ จึงไม่ต้องเพิ่ม endpoint หรือ dependency ใหม่
+//
+// ก่อนหน้านี้ค่านี้ถูกประกาศซ้ำ 3 ที่แล้วเพี้ยนกันจริง — exam.js มี "น." ต่อท้าย daily.js ไม่มี
+// ผู้ใช้คนเดียวกันจึงเห็นเวลาสอบคนละรูปแบบระหว่างการ์ดเตือนล่วงหน้ากับการ์ดสรุปเช้า
+// fallback ไว้เผื่อไฟล์เก่าที่ยังไม่มีคีย์นี้ จะได้ไม่พังตอน deploy สลับเวอร์ชัน
+const EXAM_PERIOD_TIME = examLookup.period_times || { A: '09:00 - 12:00 น.', B: '14:00 - 16:30 น.' };
 
-const THAI_MONTH_ABBR = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
-                         'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
-
-// getUTCDay() 0=อาทิตย์ -> รหัสวันแบบเดียวกับใน class_sessions
-const DAY_CODES = ['SU', 'M', 'TU', 'W', 'TH', 'F', 'S'];
-const THAI_DAY = { SU: 'อาทิตย์', M: 'จันทร์', TU: 'อังคาร', W: 'พุธ', TH: 'พฤหัสบดี', F: 'ศุกร์', S: 'เสาร์' };
-
-const PUSH_BATCH_SIZE = 20;
-
-// เวลาไทย = UTC+7 บวกเข้าไปแล้วอ่านค่าแบบ UTC จะได้วันและวันในสัปดาห์ตามเวลาไทยเสมอ
-// ห้ามใช้ getDay() ตรงๆ เพราะ worker รันบน UTC จะได้วันผิดทุกคืนหลังเที่ยงคืน UTC (7 โมงเช้าบ้านเรา)
-function bangkokNow(at = Date.now()) {
-  return new Date(at + 7 * 3600 * 1000);
-}
-
-export function bangkokDate(at = Date.now()) {
-  return bangkokNow(at).toISOString().slice(0, 10);
-}
-
-export function bangkokDayCode(at = Date.now()) {
-  return DAY_CODES[bangkokNow(at).getUTCDay()];
-}
-
-function formatThaiDate(iso) {
-  const [year, month, day] = iso.split('-').map(Number);
-  return `${day} ${THAI_MONTH_ABBR[month - 1]} ${String(year + 543).slice(-2)}`;
-}
 
 // วิชาที่เปิดหลายกลุ่มถูกข้ามไป — ระบบรู้แค่รหัสวิชา ไม่รู้ว่าผู้ใช้อยู่กลุ่มไหน
 // ถ้าเดาแล้วผิดคือส่งเขาไปผิดห้องผิดเวลา ซึ่งแย่กว่าไม่เตือนเลย
@@ -88,7 +70,7 @@ export async function collectDigests(env, dateIso, dayCode, onlyUserId = null) {
       time: periods.map((p) => EXAM_PERIOD_TIME[p] || `คาบ ${p}`).join(' และ '),
       sortKey: periods.includes('A') ? '09:00' : '14:00',
       place: r.room,
-      buildingCode: r.room ? (String(r.room).trim().match(/^([A-Z]{2,4})\b/) || [])[1] || null : null,
+      buildingCode: buildingCodeFromRoom(r.room),
     });
   }
 
@@ -100,11 +82,8 @@ export async function collectDigests(env, dateIso, dayCode, onlyUserId = null) {
 // การ์ดสรุป — เรียงตามเวลาจริงไม่แยกเรียน/สอบเป็นสองก้อน
 // เพราะสิ่งที่ผู้ใช้ต้องรู้คือ "วันนี้ไปไหนก่อน" ไม่ใช่ "วันนี้มีสอบกี่วิชา"
 export function buildDigestCard(digest, liffUrl) {
-  const linkTo = (buildingCode) => {
-    const base = liffUrl || 'https://line.me';
-    const sep = base.includes('?') ? '&' : '?';
-    return buildingCode ? `${base}${sep}dest_id=${encodeURIComponent(buildingCode)}` : `${base}${sep}mode=profile`;
-  };
+  const linkTo = (buildingCode) =>
+    (buildingCode ? liffDestLink(liffUrl, buildingCode) : liffLink(liffUrl, 'mode=profile'));
 
   const items = [
     ...digest.exams.map((e) => ({ ...e, kind: 'สอบ' })),
@@ -133,7 +112,7 @@ export function buildDigestCard(digest, liffUrl) {
   const firstNavigable = items.find((item) => item.buildingCode);
 
   return resultCard({
-    title: `วันนี้ ${THAI_DAY[digest.dayCode]}`,
+    title: `วันนี้ ${THAI_DAY_NAME[digest.dayCode]}`,
     badge: summary,
     headerColor: examCount ? FLEX_TOKENS.amberSoft : FLEX_TOKENS.blueSoft,
     hero: formatThaiDate(digest.dateIso),
@@ -193,7 +172,7 @@ export async function runDailyDigest(env, { dateIso, dayCode, dryRun = false } =
         summary.failed += 1;
         console.error('daily digest: ส่ง LINE ไม่สำเร็จ', digest.userId, err);
         // ถอนการจองคืนเฉพาะกรณีที่ลองใหม่แล้วมีโอกาสสำเร็จ เหมือน exam alerts
-        if (!err.status || err.status >= 500) {
+        if (isRetriablePushError(err)) {
           await env.DB.prepare('DELETE FROM daily_digest_sent WHERE user_id = ? AND digest_date = ?')
             .bind(digest.userId, date).run().catch((e) => console.error('rollback ไม่สำเร็จ', e));
         }
@@ -206,12 +185,8 @@ export async function runDailyDigest(env, { dateIso, dayCode, dryRun = false } =
 
 // POST /api/admin/daily-digest — ยิงมือสำหรับทดสอบ/เดโม
 export async function handleAdminDailyDigest(request, env) {
-  const token = request.headers.get('x-admin-token');
-  if (!env.ADMIN_TOKEN || token !== env.ADMIN_TOKEN) {
-    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-      status: 401, headers: { 'Content-Type': 'application/json' },
-    });
-  }
+  const denied = requireAdmin(request, env);
+  if (denied) return denied;
 
   let payload = {};
   try {
@@ -219,15 +194,13 @@ export async function handleAdminDailyDigest(request, env) {
   } catch { /* ไม่มี body ก็ได้ */ }
 
   const date = payload.date || bangkokDate();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    return new Response(JSON.stringify({ error: 'date ต้องเป็นรูปแบบ YYYY-MM-DD' }), {
-      status: 400, headers: { 'Content-Type': 'application/json' },
-    });
+  if (!isIsoDate(date)) {
+    return jsonResponse({ error: 'date ต้องเป็นรูปแบบ YYYY-MM-DD' }, 400);
   }
 
   // คำนวณวันในสัปดาห์จากวันที่ที่ขอ ไม่ใช่จากวันนี้ — ไม่งั้นทดสอบย้อนวันแล้วได้ตารางของวันอื่น
-  const dayCode = payload.day || DAY_CODES[new Date(`${date}T00:00:00Z`).getUTCDay()];
+  const dayCode = payload.day || dayCodeForDate(date);
 
   const result = await runDailyDigest(env, { dateIso: date, dayCode, dryRun: payload.dry_run !== false });
-  return new Response(JSON.stringify(result), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  return jsonResponse(result);
 }

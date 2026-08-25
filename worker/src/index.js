@@ -49,6 +49,15 @@ export default {
   //   0 0  * * * = 07:00 น. สรุปวันนี้ ทั้งเรียนและสอบ
   //   0 11 * * * = 18:00 น. เตือนล่วงหน้าว่าพรุ่งนี้มีสอบ
   async scheduled(event, env, ctx) {
+    // ผูกกับสตริง cron ใน wrangler.toml ตรงๆ — ถ้าแก้เวลาที่นั่นแล้วลืมแก้ที่นี่ ระบบจะส่ง
+    // การแจ้งเตือนผิดตัวแบบเงียบสนิท (สรุปเช้ากลายเป็นเตือนสอบ) ไม่มี error ให้เห็น
+    // จึง log เตือนไว้เมื่อเจอ cron ที่ไม่รู้จัก แทนที่จะ fallback เงียบๆ
+    const KNOWN_CRONS = ['0 0 * * *', '0 11 * * *'];
+    if (!KNOWN_CRONS.includes(event.cron)) {
+      console.error(`scheduled: cron "${event.cron}" ไม่ตรงกับที่โค้ดรู้จัก (${KNOWN_CRONS.join(' | ')}) — ` +
+        'แก้ [triggers] ใน wrangler.toml แล้วต้องแก้ KNOWN_CRONS ที่นี่ด้วย จะรันงานตอนเย็นไปก่อน');
+    }
+
     const morning = event.cron === '0 0 * * *';
     const label = morning ? 'cron_digest' : 'cron';
     ctx.waitUntil(

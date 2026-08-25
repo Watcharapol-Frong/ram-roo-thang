@@ -1,3 +1,5 @@
+import { jsonResponse, bangkokDate } from './shared.js';
+
 // ผู้ใช้ + บัญชีเหรียญ บน D1 (ดู worker/migrations/0001_users_and_coin_ledger.sql)
 //
 // ย้ายมาจาก USER_PROFILES KV ด้วยเหตุผลสามข้อ:
@@ -18,20 +20,8 @@ export const COIN_REWARDS = {
   SAVE_CAR: 5,
 };
 
-function jsonResponse(body, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  });
-}
-
 function nowIso() {
   return new Date().toISOString();
-}
-
-// วันที่ตามเวลาไทย ไม่ใช่ UTC — ไม่งั้นสิทธิ์รายวันจะรีเซ็ตตอนเที่ยงคืน UTC (7 โมงเช้าบ้านเรา)
-export function bangkokDate(at = Date.now()) {
-  return new Date(at + 7 * 3600 * 1000).toISOString().slice(0, 10);
 }
 
 // สร้างแถวผู้ใช้ถ้ายังไม่มี — ไม่ต้องมีขั้นตอนสมัครแยก เจอ userId ครั้งแรกก็มีบัญชีเลย

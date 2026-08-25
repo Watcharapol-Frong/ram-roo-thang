@@ -8,6 +8,7 @@
 // a concern (unlike logging every message).
 
 import { maskPII } from './ai.js';
+import { requireAdmin } from './shared.js';
 
 const MAX_MESSAGE_LENGTH = 200;
 
@@ -36,12 +37,8 @@ export async function logUnanswered(env, { message, intent = null, focusId = nul
 // Grouped by identical text on purpose: what we want to know is "which kind of question keeps
 // coming up that we cannot answer", not a raw feed ordered by time.
 export async function handleAdminUnanswered(request, env) {
-  const token = request.headers.get('x-admin-token');
-  if (!env.ADMIN_TOKEN || token !== env.ADMIN_TOKEN) {
-    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-      status: 401, headers: { 'Content-Type': 'application/json' },
-    });
-  }
+  const denied = requireAdmin(request, env);
+  if (denied) return denied;
 
   const url = new URL(request.url);
   const limit = Math.min(Number(url.searchParams.get('limit')) || 100, 500);

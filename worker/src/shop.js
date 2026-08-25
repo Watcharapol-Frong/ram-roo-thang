@@ -4,6 +4,7 @@
 import { listShops } from './data.js';
 import { ensureUser, getUserRow } from './user.js';
 import { pushToLINE } from './line.js';
+import { requireAdmin } from './shared.js';
 
 export async function handleListShops(request, env) {
   const shops = await listShops(env);
@@ -183,10 +184,8 @@ export async function handleListRedemptions(request, env) {
 
 // GET /api/admin/redemptions?status=PENDING — คิวของที่ต้องส่ง
 export async function handleAdminListRedemptions(request, env) {
-  const token = request.headers.get('x-admin-token');
-  if (!env.ADMIN_TOKEN || token !== env.ADMIN_TOKEN) {
-    return shopJson({ error: 'Unauthorized' }, 401);
-  }
+  const denied = requireAdmin(request, env);
+  if (denied) return denied;
 
   const url = new URL(request.url);
   const status = url.searchParams.get('status') || 'PENDING';
@@ -201,10 +200,8 @@ export async function handleAdminListRedemptions(request, env) {
 // POST /api/admin/redemptions/fulfill — ทำเครื่องหมายว่าส่งแล้ว + push แจ้งผู้ใช้
 //   body: { redemption_id, note }   note = ข้อความ/ลิงก์รับของที่จะส่งให้ผู้ใช้
 export async function handleAdminFulfill(request, env) {
-  const token = request.headers.get('x-admin-token');
-  if (!env.ADMIN_TOKEN || token !== env.ADMIN_TOKEN) {
-    return shopJson({ error: 'Unauthorized' }, 401);
-  }
+  const denied = requireAdmin(request, env);
+  if (denied) return denied;
 
   let payload;
   try {

@@ -125,7 +125,10 @@ if (DEV_MODE) {
   }
 }
 
-// Google Maps JS API เรียกชื่อนี้เองหลังโหลดสคริปต์เสร็จ (ดู loadGoogleMaps ท้ายไฟล์)
+// !!! ห้ามลบ ห้ามเปลี่ยนชื่อ !!!
+// Google Maps เรียกฟังก์ชันนี้กลับมา "ด้วยชื่อในสตริง" ผ่าน &callback=initApp ใน URL ของสคริปต์
+// (ดู loadGoogleMaps ท้ายไฟล์) เครื่องมือหา dead code ทุกตัวจะรายงานว่าไม่มีใครเรียกและลบได้
+// ซึ่งผิด — ลบแล้วแผนที่ทั้งระบบตายเงียบๆ โดยไม่มี error ตอน build ให้เห็น
 function initApp() {
   mapsBoot.resolve();
 }
@@ -281,13 +284,6 @@ function haversineDistanceMeters(lat1, lng1, lat2, lng2) {
     Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return EARTH_RADIUS_METERS * c;
-}
-
-function formatExamAt(isoString) {
-  if (!isoString) return '';
-  const date = new Date(isoString);
-  if (Number.isNaN(date.getTime())) return isoString;
-  return date.toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' });
 }
 
 // --- Map view: One-Box Context-Driven Navigation (Module_2_Technical_Specification.md §1-4) ---
@@ -893,24 +889,6 @@ function centerOnFeatures(features) {
 
 // --- Profile view (MVP-SPEC §7, docs/adr/0003) ---
 // ?mode=profile → LINE profile header → consent gate (localStorage) → ฟอร์มบันทึกวิชาสอบ + ลิสต์/ลบ
-
-// --- helper: คำนวณวันที่เหลือถึงสอบ ---
-function daysUntilExam(isoString) {
-  if (!isoString) return null;
-  const exam = new Date(isoString);
-  if (Number.isNaN(exam.getTime())) return null;
-  return Math.ceil((exam - Date.now()) / (1000 * 60 * 60 * 24));
-}
-
-// --- helper: badge "เหลืออีก X วัน" ---
-function renderDaysLeft(days) {
-  if (days === null) return '';
-  if (days < 0)  return '<span class="schedule-days-left past">สอบไปแล้ว</span>';
-  if (days === 0) return '<span class="schedule-days-left urgent">วันนี้!</span>';
-  if (days <= 3) return `<span class="schedule-days-left urgent">เหลืออีก ${days} วัน</span>`;
-  if (days <= 7) return `<span class="schedule-days-left soon">เหลืออีก ${days} วัน</span>`;
-  return `<span class="schedule-days-left normal">เหลืออีก ${days} วัน</span>`;
-}
 
 // --- ระบบเหรียญ ---
 // ยอดเหรียญอยู่ฝั่ง server ทั้งหมด (worker/src/user.js) ฝั่งนี้แค่ดึงมาแสดงกับสั่งให้รางวัล
@@ -1794,11 +1772,18 @@ async function loadExamLookup() {
   return examLookupCache;
 }
 
-// เวลาของแต่ละคาบ ตามประกาศของมหาวิทยาลัย (ผู้ใช้ยืนยัน 24 ส.ค. 2026)
-// ค่าที่ยกมาจากตารางฮาร์ดโค้ดในโค้ดชุดแรกผิดทั้งสองคาบ — B เคยเป็น 13:30-16:00 (เร็วกว่าจริงครึ่งชั่วโมง)
-// ส่วน A เคยเป็น 09:30 - 12:00/12.30 ทั้งที่จริงคือ 09:00 - 12:00 ค่าเดียว ไม่มี 12.30
-// ต้องตรงกับ PERIOD_TIME ใน worker/src/exam.js เสมอ ถ้าแก้ต้องแก้ทั้งสองที่
-const EXAM_PERIOD_TIME = { A: '09:00 - 12:00 น.', B: '14:00 - 16:30 น.' };
+
+// เวลาของแต่ละคาบมาจาก data/exam-lookup.json ไฟล์เดียวกับที่เก็บวันสอบ ซึ่งหน้านี้โหลดอยู่แล้ว
+// (ดู loadExamLookup) ฝั่ง worker ก็อ่านจากไฟล์เดียวกัน — แก้เวลาที่ไฟล์นั้นที่เดียวแล้วตรงกันทั้งระบบ
+//
+// ก่อนหน้านี้ค่านี้ถูกประกาศซ้ำ 3 ที่แล้วเพี้ยนกันจริง ผู้ใช้คนเดียวกันเห็นเวลาสอบคนละรูปแบบ
+// ระหว่างการ์ดในแชทกับหน้าตารางสอบในแอป
+const EXAM_PERIOD_TIME_FALLBACK = { A: '09:00 - 12:00 น.', B: '14:00 - 16:30 น.' };
+
+function examPeriodTimes() {
+  return (examLookupCache && examLookupCache.period_times) || EXAM_PERIOD_TIME_FALLBACK;
+}
+
 
 const THAI_MONTH_ABBR = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
                          'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
@@ -1848,7 +1833,7 @@ function getCourseExamInfo(courseCode, saved) {
   return {
     known: true,
     date_th: formatThaiExamDate(isoDate),
-    time_th: periods.map((p) => EXAM_PERIOD_TIME[p] || `คาบ ${p}`).join(' และ '),
+    time_th: periods.map((p) => examPeriodTimes()[p] || `คาบ ${p}`).join(' และ '),
     building_id: buildingCodeFromRoom(room),
     // เดิมเขียนว่า "ส่งรูปตารางสอบในแชท" ซึ่งตอนนี้ไม่ใช่ทางเดียวแล้ว — กรอกเองตรงนี้ได้
     location_th: room ? `ห้อง ${room}` : 'ยังไม่ระบุห้องสอบ',
@@ -2824,15 +2809,6 @@ function saveCar(location, zoneName, approximate) {
   updateCarButtonAvailability();
   awardSaveCarCoins();   // ไม่ await — ตำแหน่งรถบันทึกในเครื่องเสร็จแล้ว เหรียญตามมาทีหลังได้
   return car;
-}
-
-function forgetCar() {
-  try {
-    localStorage.removeItem(MY_CAR_STORAGE_KEY);
-  } catch (err) { /* ไม่เป็นไร ถือว่าลืมแล้ว */ }
-  appState.car = null;
-  updateCarPin();
-  updateCarButtonAvailability();
 }
 
 const CAR_GLYPH = '<path d="M5 11l1.5-4.5A2 2 0 018.4 5h7.2a2 2 0 011.9 1.5L19 11v7a1 1 0 01-1 1h-1a1 1 0 01-1-1v-1H8v1a1 1 0 01-1 1H6a1 1 0 01-1-1v-7zm2.2-1h9.6l-1-3H8.2l-1 3zM7.5 15a1 1 0 100-2 1 1 0 000 2zm9 0a1 1 0 100-2 1 1 0 000 2z"/>';

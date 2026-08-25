@@ -3,13 +3,7 @@
 
 import { getBuildingByKey, getParkingZoneByKey, listBuildings } from './data.js';
 import { resolveStatusForZone } from './parking.js';
-
-function jsonResponse(body, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  });
-}
+import { jsonResponse } from './shared.js';
 
 export async function handleGetBuilding(request, env) {
   const url = new URL(request.url);

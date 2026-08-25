@@ -96,6 +96,30 @@ it, not an `if` statement in application code:
 | `PARKING_REPORT` | Report timestamp | One report = one grant |
 | `SHOP_REDEEM` | Redemption id | (reserved — shop not built yet) |
 
+## Shared helpers
+
+`worker/src/shared.js` holds the small pieces that used to be copy-pasted: `jsonResponse`,
+`requireAdmin`, Bangkok date/weekday helpers, Thai date formatting, `buildingCodeFromRoom`,
+LIFF link builders, and the push batch size / retriable-error rule.
+
+**It must not import from any other worker module.** `line.js -> myschedule.js -> daily.js ->
+line.js` is already a cycle; a shared module joining it could turn a harmless import loop into a
+temporal-dead-zone crash at boot, which takes the whole worker down on every request.
+
+Exam period times live in `data/exam-lookup.json` under `period_times`, not in code. Both runtimes
+already load that file — the worker imports it into its bundle, the LIFF fetches it — so there is
+one place to change and no extra endpoint. They had already drifted apart while duplicated in three
+files (`'09:00 - 12:00 น.'` in one, `'09:00 - 12:00'` in another). Regenerate the file with
+`python3 scripts/build-exam-lookup.py`, which carries `period_times` through.
+
+### Things that look dead but are not
+
+`initApp()` in `liff/app.js` has no direct callers. Google Maps invokes it **by name** through
+`&callback=initApp` in the script URL. Deleting it kills the map with no build-time error.
+
+`recalculateBalance()` in `worker/src/user.js` is unused today. It is the documented recovery path
+when `users.coins` drifts from `coin_ledger` — keep it.
+
 ## Project structure
 
 ```

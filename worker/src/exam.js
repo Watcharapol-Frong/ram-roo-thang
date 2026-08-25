@@ -14,27 +14,18 @@
 // ของ wrangler รองรับอยู่แล้ว — เขียนแบบนี้ใช้ได้ทั้งสองทาง
 import examLookup from '../../data/exam-lookup.json' with { type: 'json' };
 import { pushToLINE } from './line.js';
+import { bangkokDate, formatThaiDate, jsonResponse, requireAdmin, isIsoDate,
+         liffProfileLink, PUSH_BATCH_SIZE, isRetriablePushError } from './shared.js';
 
-// เวลาของแต่ละคาบ ตามประกาศของมหาวิทยาลัย (ผู้ใช้ยืนยัน 24 ส.ค. 2026)
-// คาบ A เป็น 09:00 - 12:00 ค่าเดียว ไม่มี 12.30 (ค่าเดิม 09:30 - 12:00/12.30 ผิดทั้งเวลาเริ่มและเวลาเลิก)
-// ค่านี้ต้องตรงกับ EXAM_PERIOD_TIME ใน liff/app.js เสมอ ถ้าแก้ต้องแก้ทั้งสองที่
-const PERIOD_TIME = { A: '09:00 - 12:00 น.', B: '14:00 - 16:30 น.' };
 
-const THAI_MONTH_ABBR = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
-                         'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+// เวลาของแต่ละคาบมาจาก data/exam-lookup.json ซึ่งเป็นไฟล์เดียวกับที่เก็บวันสอบทุกวิชา
+// และทั้ง worker กับ LIFF โหลดไฟล์นี้อยู่แล้วทั้งคู่ จึงไม่ต้องเพิ่ม endpoint หรือ dependency ใหม่
+//
+// ก่อนหน้านี้ค่านี้ถูกประกาศซ้ำ 3 ที่แล้วเพี้ยนกันจริง — exam.js มี "น." ต่อท้าย daily.js ไม่มี
+// ผู้ใช้คนเดียวกันจึงเห็นเวลาสอบคนละรูปแบบระหว่างการ์ดเตือนล่วงหน้ากับการ์ดสรุปเช้า
+// fallback ไว้เผื่อไฟล์เก่าที่ยังไม่มีคีย์นี้ จะได้ไม่พังตอน deploy สลับเวอร์ชัน
+const PERIOD_TIME = examLookup.period_times || { A: '09:00 - 12:00 น.', B: '14:00 - 16:30 น.' };
 
-// LINE จำกัดจำนวนผู้รับต่อการเรียก multicast และเราส่งข้อความไม่เหมือนกันในแต่ละคน
-// จึงต้องยิงทีละคน — หน่วงเป็นชุดกัน rate limit ของ Messaging API
-const PUSH_BATCH_SIZE = 20;
-
-export function bangkokDate(at = Date.now()) {
-  return new Date(at + 7 * 3600 * 1000).toISOString().slice(0, 10);
-}
-
-function formatThaiDate(iso) {
-  const [year, month, day] = iso.split('-').map(Number);
-  return `${day} ${THAI_MONTH_ABBR[month - 1]} ${String(year + 543).slice(-2)}`;
-}
 
 // รหัสวิชาทั้งหมดที่สอบวันนั้น -> Map<course_code, periods[]>
 function coursesOnDate(examDate) {
@@ -59,7 +50,7 @@ function formatAlertMessage(examDate, items, liffUrl) {
   });
 
   const count = sorted.length === 1 ? '1 วิชา' : `${sorted.length} วิชา`;
-  const profileUrl = liffUrl ? `${liffUrl}${liffUrl.includes('?') ? '&' : '?'}mode=profile` : '';
+  const profileUrl = liffUrl ? liffProfileLink(liffUrl) : '';
   return [
     `พรุ่งนี้มีสอบ ${count}นะครับ`,
     formatThaiDate(examDate),
@@ -146,8 +137,7 @@ export async function runExamAlerts(env, { examDate, kind = 'DAY_BEFORE', dryRun
 
         // ถอนการจองคืนเฉพาะกรณีที่ลองใหม่แล้วมีโอกาสสำเร็จ (5xx หรือเน็ตพัง)
         // ถ้าเป็น 4xx เช่นผู้ใช้บล็อก OA ไปแล้ว ปล่อยแถวไว้ จะได้ไม่ยิงซ้ำทุกวันจนเปลืองโควตา
-        const retriable = !err.status || err.status >= 500;
-        if (retriable) {
+        if (isRetriablePushError(err)) {
           summary.retriable = (summary.retriable || 0) + 1;
           await env.DB.prepare(
             'DELETE FROM exam_alerts_sent WHERE user_id = ? AND exam_date = ? AND kind = ?'
@@ -175,12 +165,8 @@ export async function runDailyExamAlerts(env) {
 // ต้องมี token เพราะ endpoint นี้ส่งข้อความหาผู้ใช้จริงได้ ปล่อยเปิดไว้ไม่ได้เด็ดขาด
 // dry_run ก็ยังต้องใช้ token เพราะผลลัพธ์มีตัวอย่างข้อความและจำนวนผู้ใช้ติดไปด้วย
 export async function handleAdminExamAlerts(request, env) {
-  const token = request.headers.get('x-admin-token');
-  if (!env.ADMIN_TOKEN || token !== env.ADMIN_TOKEN) {
-    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-      status: 401, headers: { 'Content-Type': 'application/json' },
-    });
-  }
+  const denied = requireAdmin(request, env);
+  if (denied) return denied;
 
   let payload = {};
   try {
@@ -188,10 +174,8 @@ export async function handleAdminExamAlerts(request, env) {
   } catch { /* ไม่มี body ก็ได้ ใช้ค่าเริ่มต้น */ }
 
   const examDate = payload.date || bangkokDate(Date.now() + 24 * 3600 * 1000);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(examDate)) {
-    return new Response(JSON.stringify({ error: 'date ต้องเป็นรูปแบบ YYYY-MM-DD' }), {
-      status: 400, headers: { 'Content-Type': 'application/json' },
-    });
+  if (!isIsoDate(examDate)) {
+    return jsonResponse({ error: 'date ต้องเป็นรูปแบบ YYYY-MM-DD' }, 400);
   }
 
   const result = await runExamAlerts(env, {
@@ -200,7 +184,5 @@ export async function handleAdminExamAlerts(request, env) {
     dryRun: payload.dry_run !== false,   // ต้องระบุ dry_run: false ชัดเจนถึงจะส่งจริง
   });
 
-  return new Response(JSON.stringify(result), {
-    status: 200, headers: { 'Content-Type': 'application/json' },
-  });
+  return jsonResponse(result);
 }

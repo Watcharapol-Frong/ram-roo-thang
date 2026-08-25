@@ -9,7 +9,10 @@
 // a handful of shapes, matching is exact, and an LLM could invent a class that does not exist —
 // which for a timetable is worse than saying nothing.
 
-import { collectDigests, buildDigestCard, bangkokDate } from './daily.js';
+import { collectDigests, buildDigestCard } from './daily.js';
+// bangkokDate ย้ายไป shared.js แล้ว — ดึงจากต้นทางตรงๆ ไม่ใช่ re-export ผ่าน daily.js
+// (ยิ่งดึงผ่านไฟล์ที่อยู่ในวงจร import อยู่แล้ว ยิ่งเพิ่มโอกาสพังตอน init)
+import { bangkokDate, liffProfileLink } from './shared.js';
 import { resultCard, row, FLEX_TOKENS } from './flex.js';
 
 const DAY_CODES = ['SU', 'M', 'TU', 'W', 'TH', 'F', 'S'];
@@ -51,7 +54,7 @@ async function digestFor(env, userId, dateIso) {
 }
 
 function emptyCard(liffUrl, headline, note) {
-  const uri = liffUrl ? `${liffUrl}${liffUrl.includes('?') ? '&' : '?'}mode=profile` : 'https://line.me';
+  const uri = liffProfileLink(liffUrl);
   return resultCard({
     title: 'ตารางของคุณ',
     headerColor: FLEX_TOKENS.blueSoft,
@@ -96,7 +99,7 @@ async function weekCard(env, userId, liffUrl) {
   });
 
   const examDays = days.filter((d) => d.digest.exams.length).length;
-  const uri = liffUrl ? `${liffUrl}${liffUrl.includes('?') ? '&' : '?'}mode=profile` : 'https://line.me';
+  const uri = liffProfileLink(liffUrl);
 
   return resultCard({
     title: 'สัปดาห์นี้ของคุณ',

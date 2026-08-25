@@ -12,6 +12,7 @@ import { haversineDistanceMeters } from './utils.js';
 import { processExamScheduleImage, confirmRoomImport, cancelRoomImport } from './examroom.js';
 import { detectScheduleQuestion, answerMySchedule } from './myschedule.js';
 import { resultCard, row, FLEX_TOKENS } from './flex.js';
+import { liffLink, liffProfileLink } from './shared.js';
 import { recordHeartbeat, runHealthChecks, statusFlexMessage } from './health.js';
 
 export async function verifySignature(body, signature, channelSecret) {
@@ -64,16 +65,16 @@ export async function replyToLINE(replyToken, messages, accessToken) {
   });
 }
 
+// คง guard เดิมไว้: ไม่มี LIFF_URL ให้คืนค่าที่ได้มา ไม่ใช่ fallback เป็น line.me แบบ liffLink
+// เพราะผู้เรียกสองที่นี้เอาผลไปใส่ปุ่มใน Flex ซึ่งพฤติกรรมตอน LIFF_URL หายต่างกัน
 function withDestId(liffUrl, buildingId) {
   if (!liffUrl) return liffUrl;
-  const separator = liffUrl.includes('?') ? '&' : '?';
-  return `${liffUrl}${separator}dest_id=${encodeURIComponent(buildingId)}`;
+  return liffLink(liffUrl, `dest_id=${encodeURIComponent(buildingId)}`);
 }
 
 function withParkingZoneId(liffUrl, zoneId) {
   if (!liffUrl) return liffUrl;
-  const separator = liffUrl.includes('?') ? '&' : '?';
-  return `${liffUrl}${separator}mode=parking&zone_id=${encodeURIComponent(zoneId)}`;
+  return liffLink(liffUrl, `mode=parking&zone_id=${encodeURIComponent(zoneId)}`);
 }
 
 const PARKING_STATUS_WORD = { GREEN: 'เบาบาง', YELLOW: 'ปานกลาง', RED: 'หนาแน่น' };
@@ -159,7 +160,7 @@ function generateServiceSummaryMessage(service) {
 // รายละเอียดอย่าง "วันและคาบสอบดึงจากประกาศ" หรือ "ห้องสอบเติมทีหลังได้" ผู้ใช้จะเห็นเองในแอป
 // ตอนเปิดดู ไม่ต้องมาอ่านในการ์ดนี้ก่อน เหลือแค่ทางเลือกสองทางว่าจะส่งรูปหรือพิมพ์เอง
 export function generateScheduleFlexMessage(liffUrl) {
-  const uri = liffUrl ? `${liffUrl}${liffUrl.includes('?') ? '&' : '?'}mode=profile` : 'https://line.me';
+  const uri = liffProfileLink(liffUrl);
   return resultCard({
     title: 'ตารางของคุณ',
     headerColor: FLEX_TOKENS.blueSoft,
@@ -351,7 +352,7 @@ const QUICK_REPLY_ITEMS = {
 // เมื่อไม่มีไอคอนแย่งพื้นที่ และการ์ดทั้งใบดูสงบกว่า
 export function generateMainMenuFlex(liffUrl) {
   const base = liffUrl || 'https://line.me';
-  const link = (params) => `${base}${base.includes('?') ? '&' : '?'}${params}`;
+  const link = (params) => liffLink(base, params);
   const T = FLEX_TOKENS;
 
   const tile = (text, action, background = T.blueSoft, color = T.brand) => ({
