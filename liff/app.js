@@ -16,12 +16,6 @@ const GOOGLE_MAPS_MAP_ID = '3b904d628ff6dcd13b559086';
 // และหมุนตามเข็มทิศได้ ส่วนตึก 3D ที่ style ทำให้หายไปก็ไม่กระทบ เพราะโหมด 2D ไม่ได้ใช้อยู่แล้ว
 const GOOGLE_MAPS_MAP_ID_2D = '3b904d628ff6dcdec4f81588';
 
-// ปลายทางเก็บผลแบบประเมิน Beta — Web App URL ของ Google Apps Script
-// (ดู scripts/google-sheets-apps-script.js สำหรับโค้ดฝั่ง Sheets และวิธี deploy)
-// เว้นว่างไว้ = ไม่ส่งไปไหน เก็บลง localStorage ของเครื่องคนตอบอย่างเดียว ซึ่งเท่ากับเก็บผลไม่ได้จริง
-// เพราะข้อมูลติดอยู่ในเครื่องแต่ละคน ต้องใส่ค่านี้ก่อนเปิดให้คนทดสอบ ไม่งั้นได้ผลกลับมา 0 ชุด
-const FEEDBACK_ENDPOINT_URL = 'https://script.google.com/macros/s/AKfycbz9VcJ0srqYNHchZhkzMYkEzg0sS0hL5P9mONRNaybEoVEZhTKLZ16k0c0AAoQ3_gEo/exec';
-
 // Dev Mode (?dev=1) — เปิดทดสอบบนเบราว์เซอร์ปกติได้โดยไม่ต้องเปิดผ่านแอป LINE
 // ปกติ liff.init จะเด้งไปหน้า LINE Login ทำให้เทสยาก โหมดนี้จึง stub liff ทิ้งไปเลย
 // และจำลองพิกัด GPS ให้อยู่ในแคมปัส (ใส่ &lat=&lng= เพื่อจำลองตำแหน่งอื่น เช่น นอกแคมปัส)
