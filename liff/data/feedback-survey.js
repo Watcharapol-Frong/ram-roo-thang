@@ -123,7 +123,7 @@ const FEEDBACK_SURVEY = {
           options: [
             { value: 'รู้ใจ พิมพ์ถาม AI',        label: 'รู้ใจ พิมพ์ถาม AI ถามขั้นตอนเอกสาร ค่าธรรมเนียม และชื่อย่ออาคารผ่านแชต' },
             { value: 'รู้ทาง 3D Navigation',      label: 'รู้ทาง 3D Navigation แผนที่นำทางเดินเท้าตรงถึงตึก' },
-            { value: 'รู้ที่จอด Parking Finder',  label: '🅿รู้ที่จอด Parking Finder เช็กความหนาแน่นลานจอด และบันทึกพิกัดจุดจอดรถ' },
+            { value: 'รู้ที่จอด Parking Finder',  label: 'รู้ที่จอด Parking Finder เช็กความหนาแน่นลานจอด และบันทึกพิกัดจุดจอดรถ' },
             { value: 'รู้ตาราง Exam Assistant',   label: 'รู้ตาราง Exam Assistant สแกนตารางสอบจากรูปภาพ และตั้งเตือนวันสอบ' },
           ],
         },
