@@ -146,10 +146,41 @@ async function readUserId(request) {
   }
 }
 
-// POST /api/user/feedback — ครั้งเดียวตลอดชีพ (ref_id คงที่ = 'once')
+// POST /api/user/feedback — ครั้งเดียวตลอดชีพ (ref_id คงที่ = 'once') และบันทึกผลลง D1
 export async function handleFeedbackAward(request, env) {
-  const userId = await readUserId(request);
+  let body = {};
+  try {
+    body = await request.json();
+  } catch {
+    body = {};
+  }
+  const userId = body && body.user_id ? String(body.user_id) : null;
   if (!userId) return jsonResponse({ error: 'ต้องระบุ user_id' }, 400);
+
+  // บันทึกคำตอบแบบประเมินลง D1 (ถ้ามีคำตอบส่งมา)
+  if (body.answers) {
+    try {
+      await env.DB.prepare(`
+        CREATE TABLE IF NOT EXISTS user_feedback (
+          id           INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id      TEXT NOT NULL,
+          answers_json TEXT NOT NULL,
+          device_os    TEXT,
+          created_at   TEXT NOT NULL
+        )
+      `).run();
+
+      const answersJson = typeof body.answers === 'string' ? body.answers : JSON.stringify(body.answers);
+      const deviceOs = body.device_os || (body.answers && body.answers.deviceOS) || null;
+      const at = nowIso();
+
+      await env.DB.prepare(
+        'INSERT INTO user_feedback (user_id, answers_json, device_os, created_at) VALUES (?, ?, ?, ?)'
+      ).bind(userId, answersJson, deviceOs, at).run();
+    } catch (err) {
+      console.error('บันทึก feedback ลง D1 ไม่สำเร็จ', err);
+    }
+  }
 
   const result = await applyCoins(env, userId, {
     delta: COIN_REWARDS.FEEDBACK,

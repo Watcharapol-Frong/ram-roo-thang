@@ -445,40 +445,199 @@ body.map-view {
 }
 
 /* --- Consent Gate Screen --- */
-.consent-card {
-  padding: 24px 20px;
-  margin-top: 16px;
+.consent-wrapper {
+  display: flex;
+  flex-direction: column;
+  height: calc(100dvh - 60px); /* full screen minus bottom nav */
+  background: var(--bg, #f8f9fa);
 }
 
-.consent-card h2 {
-  font-size: 1.2rem;
-  margin-bottom: 12px;
+/* Sticky header */
+.consent-header {
+  flex-shrink: 0;
+  padding: 16px 20px 12px;
+  background: #ffffff;
+  border-bottom: 1px solid #e9ecef;
+}
+
+.consent-header h2 {
+  font-size: 1.05rem;
+  font-weight: 700;
   color: var(--text);
+  margin: 0 0 4px;
+  line-height: 1.4;
 }
 
-.consent-card p {
+.consent-subtitle {
+  font-size: 0.82rem;
+  color: var(--muted);
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* PDPA badge */
+.badge-pdpa {
+  display: inline-block;
+  padding: 1px 7px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #1a6b3c;
+  background: #e6f4ed;
+  border: 1px solid #a3d9b8;
+  border-radius: 6px;
+  letter-spacing: 0.04em;
+}
+
+/* Scrollable document area */
+.consent-doc-scroll {
+  flex: 1;
+  overflow-y: auto;
+  position: relative;
+  -webkit-overflow-scrolling: touch;
+}
+
+.consent-doc-body {
+  padding: 16px 20px 24px;
+}
+
+.consent-doc-body h3 {
   font-size: 0.92rem;
-  line-height: 1.6;
-  margin-bottom: 12px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 20px 0 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #e9ecef;
 }
 
-.consent-card p.muted {
-  font-size: 0.86rem;
+.consent-doc-body p {
+  font-size: 0.875rem;
+  line-height: 1.65;
+  color: var(--text);
+  margin-bottom: 10px;
+}
+
+.consent-law-note {
+  background: #fffbf0;
+  border-left: 3px solid #f0a500;
+  padding: 8px 12px;
+  border-radius: 0 6px 6px 0;
+  font-size: 0.8rem !important;
+  color: #7a5800 !important;
+  margin-bottom: 16px !important;
+}
+
+.consent-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 10px;
+}
+
+.consent-list li {
+  position: relative;
+  padding: 6px 0 6px 20px;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  color: var(--text);
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.consent-list li:last-child {
+  border-bottom: none;
+}
+
+.consent-list li::before {
+  content: "•";
+  position: absolute;
+  left: 6px;
+  color: var(--accent, #2d6a4f);
+  font-weight: 700;
+}
+
+.consent-contact-box {
+  background: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 10px;
+  padding: 12px 16px;
+  margin-top: 8px;
+}
+
+.consent-contact-box p {
+  margin: 0 0 8px;
+  font-size: 0.875rem;
+}
+
+.consent-contact-box p:last-child {
+  margin: 0;
+}
+
+.consent-contact-box a {
+  color: var(--accent, #2d6a4f);
+  text-decoration: none;
+}
+
+/* Scroll-to-read fade indicator */
+.consent-scroll-indicator {
+  position: sticky;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  text-align: center;
+  padding: 10px 0 6px;
+  background: linear-gradient(to bottom, transparent, rgba(248, 249, 250, 0.95) 40%);
+  pointer-events: none;
+  transition: opacity 0.3s;
+}
+
+.consent-scroll-indicator span {
+  display: inline-block;
+  font-size: 0.78rem;
+  color: var(--muted);
+  background: #ffffff;
+  border: 1px solid #dee2e6;
+  border-radius: 20px;
+  padding: 4px 14px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+}
+
+.consent-scroll-indicator.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Footer: checkbox + button */
+.consent-footer {
+  flex-shrink: 0;
+  padding: 12px 20px 16px;
+  background: #ffffff;
+  border-top: 1px solid #e9ecef;
+  box-shadow: 0 -2px 8px rgba(0,0,0,0.06);
+}
+
+.consent-btn-submit {
+  width: 100%;
+  margin-top: 4px;
+  font-size: 0.95rem;
+}
+
+.consent-revoke-note {
+  font-size: 0.75rem;
+  color: var(--muted);
+  text-align: center;
+  margin: 10px 0 0;
   line-height: 1.5;
-  background: var(--bg);
-  padding: 12px;
-  border-radius: 8px;
 }
 
 .consent-checkbox-label {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  margin: 20px 0 24px;
-  font-size: 0.9rem;
+  margin: 0 0 12px;
+  font-size: 0.875rem;
   color: var(--text);
   cursor: pointer;
-  line-height: 1.4;
+  line-height: 1.5;
   user-select: none;
 }
 
@@ -490,6 +649,7 @@ body.map-view {
   cursor: pointer;
   flex-shrink: 0;
 }
+
 
 /* --- Flat Minimal Profile Layout (Soft Minimal Backgrounds) --- */
 .profile-flat-container {
@@ -800,6 +960,78 @@ body.map-view {
   font-weight: 700;
   cursor: pointer;
 }
+
+/* กล่อง header notice (ขอบคุณ + ชี้แจงวัตถุประสงค์ + เวลา/รางวัล) */
+.survey-header-note {
+  background: linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%);
+  border: 1px solid #a7f3d0;
+  border-radius: 14px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+
+.survey-header-note h1 {
+  font-size: 1.05rem;
+  font-weight: 900;
+  color: #065f46;
+  margin: 0 0 6px;
+  line-height: 1.4;
+}
+
+.survey-header-note p {
+  font-size: 0.82rem;
+  line-height: 1.55;
+  color: #047857;
+  margin: 0 0 8px;
+}
+
+.survey-header-note p:last-child {
+  margin: 0;
+}
+
+.survey-header-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.survey-meta-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  background: #d1fae5;
+  color: #065f46;
+  border: 1px solid #6ee7b7;
+}
+
+/* badge "ไม่บังคับ" ติดข้าง label */
+.survey-optional-badge {
+  display: inline-block;
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: #64748b;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  padding: 1px 7px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+/* hint "เลือกได้สูงสุด N ข้อ" */
+.survey-max-hint {
+  font-size: 0.75rem;
+  color: #64748b;
+  margin: -2px 0 8px;
+  font-style: italic;
+}
+
 
 .survey-section-card {
   background: #ffffff;

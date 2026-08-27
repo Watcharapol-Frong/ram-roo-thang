@@ -1029,7 +1029,123 @@ function bindBottomNavEvents() {
   });
 }
 
-// renderFeedbackView — หน้ากรอกแบบประเมินความคิดเห็น Beta Test (จำกัด 1 ครั้งต่อผู้ใช้ บันทึกลง Sheet)
+// buildFeedbackSurveyHTML — แปลง FEEDBACK_SURVEY object (data/feedback-survey.js) เป็น HTML
+// แก้ไขเนื้อหาและคำถามที่ data/feedback-survey.js ไม่ต้องแตะฟังก์ชันนี้
+function buildFeedbackSurveyHTML(survey) {
+  // Header note
+  const paragraphsHTML = survey.headerNote.paragraphs
+    .map(p => `<p>${p}</p>`)
+    .join('');
+  const chipsHTML = survey.headerNote.chips
+    .map(c => `<span class="survey-meta-chip">${c}</span>`)
+    .join('');
+
+  // Sections + Questions
+  const sectionsHTML = survey.sections.map((section, sIdx) => {
+    const questionsHTML = section.questions.map(q => buildQuestionHTML(q)).join('\n');
+    return `
+      <div class="survey-section-card">
+        <div class="survey-section-header">
+          <span class="survey-section-num">${sIdx + 1}</span>
+          <h3 class="survey-section-title">${section.heading}</h3>
+        </div>
+        ${questionsHTML}
+      </div>`;
+  }).join('\n');
+
+  return `
+    <div class="survey-header-note">
+      <h1>${survey.title}</h1>
+      ${paragraphsHTML}
+      <div class="survey-header-meta">${chipsHTML}</div>
+    </div>
+    <form id="beta-survey-form">
+      ${sectionsHTML}
+      <button type="submit" class="btn btn-primary" id="btn-submit-feedback"
+        style="width:100%; padding:14px; font-size:1rem; font-weight:800; border-radius:14px; margin-bottom:20px;">
+        ${survey.submitLabel || 'ส่งแบบประเมิน'}
+      </button>
+    </form>
+  `;
+}
+
+// buildQuestionHTML — แปลง question object เป็น HTML input ตาม type
+function buildQuestionHTML(q) {
+  const optionalBadge = q.optional
+    ? '<span class="survey-optional-badge">ไม่บังคับ</span>'
+    : '';
+  const hintHTML = q.hint
+    ? `<p class="survey-max-hint">${q.hint}</p>`
+    : '';
+
+  let inputHTML = '';
+
+  if (q.type === 'radio' || q.type === 'checkbox') {
+    const inputType = q.type;
+    const listId = q.type === 'checkbox' ? ` id="survey-list-${q.id}"` : '';
+    const optionsHTML = q.options.map(opt => {
+      const val = opt.value;
+      const lbl = opt.label || opt.value;
+      const checked = q.defaultValue === val ? ' checked' : '';
+      return `<label class="choice-option-label">
+        <input type="${inputType}" name="${q.id}" value="${val}"${checked} />
+        <span>${lbl}</span>
+      </label>`;
+    }).join('\n');
+    inputHTML = `<div class="choice-card-list"${listId}>${optionsHTML}</div>`;
+
+  } else if (q.type === 'rating') {
+    const min = q.min || 1;
+    const max = q.max || 5;
+    const btns = [];
+    for (let i = min; i <= max; i++) {
+      const checked = (q.defaultValue === i) ? ' checked' : '';
+      btns.push(`<label class="rating-num-btn"><input type="radio" name="${q.id}" value="${i}"${checked} />${i}</label>`);
+    }
+    inputHTML = `
+      <div class="rating-num-group">${btns.join('')}</div>
+      <div class="rating-legend-row">
+        <span>${q.legendMin || ''}</span>
+        <span>${q.legendMax || ''}</span>
+      </div>`;
+
+  } else if (q.type === 'textarea') {
+    inputHTML = `<textarea class="feedback-textarea" name="${q.id}"
+      placeholder="${q.placeholder || ''}"></textarea>`;
+  }
+
+  return `
+    <label class="survey-q-label">${q.label}${optionalBadge}</label>
+    ${hintHTML}
+    ${inputHTML}`;
+}
+
+// collectSurveyAnswers — รวบรวมคำตอบทั้งหมดจากฟอร์มตาม FEEDBACK_SURVEY structure
+// ไม่ต้องแก้เมื่อเพิ่ม/ลด/เปลี่ยนคำถาม — loop ตาม sections/questions อัตโนมัติ
+function collectSurveyAnswers(form, survey) {
+  const formData = new FormData(form);
+  const answers = {};
+
+  for (const section of survey.sections) {
+    for (const q of section.questions) {
+      if (q.type === 'checkbox') {
+        const checkedCbs = Array.from(form.querySelectorAll(`input[name="${q.id}"]:checked`));
+        answers[q.id] = checkedCbs.map(cb => cb.value);
+      } else if (q.type === 'rating') {
+        const val = formData.get(q.id);
+        answers[q.id] = (val !== null && val !== '') ? Number(val) : (q.defaultValue ? Number(q.defaultValue) : null);
+      } else if (q.type === 'textarea') {
+        answers[q.id] = (formData.get(q.id) || '').trim();
+      } else {
+        answers[q.id] = formData.get(q.id) || '';
+      }
+    }
+  }
+  return answers;
+}
+
+// renderFeedbackView — หน้ากรอกแบบประเมินความคิดเห็น Beta Test (จำกัด 1 ครั้งต่อผู้ใช้ บันทึกคำตอบและให้เหรียญลง D1)
+// เนื้อหาและคำถามอ่านจาก FEEDBACK_SURVEY ใน data/feedback-survey.js
 async function renderFeedbackView() {
   const container = getApp();
   const isDone = localStorage.getItem('ram-roo-thang:feedback-done') === 'true';
@@ -1065,13 +1181,15 @@ async function renderFeedbackView() {
   let profile = null;
   try {
     profile = await getUserProfile();
-  } catch (_) { /* fallback */ }
+  } catch (_) {}
 
   const detectedOS = /iPhone|iPad|iPod/i.test(navigator.userAgent)
     ? 'iOS'
     : /Android/i.test(navigator.userAgent)
       ? 'Android'
       : 'Desktop/Other';
+
+  const survey = typeof FEEDBACK_SURVEY !== 'undefined' ? FEEDBACK_SURVEY : null;
 
   container.innerHTML = `
     <div class="profile-flat-container">
@@ -1084,206 +1202,38 @@ async function renderFeedbackView() {
         </button>
         <span class="badge-reward-coin">+30 เหรียญ</span>
       </div>
-
-      <div style="margin-bottom: 14px; padding: 0 4px;">
-        <h1 style="font-size: 1.3rem; font-weight: 900; color: #0f172a; margin: 0 0 4px;">แบบประเมินระบบ Beta Test</h1>
-        <p class="muted" style="font-size: 0.82rem; margin: 0; line-height: 1.4;">
-          ความคิดเห็นของท่านมีคุณค่าอย่างยิ่งในการปรับปรุงและพัฒนา "รามรู้ทาง" ให้สมบูรณ์แบบก่อนเปิดใช้งานจริง
-        </p>
-      </div>
-
-      <form id="beta-survey-form">
-        <!-- ส่วนที่ 1: ความพึงพอใจและประสบการณ์ใช้งาน -->
-        <div class="survey-section-card">
-          <div class="survey-section-header">
-            <span class="survey-section-num">1</span>
-            <h3 class="survey-section-title">ความพึงพอใจและประสบการณ์ใช้งาน</h3>
-          </div>
-
-          <label class="survey-q-label">1. ความพึงพอใจโดยรวมในการใช้งาน (Overall Satisfaction)</label>
-          <div class="rating-num-group">
-            <label class="rating-num-btn"><input type="radio" name="q1_overall_sat" value="1" />1</label>
-            <label class="rating-num-btn"><input type="radio" name="q1_overall_sat" value="2" />2</label>
-            <label class="rating-num-btn"><input type="radio" name="q1_overall_sat" value="3" />3</label>
-            <label class="rating-num-btn"><input type="radio" name="q1_overall_sat" value="4" />4</label>
-            <label class="rating-num-btn"><input type="radio" name="q1_overall_sat" value="5" checked />5</label>
-          </div>
-          <div class="rating-legend-row">
-            <span>1 = ควรปรับปรุง</span>
-            <span>5 = พึงพอใจมากที่สุด</span>
-          </div>
-
-          <label class="survey-q-label">2. ความง่ายและความลื่นไหลในการใช้งาน (Ease of Use)</label>
-          <div class="rating-num-group">
-            <label class="rating-num-btn"><input type="radio" name="q2_ease_of_use" value="1" />1</label>
-            <label class="rating-num-btn"><input type="radio" name="q2_ease_of_use" value="2" />2</label>
-            <label class="rating-num-btn"><input type="radio" name="q2_ease_of_use" value="3" />3</label>
-            <label class="rating-num-btn"><input type="radio" name="q2_ease_of_use" value="4" />4</label>
-            <label class="rating-num-btn"><input type="radio" name="q2_ease_of_use" value="5" checked />5</label>
-          </div>
-          <div class="rating-legend-row">
-            <span>1 = ใช้งานยาก</span>
-            <span>5 = ใช้งานง่ายมาก</span>
-          </div>
-
-          <label class="survey-q-label">3. ความเร็วในการเปิดและโหลดข้อมูล (Speed & Performance)</label>
-          <div class="rating-num-group">
-            <label class="rating-num-btn"><input type="radio" name="q3_speed_perf" value="1" />1</label>
-            <label class="rating-num-btn"><input type="radio" name="q3_speed_perf" value="2" />2</label>
-            <label class="rating-num-btn"><input type="radio" name="q3_speed_perf" value="3" />3</label>
-            <label class="rating-num-btn"><input type="radio" name="q3_speed_perf" value="4" />4</label>
-            <label class="rating-num-btn"><input type="radio" name="q3_speed_perf" value="5" checked />5</label>
-          </div>
-          <div class="rating-legend-row">
-            <span>1 = ช้า/ค้างบ่อย</span>
-            <span>5 = รวดเร็วทันใจ</span>
-          </div>
-        </div>
-
-        <!-- ส่วนที่ 2: ประเมินรายฟีเจอร์หลัก -->
-        <div class="survey-section-card">
-          <div class="survey-section-header">
-            <span class="survey-section-num">2</span>
-            <h3 class="survey-section-title">การประเมินรายฟีเจอร์หลัก</h3>
-          </div>
-
-          <label class="survey-q-label">4. ระบบแผนที่และการนำทางไปอาคารสอบ (Map & Navigation)</label>
-          <div class="rating-num-group">
-            <label class="rating-num-btn"><input type="radio" name="q4_map_rating" value="1" />1</label>
-            <label class="rating-num-btn"><input type="radio" name="q4_map_rating" value="2" />2</label>
-            <label class="rating-num-btn"><input type="radio" name="q4_map_rating" value="3" />3</label>
-            <label class="rating-num-btn"><input type="radio" name="q4_map_rating" value="4" />4</label>
-            <label class="rating-num-btn"><input type="radio" name="q4_map_rating" value="5" checked />5</label>
-          </div>
-          <div class="rating-legend-row">
-            <span>1 = ไม่แม่นยำ</span>
-            <span>5 = นำทางแม่นยำมาก</span>
-          </div>
-
-          <label class="survey-q-label">5. ระบบจัดการตารางสอบและปุ่มกด 'Go' นำทาง (Exam Schedule)</label>
-          <div class="rating-num-group">
-            <label class="rating-num-btn"><input type="radio" name="q5_schedule_rating" value="1" />1</label>
-            <label class="rating-num-btn"><input type="radio" name="q5_schedule_rating" value="2" />2</label>
-            <label class="rating-num-btn"><input type="radio" name="q5_schedule_rating" value="3" />3</label>
-            <label class="rating-num-btn"><input type="radio" name="q5_schedule_rating" value="4" />4</label>
-            <label class="rating-num-btn"><input type="radio" name="q5_schedule_rating" value="5" checked />5</label>
-          </div>
-          <div class="rating-legend-row">
-            <span>1 = ไม่สะดวก</span>
-            <span>5 = สะดวกและมีประโยชน์มาก</span>
-          </div>
-
-          <label class="survey-q-label">6. ระบบดูที่จอดรถและการสะสมเหรียญ (Parking & Coins)</label>
-          <div class="rating-num-group">
-            <label class="rating-num-btn"><input type="radio" name="q6_parking_rating" value="1" />1</label>
-            <label class="rating-num-btn"><input type="radio" name="q6_parking_rating" value="2" />2</label>
-            <label class="rating-num-btn"><input type="radio" name="q6_parking_rating" value="3" />3</label>
-            <label class="rating-num-btn"><input type="radio" name="q6_parking_rating" value="4" />4</label>
-            <label class="rating-num-btn"><input type="radio" name="q6_parking_rating" value="5" checked />5</label>
-          </div>
-          <div class="rating-legend-row">
-            <span>1 = ไม่น่าสนใจ</span>
-            <span>5 = น่าสนใจและมีประโยชน์</span>
-          </div>
-
-          <label class="survey-q-label">7. ฟีเจอร์ที่คุณคิดว่ามีประโยชน์มากที่สุดในช่วงสอบ?</label>
-          <div class="choice-card-list">
-            <label class="choice-option-label">
-              <input type="radio" name="q7_top_feature" value="แผนที่และเส้นทางเดินไปอาคารสอบ" checked />
-              <span>แผนที่และเส้นทางเดินไปอาคารสอบ</span>
-            </label>
-            <label class="choice-option-label">
-              <input type="radio" name="q7_top_feature" value="ตารางสอบส่วนตัวที่กด Go นำทางได้ทันที" />
-              <span>ตารางสอบส่วนตัวที่กด Go นำทางได้ทันที</span>
-            </label>
-            <label class="choice-option-label">
-              <input type="radio" name="q7_top_feature" value="ค้นหาข้อมูลอาคาร แผนก และห้องน้ำ" />
-              <span>ค้นหาข้อมูลอาคาร แผนก และห้องน้ำ</span>
-            </label>
-            <label class="choice-option-label">
-              <input type="radio" name="q7_top_feature" value="ข้อมูลที่จอดรถรอบมหาวิทยาลัย" />
-              <span>ข้อมูลที่จอดรถรอบมหาวิทยาลัย</span>
-            </label>
-          </div>
-        </div>
-
-        <!-- ส่วนที่ 3: ปัญหาที่พบและโอกาสในการบอกต่อ (NPS) -->
-        <div class="survey-section-card">
-          <div class="survey-section-header">
-            <span class="survey-section-num">3</span>
-            <h3 class="survey-section-title">ปัญหาที่พบและโอกาสในการบอกต่อ</h3>
-          </div>
-
-          <label class="survey-q-label">8. ปัญหาหรือจุดติดขัดที่พบระหว่างทดสอบ (เลือกได้หลายข้อ)</label>
-          <div class="choice-card-list">
-            <label class="choice-option-label">
-              <input type="checkbox" name="q8_issues" value="ไม่พบปัญหาเลย ใช้งานได้ราบรื่น" checked />
-              <span>ไม่พบปัญหาเลย ใช้งานได้ราบรื่น</span>
-            </label>
-            <label class="choice-option-label">
-              <input type="checkbox" name="q8_issues" value="พิกัดหรือเส้นทางนำทางไม่ตรงจุดจริง" />
-              <span>พิกัดหรือเส้นทางนำทางไม่ตรงจุดจริง</span>
-            </label>
-            <label class="choice-option-label">
-              <input type="checkbox" name="q8_issues" value="ค้นหารหัสวิชาหรืออาคารไม่เจอ" />
-              <span>ค้นหารหัสวิชาหรืออาคารไม่เจอ</span>
-            </label>
-            <label class="choice-option-label">
-              <input type="checkbox" name="q8_issues" value="หน้าจอโหลดช้า หรือกระตุกในบางจุด" />
-              <span>หน้าจอโหลดช้า หรือกระตุกในบางจุด</span>
-            </label>
-            <label class="choice-option-label">
-              <input type="checkbox" name="q8_issues" value="การปัดหน้าจอ (Swipe) หรือกดปุ่มบางจุดกดยาก" />
-              <span>การปัดหน้าจอ (Swipe) หรือกดปุ่มบางจุดกดยาก</span>
-            </label>
-          </div>
-
-          <label class="survey-q-label">9. Net Promoter Score (NPS): โอกาสที่จะแนะนำให้เพื่อนใช้งาน?</label>
-          <p class="survey-q-desc">คะแนน 0 (ไม่แนะนำแน่นอน) ถึง 10 (แนะนำทุกคนแน่นอน)</p>
-          <div class="nps-grid">
-            <label class="nps-btn"><input type="radio" name="q9_nps_score" value="0" />0</label>
-            <label class="nps-btn"><input type="radio" name="q9_nps_score" value="1" />1</label>
-            <label class="nps-btn"><input type="radio" name="q9_nps_score" value="2" />2</label>
-            <label class="nps-btn"><input type="radio" name="q9_nps_score" value="3" />3</label>
-            <label class="nps-btn"><input type="radio" name="q9_nps_score" value="4" />4</label>
-            <label class="nps-btn"><input type="radio" name="q9_nps_score" value="5" />5</label>
-            <label class="nps-btn"><input type="radio" name="q9_nps_score" value="6" />6</label>
-            <label class="nps-btn"><input type="radio" name="q9_nps_score" value="7" />7</label>
-            <label class="nps-btn"><input type="radio" name="q9_nps_score" value="8" />8</label>
-            <label class="nps-btn"><input type="radio" name="q9_nps_score" value="9" />9</label>
-            <label class="nps-btn"><input type="radio" name="q9_nps_score" value="10" checked />10</label>
-          </div>
-          <div class="rating-legend-row">
-            <span>0 = ไม่แนะนำ</span>
-            <span>10 = แนะนำแน่นอน</span>
-          </div>
-        </div>
-
-        <!-- ส่วนที่ 4: ข้อเสนอแนะเพื่อการพัฒนา -->
-        <div class="survey-section-card">
-          <div class="survey-section-header">
-            <span class="survey-section-num">4</span>
-            <h3 class="survey-section-title">ข้อเสนอแนะเพื่อการพัฒนา</h3>
-          </div>
-
-          <label class="survey-q-label">10. ฟีเจอร์ที่อยากให้มีเพิ่มเติมก่อนเปิดใช้งานจริง</label>
-          <textarea class="feedback-textarea" name="q10_feature_requests" placeholder="เช่น ตารางเดินรถสองแถวรอบ ม., จุดบริการถ่ายเอกสาร, แจ้งเตือนสอบล่วงหน้า..."></textarea>
-
-          <label class="survey-q-label">11. ข้อเสนอแนะหรือความคิดเห็นเพิ่มเติม</label>
-          <textarea class="feedback-textarea" name="q11_general_comments" placeholder="ข้อความถึงทีมผู้พัฒนาเพื่อปรับปรุงระบบให้ดียิ่งขึ้น..."></textarea>
-        </div>
-
-        <button type="submit" class="btn btn-primary" id="btn-submit-feedback" style="width:100%; padding:14px; font-size:1rem; font-weight:800; border-radius:14px; margin-bottom:20px;">
-          ส่งแบบประเมิน (รับ 30 เหรียญ)
-        </button>
-      </form>
+      ${survey
+        ? buildFeedbackSurveyHTML(survey)
+        : '<p style="text-align:center;padding:40px 0;color:var(--muted)">ไม่สามารถโหลดแบบประเมินได้ กรุณาลองใหม่อีกครั้ง</p>'
+      }
     </div>
-
     ${renderBottomNavHTML('profile')}
   `;
 
   document.getElementById('btn-feedback-back').addEventListener('click', () => renderProfileView());
   bindBottomNavEvents();
+
+  if (!survey) return;
+
+  // จัดการการจำกัดจำนวนเลือกสำหรับคำถามแบบ checkbox
+  for (const section of survey.sections) {
+    for (const q of section.questions) {
+      if (q.type === 'checkbox' && q.maxSelect) {
+        const listEl = document.getElementById(`survey-list-${q.id}`);
+        if (!listEl) continue;
+        listEl.addEventListener('change', () => {
+          const checked = listEl.querySelectorAll(`input[name="${q.id}"]:checked`);
+          const overLimit = checked.length >= q.maxSelect;
+          listEl.querySelectorAll(`input[name="${q.id}"]`).forEach((cb) => {
+            if (!cb.checked) {
+              cb.disabled = overLimit;
+              cb.closest('.choice-option-label').style.opacity = overLimit ? '0.45' : '';
+            }
+          });
+        });
+      }
+    }
+  }
 
   document.getElementById('beta-survey-form').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -1291,65 +1241,14 @@ async function renderFeedbackView() {
     btn.disabled = true;
     btn.textContent = 'กำลังส่งข้อมูล...';
 
-    const form = e.target;
-    const formData = new FormData(form);
-
-    // รวบรวมคำตอบ Checkbox Q8
-    const issues = [];
-    form.querySelectorAll('input[name="q8_issues"]:checked').forEach((cb) => {
-      issues.push(cb.value);
-    });
-
+    const answers = collectSurveyAnswers(e.target, survey);
+    const userId = (profile && profile.userId) ? profile.userId : 'dev-user-' + Date.now();
     const payload = {
       timestamp: new Date().toISOString(),
-      // ส่งแค่ userId — ไม่ส่ง displayName/pictureUrl ออกนอกเครื่องตามหลักของโปรเจกต์
-      // (ดู getUserProfile: ค่าพวกนั้นใช้แสดงผลใน UI เท่านั้น)
-      userId: (profile && profile.userId) ? profile.userId : 'dev-user-' + Date.now(),
+      userId,
       deviceOS: detectedOS,
-      q1_overall_sat: Number(formData.get('q1_overall_sat') || 5),
-      q2_ease_of_use: Number(formData.get('q2_ease_of_use') || 5),
-      q3_speed_perf: Number(formData.get('q3_speed_perf') || 5),
-      q4_map_rating: Number(formData.get('q4_map_rating') || 5),
-      q5_schedule_rating: Number(formData.get('q5_schedule_rating') || 5),
-      q6_parking_rating: Number(formData.get('q6_parking_rating') || 5),
-      q7_top_feature: formData.get('q7_top_feature') || '',
-      q8_issues_found: issues,
-      q9_nps_score: Number(formData.get('q9_nps_score') || 10),
-      q10_feature_requests: (formData.get('q10_feature_requests') || '').trim(),
-      q11_general_comments: (formData.get('q11_general_comments') || '').trim()
+      answers,
     };
-
-    // ส่งไป Google Apps Script (localStorage ใช้ override ตอนทดสอบได้ ไม่ต้องแก้โค้ด)
-    //
-    // ส่งเป็น text/plain ไม่ใช่ application/json ทั้งที่ body เป็น JSON — เพราะ application/json
-    // ทำให้เบราว์เซอร์ยิง preflight OPTIONS ก่อน ซึ่ง Apps Script ไม่ตอบ เลยต้องหนีไปใช้
-    // mode:'no-cors' ที่อ่าน response ไม่ได้เลย (opaque) แปลว่าส่งไม่ผ่านก็ไม่มีทางรู้
-    // text/plain เป็น simple request ไม่มี preflight อ่านผลได้จริง ส่วนฝั่ง Apps Script อ่านจาก
-    // e.postData.contents ซึ่งได้ body ดิบอยู่แล้วไม่ว่า Content-Type จะเป็นอะไร
-    const endpointUrl = localStorage.getItem('ram-roo-thang:feedback-sheet-url') || FEEDBACK_ENDPOINT_URL;
-    let syncedToSheet = false;
-    if (endpointUrl) {
-      try {
-        const res = await fetch(endpointUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify(payload),
-          redirect: 'follow',
-        });
-
-        // Apps Script รัน doPost แล้วตอบ 302 ไป script.googleusercontent.com เสมอ ซึ่ง fetch
-        // จะตามต่อด้วย GET ตามสเปก ทำให้ปลายทางอาจตอบ 405 ทั้งที่แถวถูกเขียนลงชีตไปแล้ว
-        // เช็ค res.ok แล้วขึ้นว่า "ส่งไม่สำเร็จ" จึงเป็นการเตือนผิดๆ ที่ทำให้ผู้ใช้กดส่งซ้ำโดยไม่จำเป็น
-        // ถือว่าส่งถึงเมื่อ fetch ไม่ throw (เน็ตถึงจริง) ส่วนรายละเอียดเก็บไว้ใน log ให้เราดูเอง
-        syncedToSheet = true;
-        const result = await res.json().catch(() => null);
-        if (!result || result.status !== 'success') {
-          console.warn('Google Sheets ตอบกลับแบบอ่านผลไม่ได้ (ปกติของ Apps Script)', res.status);
-        }
-      } catch (err) {
-        console.error('ส่งผลประเมินไป Google Sheets ไม่สำเร็จ', err);
-      }
-    }
 
     // บันทึกสำเนาลง LocalStorage
     try {
@@ -1360,25 +1259,24 @@ async function renderFeedbackView() {
 
     localStorage.setItem('ram-roo-thang:feedback-done', 'true');
 
-    // เหรียญให้ฝั่ง server และให้ครั้งเดียวต่อบัญชี — เดิมนับจาก flag ใน localStorage อย่างเดียว
-    // ล้างข้อมูลเบราว์เซอร์แล้วกดรับใหม่ได้ไม่จำกัด
+    // ส่งคำตอบและขอรับเหรียญจาก backend (D1)
     let awarded = 0;
     try {
       const res = await fetchJSON('/api/user/feedback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: payload.userId }),
+        body: JSON.stringify({
+          user_id: userId,
+          device_os: detectedOS,
+          answers,
+        }),
       });
       awarded = res.awarded || 0;
     } catch (err) {
-      console.error('ให้เหรียญค่าแบบประเมินไม่สำเร็จ', err);
+      console.error('ส่งแบบประเมินไปยัง D1 ไม่สำเร็จ', err);
     }
 
-    // ถ้ายังไม่ได้ตั้ง endpoint ก็ไม่ใช่ความผิดผู้ใช้ ไม่ต้องขู่ — แต่ถ้าตั้งไว้แล้วส่งไม่ผ่าน
-    // ต้องบอกตามจริง ไม่งั้นทั้งคนตอบและเราเข้าใจว่าเก็บได้แล้วทั้งที่ข้อมูลไม่ถึงไหน
-    if (endpointUrl && !syncedToSheet) {
-      showToast('บันทึกในเครื่องแล้ว แต่ส่งเข้าระบบไม่สำเร็จ');
-    } else if (awarded > 0) {
+    if (awarded > 0) {
       showToast(`ส่งแบบประเมินสำเร็จ! ได้รับ ${awarded} เหรียญ`);
     } else {
       showToast('ส่งแบบประเมินสำเร็จ!');
@@ -1386,6 +1284,7 @@ async function renderFeedbackView() {
     renderProfileView();
   });
 }
+
 
 // ปิดร้านค้าชั่วคราวก่อนวันเดโม — ของรางวัลยังจัดหาไม่ทัน
 //
@@ -1644,26 +1543,97 @@ function renderProfileView() {
   }
 }
 
+// buildConsentDocHTML — แปลง CONSENT_DOC object (data/consent-doc.js) เป็น HTML
+// แก้ไขเนื้อหาเอกสารที่ data/consent-doc.js ไม่ต้องแตะฟังก์ชันนี้
+function buildConsentDocHTML(doc) {
+  const sectionsHTML = doc.sections.map(section => {
+    let html = `<h3>${section.heading}</h3>`;
+
+    if (section.intro) {
+      html += `<p>${section.intro}</p>`;
+    }
+
+    if (section.items && section.items.length) {
+      html += '<ul class="consent-list">';
+      for (const item of section.items) {
+        const labelHTML = item.label ? `<strong>${item.label}</strong> ` : '';
+        html += `<li>${labelHTML}${item.text}</li>`;
+      }
+      html += '</ul>';
+    }
+
+    if (section.contact) {
+      const { name, affiliation, emails } = section.contact;
+      const emailsHTML = emails
+        .map(e => `<a href="mailto:${e}">${e}</a>`)
+        .join('<br>');
+      html += `
+        <div class="consent-contact-box">
+          <p><strong>ผู้รับผิดชอบโครงการ:</strong> ${name}<br>${affiliation}</p>
+          <p><strong>อีเมล:</strong><br>${emailsHTML}</p>
+        </div>`;
+    }
+
+    if (section.closing) {
+      html += `<p>${section.closing}</p>`;
+    }
+
+    return html;
+  }).join('\n');
+
+  return `
+    <p class="consent-law-note">${doc.lawNote}</p>
+    ${sectionsHTML}
+  `;
+}
+
 // renderConsentGate — หน้าขอยืนยันความยินยอม (แสดงครั้งแรกก่อนเข้าหน้า Profile)
+// เนื้อหาเอกสารอ่านจาก CONSENT_DOC ใน data/consent-doc.js
 function renderConsentGate(container) {
+  // ถ้า consent-doc.js ยังไม่ถูกโหลด (ไม่ควรเกิด) ให้ fallback gracefully
+  const doc = (typeof CONSENT_DOC !== 'undefined') ? CONSENT_DOC : null;
+
   container.innerHTML = `
-    <div class="card consent-card">
-      <h2>ข้อตกลงและเงื่อนไขการใช้งาน <span class="badge-beta">Beta Test</span></h2>
-      <p>ระบบรามรู้ทาง มีฟีเจอร์สำหรับบันทึกและจัดการข้อมูลการสอบ เพื่ออำนวยความสะดวกในการใช้งาน (ช่วงทดสอบระบบ Beta Test)</p>
-      <p class="muted">
-        • ระบบจะจัดเก็บข้อมูล <strong>รหัสวิชา</strong> เพื่อนำไปประมวลผลข้อมูลการสอบ<br>
-        • ข้อมูลจะผูกกับบัญชี LINE ของคุณเท่านั้น ไม่มีการเก็บข้อมูลส่วนบุคคล เช่น ชื่อ-นามสกุล หรือเบอร์โทรศัพท์
-      </p>
-      <label class="consent-checkbox-label">
-        <input type="checkbox" id="consent-check" />
-        <span>ข้าพเจ้ารับทราบและยินยอมให้บันทึกข้อมูลดังกล่าว</span>
-      </label>
-      <button class="btn btn-primary" id="consent-accept-btn" disabled>ยืนยันและเข้าสู่ระบบ</button>
+    <div class="consent-wrapper">
+      <div class="consent-header">
+        <h2>${doc ? doc.title : 'หนังสือให้ความยินยอมการเก็บรวบรวมข้อมูลส่วนบุคคล'}</h2>
+        <p class="consent-subtitle">${doc ? doc.subtitle : 'โครงการรามรู้ทาง'} <span class="badge-pdpa">PDPA</span></p>
+      </div>
+
+      <div class="consent-doc-scroll" id="consent-doc-scroll">
+        <div class="consent-doc-body">
+          ${doc ? buildConsentDocHTML(doc) : '<p>ไม่สามารถโหลดเอกสารได้ กรุณาลองใหม่อีกครั้ง</p>'}
+        </div>
+        <div class="consent-scroll-indicator" id="consent-scroll-indicator">
+          <span>เลื่อนเพื่ออ่านต่อ ↓</span>
+        </div>
+      </div>
+
+      <div class="consent-footer">
+        <label class="consent-checkbox-label">
+          <input type="checkbox" id="consent-check" />
+          <span>${doc ? doc.checkboxLabel : 'ข้าพเจ้ารับทราบและยินยอม'}</span>
+        </label>
+        <button class="btn btn-primary consent-btn-submit" id="consent-accept-btn" disabled>ยืนยันให้ความยินยอมและเข้าสู่ระบบ</button>
+        <p class="consent-revoke-note">${doc ? doc.revokeNote : ''}</p>
+      </div>
     </div>
   `;
 
   const checkEl = document.getElementById('consent-check');
   const btnEl = document.getElementById('consent-accept-btn');
+  const scrollEl = document.getElementById('consent-doc-scroll');
+  const indicatorEl = document.getElementById('consent-scroll-indicator');
+
+  // ซ่อน indicator เมื่อ scroll ถึงท้าย
+  scrollEl.addEventListener('scroll', () => {
+    const atBottom = scrollEl.scrollTop + scrollEl.clientHeight >= scrollEl.scrollHeight - 16;
+    if (atBottom) {
+      indicatorEl.classList.add('hidden');
+    } else {
+      indicatorEl.classList.remove('hidden');
+    }
+  });
 
   checkEl.addEventListener('change', () => {
     btnEl.disabled = !checkEl.checked;
