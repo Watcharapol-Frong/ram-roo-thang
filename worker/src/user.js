@@ -158,18 +158,11 @@ export async function handleFeedbackAward(request, env) {
   if (!userId) return jsonResponse({ error: 'ต้องระบุ user_id' }, 400);
 
   // บันทึกคำตอบแบบประเมินลง D1 (ถ้ามีคำตอบส่งมา)
+  // ตาราง user_feedback มาจาก migrations/0010_user_feedback.sql แล้ว — ไม่ต้อง CREATE TABLE
+  // IF NOT EXISTS ซ้ำในโค้ดฝั่ง handler เพราะ D1 ยังต้อง parse/plan statement นั้นทุกครั้งที่มี
+  // คนกดส่งแบบประเมิน ทั้งที่ผลมันเหมือนเดิมทุกครั้ง (ตารางมีอยู่แล้วตั้งแต่ deploy)
   if (body.answers) {
     try {
-      await env.DB.prepare(`
-        CREATE TABLE IF NOT EXISTS user_feedback (
-          id           INTEGER PRIMARY KEY AUTOINCREMENT,
-          user_id      TEXT NOT NULL,
-          answers_json TEXT NOT NULL,
-          device_os    TEXT,
-          created_at   TEXT NOT NULL
-        )
-      `).run();
-
       const answersJson = typeof body.answers === 'string' ? body.answers : JSON.stringify(body.answers);
       const deviceOs = body.device_os || (body.answers && body.answers.deviceOS) || null;
       const at = nowIso();
