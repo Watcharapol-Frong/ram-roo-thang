@@ -1036,6 +1036,7 @@ function buildFeedbackSurveyHTML(survey) {
 
   // Sections + Questions
   const sectionsHTML = survey.sections.map((section, sIdx) => {
+    const introHTML = section.intro ? `<p class="survey-section-intro">${section.intro}</p>` : '';
     const questionsHTML = section.questions.map(q => buildQuestionHTML(q)).join('\n');
     return `
       <div class="survey-section-card">
@@ -1043,6 +1044,7 @@ function buildFeedbackSurveyHTML(survey) {
           <span class="survey-section-num">${sIdx + 1}</span>
           <h3 class="survey-section-title">${section.heading}</h3>
         </div>
+        ${introHTML}
         ${questionsHTML}
       </div>`;
   }).join('\n');
@@ -1103,6 +1105,11 @@ function buildQuestionHTML(q) {
         <span>${q.legendMax || ''}</span>
       </div>`;
 
+  } else if (q.type === 'tel' || q.type === 'text') {
+    inputHTML = `<input type="${q.type}" class="feedback-input-text" name="${q.id}"
+      placeholder="${q.placeholder || ''}" ${q.maxlength ? `maxlength="${q.maxlength}"` : ''}
+      inputmode="${q.type === 'tel' ? 'tel' : 'text'}" autocomplete="${q.type === 'tel' ? 'tel' : 'off'}" />`;
+
   } else if (q.type === 'textarea') {
     inputHTML = `<textarea class="feedback-textarea" name="${q.id}"
       placeholder="${q.placeholder || ''}"></textarea>`;
@@ -1128,6 +1135,9 @@ function collectSurveyAnswers(form, survey) {
       } else if (q.type === 'rating') {
         const val = formData.get(q.id);
         answers[q.id] = (val !== null && val !== '') ? Number(val) : (q.defaultValue ? Number(q.defaultValue) : null);
+      } else if (q.type === 'tel') {
+        const raw = (formData.get(q.id) || '').trim();
+        answers[q.id] = raw.replace(/[^\d+]/g, '');
       } else if (q.type === 'textarea') {
         answers[q.id] = (formData.get(q.id) || '').trim();
       } else {
@@ -1236,6 +1246,24 @@ async function renderFeedbackView() {
     btn.textContent = 'กำลังส่งข้อมูล...';
 
     const answers = collectSurveyAnswers(e.target, survey);
+
+    // ตรวจสอบความถูกต้องของหมายเลขโทรศัพท์และหนังสือยินยอม PDPA (กรณีที่ผู้ใช้ระบุเบอร์โทร)
+    if (answers.q12_phone) {
+      const cleanPhone = String(answers.q12_phone).replace(/\D/g, '');
+      if (cleanPhone.length < 9 || cleanPhone.length > 10 || !cleanPhone.startsWith('0')) {
+        showToast('กรุณาระบุหมายเลขโทรศัพท์ให้ถูกต้อง (9–10 หลัก เช่น 0812345678)');
+        btn.disabled = false;
+        btn.textContent = survey.submitLabel || 'ส่งแบบประเมิน';
+        return;
+      }
+      if (!Array.isArray(answers.q13_consent_contact) || answers.q13_consent_contact.length === 0) {
+        showToast('กรุณากดทำเครื่องหมายให้ความยินยอมการติดต่อกลับตาม PDPA');
+        btn.disabled = false;
+        btn.textContent = survey.submitLabel || 'ส่งแบบประเมิน';
+        return;
+      }
+    }
+
     const userId = (profile && profile.userId) ? profile.userId : 'dev-user-' + Date.now();
     const payload = {
       timestamp: new Date().toISOString(),
