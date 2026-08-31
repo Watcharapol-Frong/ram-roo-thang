@@ -583,13 +583,9 @@ async function resolvePresetBuilding(buildingId, features) {
 async function loadParkingZones() {
   try {
     const data = await fetchJSON('/api/parking/zones');
-    // เก็บ source/as_of ไว้ด้วย ไม่ใช่แค่ตัวสถานะ — การ์ดที่จอดต้องแยกให้ออกว่าค่าที่เห็นมาจาก
-    // คนรายงานจริง (ชวนให้ยืนยันได้) หรือเป็นค่าประเมินของระบบ (ยังไม่มีใครรายงาน)
     appState.parkingZones = (data.zones || []).map(({ zone, parking_status: status }) => ({
       ...zone,
       status: (status && status.status) || zone.baseline_status,
-      statusSource: (status && status.source) || 'baseline_estimate',
-      statusAsOf: (status && status.as_of) || null,
     }));
   } catch (err) {
     console.error('โหลดข้อมูลลานจอดไม่สำเร็จ', err);
@@ -3004,20 +3000,11 @@ function showParkingActionSheet(here, location) {
   });
   const zoneName = here.feature.name;
   const saved = appState.car;
-  // ชวนยืนยันได้เฉพาะตอนมีรายงานจากคนจริงที่ยังไม่หมดอายุ — ถ้าเป็นค่าประเมินของระบบ
-  // (baseline_estimate) ไม่มีอะไรให้ "ยืนยัน" การให้กดยืนยันค่าที่ระบบเดาเองจะเปลี่ยนค่าเดานั้น
-  // ให้กลายเป็นรายงานจากคน ทั้งที่ไม่มีใครดูของจริงเลยสักคน
-  const zone = here.zone;
-  const liveStatus = zone && zone.statusSource === 'live_report' ? zone.status : null;
   SheetManager.showParkingActionSheet({
     title: zoneName.replace(/^ที่จอดรถ\s*/, ''),
     savedNote: saved
       ? `จดจำตำแหน่งรถไว้แล้วเมื่อ ${formatSavedAt(saved.savedAt)}${saved.approximate ? ' (ตำแหน่งโดยประมาณ)' : ''}`
       : '',
-    currentReport: liveStatus
-      ? { label: PARKING_STATUS_LABEL[liveStatus], agoText: formatReportAge(zone.statusAsOf) }
-      : null,
-    onConfirm: liveStatus ? () => submitParkingReport(here, location, liveStatus) : null,
     onSaveCar: () => {
       const resolved = resolveCarLocation(location, here);
       saveCar(resolved.coords, zoneName, resolved.approximate);
@@ -3032,17 +3019,6 @@ function formatSavedAt(iso) {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return '';
   return date.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
-}
-
-// บอกเป็น "เมื่อกี้/กี่นาทีที่แล้ว" ไม่ใช่เวลานาฬิกา เพราะสิ่งที่ผู้ใช้ต้องตัดสินคือข้อมูลนี้เก่าแค่ไหน
-// ไม่ใช่ว่ามันเกิดตอนกี่โมง (รายงานมีอายุแค่ 30 นาทีอยู่แล้ว เวลานาฬิกาจึงไม่ได้ช่วยอะไร)
-function formatReportAge(iso) {
-  if (!iso) return '';
-  const reportedAt = new Date(iso).getTime();
-  if (Number.isNaN(reportedAt)) return '';
-  const minutes = Math.floor((Date.now() - reportedAt) / 60000);
-  if (minutes < 1) return 'เมื่อกี้นี้';
-  return `เมื่อ ${minutes} นาทีที่แล้ว`;
 }
 
 // ยิงเข้า endpoint เดิมที่มีอยู่แล้ว — backend ตรวจ geofence กับ rate limit ให้เอง เราไม่ต้อง
