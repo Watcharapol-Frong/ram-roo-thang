@@ -33,9 +33,9 @@ The system is **two separate Cloudflare Workers**, deployed with different comma
 
 | Store | Contents | Why here |
 |---|---|---|
-| **D1** `ram-roo-thang` | `users`, `coin_ledger`, `user_courses`, `exam_alerts_sent`, `room_import_drafts` | Needs real transactions when granting/spending coins, and needs to be queryable |
+| **D1** `ram-roo-thang` | `users`, `coin_ledger`, `user_courses`, `exam_alerts_sent`, `room_import_drafts`, `parking_reports` | Needs real transactions when granting/spending coins, and needs to be queryable |
 | **Worker bundle** | 35 buildings / 8 parking zones / 11 services / 25 shops | Read-only and almost never changes — imported straight from `data/baseline-dataset.json` |
-| **KV** `PARKING_REPORTS` | Latest parking report per zone | Must expire on its own — uses KV TTL |
+| **KV** `PARKING_REPORTS` | *(unused since ADR 0005 — parking reports moved to D1; binding kept so a rollback still boots)* | — |
 | **KV** `RATE_LIMIT` | Last report time per user | Same, uses TTL |
 | **KV** `CHAT_HISTORY_RAM` | Bot conversation history | Same, uses TTL |
 | **Static files** | `ru_master.geojson` (91 places), `exam-lookup.json` (2,865 courses) | Static data — served directly by the LIFF worker instead of burning KV read quota |
@@ -63,9 +63,10 @@ that building" while the data itself was perfectly intact.
 Reference data is read-only and changes maybe once a term, so it is now imported into the worker
 bundle. No network hop, no quota, no cost — the tradeoff is that changing it requires a redeploy.
 
-Parking reports keep only the newest report per zone (`latest:{zone_id}`) with a TTL equal to the
-aggregation window, so resolving status is a single `get` and expiry is handled by KV rather than by
-filtering timestamps in code.
+Parking reports used to live in KV as one key per zone (`latest:{zone_id}`), which meant every new
+report overwrote the previous one and two people reporting at once silently lost a write. They are
+now one row per report on D1 (see ADR 0005) — the map reads every zone's recent reports in a single
+query, so this rule is not broken to get there.
 
 **Rule of thumb: never put a KV `list` on a request path users hit often.**
 
@@ -76,11 +77,13 @@ every write from Thailand noticeably slower.
 
 | Action | Coins | Abuse protection |
 |---|---|---|
-| Report parking conditions | +10 | 150 m geofence + 30 min rate limit |
-| Complete the feedback survey | +30 | Once per account, ever |
-| Save your car location | +5 | Once per day (Bangkok date, not UTC) |
+| Report parking conditions | +2 | 150 m geofence + 30 min rate limit |
+| …and someone else later reports the same thing | +2 | Paid to the earlier reporter, once per report |
+| Complete the feedback survey | +15 | Once per account, ever |
+| Save your car location | +3 | Once per day (Bangkok date, not UTC) |
 
-Change the amounts in one place: `COIN_REWARDS` in `worker/src/user.js`.
+Change the amounts in one place: `COIN_REWARDS` in `worker/src/user.js` — except the survey figure
+shown on the LIFF badge, which is `FEEDBACK_REWARD_COINS` in `liff/app.js` and must be kept in step.
 
 **`coin_ledger` is the source of truth.** `users.coins` is a materialized total, always written in the
 same `batch` (a single D1 transaction). If the two ever disagree, trust the ledger and call
@@ -94,7 +97,7 @@ it, not an `if` statement in application code:
 | `FEEDBACK` | `once` | Claimable once, ever |
 | `SAVE_CAR` | `2026-08-23` | Once per day |
 | `PARKING_REPORT` | Report timestamp | One report = one grant |
-| `PARKING_REPORT_CONFIRMED` | Timestamp of the *confirmed* report | Accuracy bonus, paid to the earlier reporter when the next person independently sees the same thing. Keyed by the confirmed report, so one report earns it at most once |
+| `PARKING_REPORT_CONFIRMED` | `parking_reports.id` of the *confirmed* report | Accuracy bonus, paid to the earlier reporter when the next person independently sees the same thing. Keyed by the confirmed row, so one report earns it at most once even if two people confirm it |
 | `SHOP_REDEEM` | Redemption id | (reserved — shop not built yet) |
 
 A parking report pays in two parts on purpose: a flat amount on submit, plus the same amount again
@@ -566,7 +569,8 @@ Assumes you already have a Cloudflare account and a LINE Developers Console chan
 cd worker
 npm install
 
-# 1. Four KV namespaces — put the returned ids into wrangler.toml
+# 1. KV namespaces — put the returned ids into wrangler.toml
+#    (PARKING_REPORTS is still bound but no longer read or written — see ADR 0005)
 npx wrangler kv namespace create BASELINE_DATA
 npx wrangler kv namespace create PARKING_REPORTS
 npx wrangler kv namespace create RATE_LIMIT

@@ -16,6 +16,8 @@ id = "8bd20354236540b59ad64da34f43c6ee"
 binding = "BASELINE_DATA"
 id = "f14025c3ea9241aaa4b8559eab96b343"
 
+# ไม่ได้ใช้แล้วตั้งแต่ ADR 0005 (รายงานที่จอดย้ายไป D1) — คงไว้ก่อนเพื่อให้ rollback ไปเวอร์ชันก่อน
+# หน้านี้ยัง boot ได้ ลบทิ้งได้เมื่อ deploy ใหม่นิ่งแล้ว
 [[kv_namespaces]]
 binding = "PARKING_REPORTS"
 id = "f69bf1e6461c4627979722c3b45fb5f7"

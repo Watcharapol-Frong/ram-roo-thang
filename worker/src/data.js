@@ -39,25 +39,49 @@ export async function getServiceByKey(env, serviceId) {
   return SERVICE_BY_ID.get(serviceId) || null;
 }
 
-// --- PARKING_REPORTS ---
+// --- parking_reports (D1, migration 0011) ---
 //
-// เก็บ "รายงานล่าสุดของแต่ละลาน" คีย์เดียวต่อลาน ไม่ใช่คีย์ละหนึ่งรายงาน
-// เพราะการคิดสถานะใช้แค่รายงานล่าสุดในกรอบเวลาเท่านั้น เก็บทีละใบแล้วต้อง list ทุกครั้งที่
-// มีคนเปิดแผนที่ ซึ่งเปลืองโควตาที่หมดง่ายที่สุดของ KV โดยไม่ได้ใช้ข้อมูลที่ list มาเลยนอกจากใบล่าสุด
+// ย้ายมาจาก KV ที่เก็บคีย์เดียวต่อลาน (`latest:{zone_id}`) แล้วเขียนทับทุกครั้ง — เหตุผลเดียวกับที่
+// README เขียนไว้เรื่อง "ทำไม user data ถึงอยู่บน D1": KV เขียนแบบ read-modify-write จึงเสียรายงาน
+// เมื่อมีคนกดพร้อมกัน, query ไม่ได้จึงดูได้แค่ใบล่าสุดใบเดียว, และการอ่านหลายใบต้องใช้ list
+// ซึ่งเป็นโควตาที่เคยทำ production ล่มมาแล้ว ส่วน D1 insert เป็น atomic และอ่านด้วย query ปกติ
 //
-// TTL = กรอบเวลารวมผล พอหมดอายุก็กลับไปใช้ baseline เองโดยไม่ต้องกรองวันที่ในโค้ด
-export async function putParkingReport(env, report, ttlSeconds) {
-  await env.PARKING_REPORTS.put(`latest:${report.zone_id}`, JSON.stringify(report), { expirationTtl: ttlSeconds });
+// ไม่มี TTL แบบ KV แล้ว — "รายงานหมดอายุ" กลายเป็นเงื่อนไข WHERE reported_at > cutoff แทน
+// ซึ่งตรงกว่าเพราะกรอบเวลารวมผลเป็นเรื่องของการคิดสถานะ ไม่ใช่เรื่องของการเก็บข้อมูล
+export async function insertParkingReport(env, { zone_id, status, reporter_user_id, reported_at }) {
+  const res = await env.DB.prepare(
+    'INSERT INTO parking_reports (zone_id, status, reporter_user_id, reported_at) VALUES (?, ?, ?, ?)'
+  ).bind(zone_id, status, reporter_user_id, reported_at).run();
+  return res.meta ? res.meta.last_row_id : null;
 }
 
-export async function getLatestParkingReport(env, zoneId) {
-  const raw = await env.PARKING_REPORTS.get(`latest:${zoneId}`);
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
+// รายงานทั้งหมดในกรอบเวลา เรียงใหม่สุดก่อน — ไม่ใส่ zoneId = เอาทุกลานในคำถามเดียว
+// (หน้าแผนที่เรียกครั้งเดียวได้ทุกลาน ไม่ต้องยิงทีละลานเหมือนตอนอยู่บน KV)
+export async function listRecentParkingReports(env, sinceIso, zoneId) {
+  const sql = zoneId
+    ? 'SELECT id, zone_id, status, reporter_user_id, reported_at FROM parking_reports WHERE reported_at > ? AND zone_id = ? ORDER BY reported_at DESC'
+    : 'SELECT id, zone_id, status, reporter_user_id, reported_at FROM parking_reports WHERE reported_at > ? ORDER BY reported_at DESC';
+  const stmt = zoneId
+    ? env.DB.prepare(sql).bind(sinceIso, zoneId)
+    : env.DB.prepare(sql).bind(sinceIso);
+  const { results } = await stmt.all();
+  return results || [];
+}
+
+// รายงานล่าสุดของลานนี้ที่ "คนอื่น" เป็นคนรายงาน — ใช้ตัดสินโบนัสความแม่น
+export async function getLatestOtherReport(env, zoneId, excludeUserId, sinceIso) {
+  return env.DB.prepare(
+    `SELECT id, status, reporter_user_id, reported_at FROM parking_reports
+      WHERE zone_id = ? AND reporter_user_id != ? AND reported_at > ?
+      ORDER BY reported_at DESC LIMIT 1`
+  ).bind(zoneId, excludeUserId, sinceIso).first();
+}
+
+// ลบรายงานเก่าทิ้ง เรียกจาก cron รายวัน — เก็บไว้นานกว่ากรอบเวลารวมผลมาก เพราะประวัติย้อนหลัง
+// คือวัตถุดิบของ baseline ตามช่วงเวลาในอนาคต ถ้าลบทุก 30 นาทีจะไม่เหลืออะไรให้ทำ
+export async function deleteOldParkingReports(env, cutoffIso) {
+  const res = await env.DB.prepare('DELETE FROM parking_reports WHERE reported_at < ?').bind(cutoffIso).run();
+  return res.meta ? res.meta.changes : 0;
 }
 
 // --- RATE_LIMIT (MVP-SPEC-for-Dev.md §3.3) ---
