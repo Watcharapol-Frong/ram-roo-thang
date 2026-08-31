@@ -10,6 +10,7 @@ import { handleAdminExamAlerts, runDailyExamAlerts } from './exam.js';
 import { handleAdminDailyDigest, runDailyDigest } from './daily.js';
 import { handleHealth, recordHeartbeat } from './health.js';
 import { handleAdminUnanswered } from './analytics.js';
+import { deleteOldParkingReports } from './data.js';
 
 // LIFF (liff/) เป็น static site คนละ origin กับ worker นี้เสมอ — ต้องมี CORS ให้ /api/* ถึงจะเรียก
 // fetch() จากฝั่ง browser ได้จริง (ไม่มีมาก่อนหน้านี้ ทำให้ทุก endpoint ใต้ /api/ เรียกจาก LIFF ไม่ได้เลย
@@ -60,6 +61,19 @@ export default {
 
     const morning = event.cron === '0 0 * * *';
     const label = morning ? 'cron_digest' : 'cron';
+
+    // เก็บกวาดรายงานที่จอดเก่าวันละครั้ง — ตารางนี้โตขึ้นทุกรายงานเพราะไม่มี TTL แบบ KV แล้ว
+    // เก็บไว้ 30 วัน ไม่ใช่ 30 นาทีตามกรอบเวลารวมผล เพราะประวัติย้อนหลังคือวัตถุดิบของ baseline
+    // ตามช่วงเวลาในอนาคต ส่วนการคิดสถานะสดก็กรองด้วย WHERE ของมันเองอยู่แล้ว ไม่ได้พึ่งการลบ
+    //
+    // แยก waitUntil ของตัวเอง งานเก็บกวาดพังไม่ควรทำให้การแจ้งเตือนสอบพังตาม
+    if (morning) {
+      const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      ctx.waitUntil(
+        deleteOldParkingReports(env, cutoff)
+          .catch((err) => console.error('deleteOldParkingReports error', err))
+      );
+    }
     ctx.waitUntil(
       (morning ? runDailyDigest(env) : runDailyExamAlerts(env))
         .then((result) => recordHeartbeat(env, label, `sent=${result.sent} skipped=${result.skipped} failed=${result.failed}`))

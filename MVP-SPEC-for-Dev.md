@@ -28,7 +28,7 @@
                               |
                               ├── Cloudflare KV: CHAT_HISTORY_RAM (มีอยู่แล้ว)
                               ├── Cloudflare KV: BASELINE_DATA (ใหม่) — พิกัดอาคาร/ลานจอด
-                              ├── Cloudflare KV: PARKING_REPORTS (ใหม่) — รายงานสถานะสด
+                              ├── Cloudflare D1: parking_reports — รายงานสถานะสด (เดิมอยู่บน KV ดู ADR 0005)
                               ├── Cloudflare KV: RATE_LIMIT (ใหม่) — กัน spam การรายงาน
                               └── Workers AI (@cf/qwen/qwen3-30b-a3b-fp8) + function calling
 
@@ -37,11 +37,15 @@
        └── Google Maps Embed API (mode=directions) — วาดเส้นทาง+ระยะ+เวลาให้อัตโนมัติ
 ```
 
-**ไม่มี**: ฐานข้อมูล SQL (D1/Postgres), MCP Server ตาม spec, Redis, Gemini API, Auth token verification (ดูเหตุผลใน `CONTEXT.md` และ `docs/adr/`)
+**ไม่มี**: MCP Server ตาม spec, Redis, Gemini API, Auth token verification (ดูเหตุผลใน `CONTEXT.md` และ `docs/adr/`)
+
+> หมายเหตุ: ฉบับแรกเขียนว่า "ไม่มีฐานข้อมูล SQL" แต่ภายหลังย้าย users/coin_ledger/user_courses มาอยู่บน
+> Cloudflare D1 (migration 0001) และย้าย parking_reports ตามมา (migration 0011, ADR 0005) เพราะ KV
+> ไม่มี atomic write และ query ไม่ได้ — ดูหัวข้อ "Where data lives" ใน README
 
 ---
 
-## 3. Data Model (ทั้งหมดเก็บใน Cloudflare KV เป็น JSON — ไม่ใช้ SQL)
+## 3. Data Model (ข้อมูลอ้างอิงอยู่ใน KV/bundle, ข้อมูลที่ต้อง query อยู่บน D1)
 
 ### 3.1 `BASELINE_DATA` (เขียนด้วยมือล่วงหน้า ไม่เปลี่ยนขณะรัน)
 Key: `building:{building_id}` เช่น `building:VKB`
@@ -66,19 +70,20 @@ Key: `parking_zone:{zone_id}` เช่น `parking_zone:ZONE_VKB`
 }
 ```
 
-### 3.2 `PARKING_REPORTS` (เขียนตอน user รายงานจริง)
-Key: `report:{zone_id}:{timestamp}`
-```json
-{
-  "zone_id": "ZONE_VKB",
-  "reported_status": "RED",
-  "reporter_user_id": "U1234...",
-  "reported_at": "2026-09-01T08:40:00Z"
-}
+### 3.2 `parking_reports` (D1 — เขียนตอน user รายงานจริง, migration 0011)
+หนึ่งแถวต่อหนึ่งรายงาน ไม่ทับกัน (เดิมเป็น KV คีย์เดียวต่อลานแล้วเขียนทับ ดู ADR 0005)
+```
+id | zone_id    | status | reporter_user_id | reported_at
+ 1 | ZONE_VKB   | RED    | U1234...         | 2026-09-01T08:40:00Z
 ```
 
 ### 3.3 `RATE_LIMIT`
-Key: `ratelimit:{user_id}` → value = ISO timestamp ล่าสุดที่รายงาน, TTL 30 นาที
+Key: `ratelimit:{user_id}:{zone_id}` → ISO timestamp ที่รายงาน "ลานนั้น" ล่าสุด, TTL 30 นาที
+Key: `ratelimit-any:{user_id}` → ISO timestamp ที่รายงานลานใดก็ได้ล่าสุด, TTL 60 วินาที
+
+เดิมเป็นคีย์เดียว `ratelimit:{user_id}` ซึ่งแปลว่ารายงานลานหนึ่งแล้วรายงาน **ลานอื่น** ไม่ได้อีก 30 นาที
+ทั้งที่เจตนาคือกันการถล่มลานเดิม ไม่ใช่ห้ามคนที่ขับผ่านหลายลานรายงานตามจริง — คีย์ที่สองเป็นเพดานรวม
+กันสคริปต์ยิงทุกลานรวดเดียวด้วยพิกัดปลอม ซึ่งเป็นช่องที่เปิดขึ้นจากการแยกคีย์ตามลาน
 
 ---
 
@@ -96,14 +101,17 @@ Key: `ratelimit:{user_id}` → value = ISO timestamp ล่าสุดที่
 ## 5. Parking Status Logic (Aggregation Window)
 
 ```
-1. ดึง reports ทั้งหมดของ zone_id จาก PARKING_REPORTS
-2. กรองเฉพาะ report ที่ reported_at อยู่ในช่วง N นาทีล่าสุด (แนะนำ N=30)
-3. ถ้ามี report ในช่วงนั้น → ใช้ report ล่าสุด (เรียงตาม timestamp)
-4. ถ้าไม่มี → fallback ไปใช้ baseline_status จาก BASELINE_DATA
+1. ดึง reports ทั้งหมดของ zone_id ในช่วง N นาทีล่าสุด (ค่าเริ่มต้น N=240) จากตาราง parking_reports (D1)
+2. ให้น้ำหนักแต่ละใบแบบครึ่งชีวิต 15 นาที (สด = 1, 15 นาที = 0.5, 30 นาที = 0.25, 2 ชม. ≈ 0.004)
+3. รวมน้ำหนักตามสถานะ แล้วเลือกสถานะที่ได้น้ำหนักรวมมากที่สุด (เสียงเท่ากัน → ใบที่ใหม่กว่าชนะ)
+4. ถ้าไม่มี report ในช่วงนั้น → fallback ไปใช้ baseline_status จาก BASELINE_DATA
 5. Response ต้องระบุด้วยว่าข้อมูลนี้มาจาก "รายงานสด" หรือ "ค่าประมาณการ" (แสดงความแตกต่างให้ user เห็น)
+   พร้อม sample_size (ใช้กี่ใบคิด) และ agreement (สัดส่วนที่เห็นตรงกัน 0-1)
 ```
 
-**ไม่ใช้** weighted formula ($D_{final}$) แบบ Full Vision — ดู `docs/adr/0002-crowdsourced-parking-checkin-for-mvp.md`
+เดิมข้อ 3 คือ "ใช้ report ล่าสุดใบเดียว" ซึ่งแปลว่าคนที่กดคนสุดท้ายทับความเห็นของทุกคนก่อนหน้า —
+เปลี่ยนเป็นถ่วงน้ำหนักแล้ว ดู `docs/adr/0005-weighted-aggregation-for-parking-reports.md`
+(ยังไม่มี reporter reputation ตาม `docs/adr/0002-crowdsourced-parking-checkin-for-mvp.md`)
 
 ---
 
@@ -116,9 +124,9 @@ Key: `ratelimit:{user_id}` → value = ISO timestamp ล่าสุดที่
 ```
 
 **Validation ต้องทำตามลำดับ**:
-1. **Rate limit**: เช็ค `RATE_LIMIT:{user_id}` — ถ้ารายงานล่าสุด < 30 นาทีที่แล้ว → reject `429 Too Many Requests`
+1. **Rate limit** (สองชั้น): ถ้ารายงาน **ลานเดิม** ไป < 30 นาที → `429`; หรือรายงาน **ลานใดก็ได้** ไป < 60 วินาที → `429`
 2. **Geofence**: คำนวณระยะจาก `user_lat/lng` ถึงพิกัด zone (Haversine formula) — ถ้าเกิน 150 เมตร → reject `422 Unprocessable Entity` พร้อมข้อความ "คุณอยู่ไกลจากลานจอดนี้เกินไป"
-3. ผ่านทั้งคู่ → บันทึกลง `PARKING_REPORTS`, อัปเดต `RATE_LIMIT`
+3. ผ่านทั้งคู่ → เพิ่มแถวใน `parking_reports` (D1), อัปเดต `RATE_LIMIT`
 
 ```json
 // Response 200

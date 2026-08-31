@@ -113,6 +113,10 @@
     { status: 'RED', label: 'หนาแน่น' },
   ];
 
+  const reportChoicesHtml = PARKING_REPORT_CHOICES
+    .map((c) => `<button class="report-btn report-${c.status.toLowerCase()}" data-status="${c.status}">${c.label}</button>`)
+    .join('');
+
   function showParkingActionSheet({ title, savedNote, onSaveCar, onReport }) {
     const slot = sheetSlot();
     if (!slot) return;
@@ -124,12 +128,32 @@
         ${savedNote ? `<p class="muted sheet-hint">${savedNote}</p>` : ''}
         <button class="btn btn-primary" id="save-car-btn">${savedNote ? 'อัปเดตตำแหน่งรถ' : 'จดจำตำแหน่งรถ'}</button>
         <p class="muted report-label">สภาพที่จอดตอนนี้เป็นยังไง</p>
-        <div class="report-choices">
-          ${PARKING_REPORT_CHOICES.map((c) => `<button class="report-btn report-${c.status.toLowerCase()}" data-status="${c.status}">${c.label}</button>`).join('')}
-        </div>
+        <div class="report-choices">${reportChoicesHtml}</div>
       </div>
     `;
     document.getElementById('save-car-btn').addEventListener('click', onSaveCar);
+    slot.querySelectorAll('.report-btn').forEach((btn) => {
+      btn.addEventListener('click', () => onReport(btn.dataset.status));
+    });
+    bindClose();
+    syncSheetHeight();
+  }
+
+  // ถามตอนเพิ่งออกจากลาน — คนที่เพิ่งเดินผ่านลานทั้งลานรู้สภาพจริงดีที่สุด และเป็นจังหวะที่
+  // ไม่ได้รีบหาที่จอดแล้ว ต่างจากตอนขาเข้าที่กำลังมองหาช่องว่างอยู่ จึงตอบได้ตรงกว่า
+  // ไม่มีปุ่มจำตำแหน่งรถเพราะขาออกไม่ใช่จังหวะที่จะบันทึกที่จอด
+  function showParkingExitSheet({ title, onReport }) {
+    const slot = sheetSlot();
+    if (!slot) return;
+    slot.innerHTML = `
+      <div class="nav-info-card">
+        <div class="sheet-handle"></div>
+        <button class="sheet-close" id="sheet-close-btn" aria-label="ปิด">&times;</button>
+        <h2>ออกจากลานจอด ${title} แล้ว</h2>
+        <p class="muted sheet-hint">ตอนนี้ในลานเป็นยังไงบ้าง บอกไว้หน่อยจะได้ช่วยคนที่กำลังจะเข้ามา</p>
+        <div class="report-choices">${reportChoicesHtml}</div>
+      </div>
+    `;
     slot.querySelectorAll('.report-btn').forEach((btn) => {
       btn.addEventListener('click', () => onReport(btn.dataset.status));
     });
@@ -307,6 +331,7 @@
     showLocationPrimer,
     showParkingActionSheet,
     showParkingArrivalSheet,
+    showParkingExitSheet,
     showRouteSheet,
     showGpsDeniedSheet,
     showNavigationSheet,

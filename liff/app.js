@@ -67,7 +67,13 @@ const appState = {
   target: null, // { id, name, type: 'BUILDING'|'PARKING'|'MY_CAR'|'COMMUNITY', coords: {lat,lng} }
   parkingZones: [],
   car: null,
-  parking: { offeredZoneId: null, dismissedZoneId: null },
+  // insideZoneId = ลานที่ยืนอยู่จริงตอนนี้ แยกจาก offeredZoneId (ลานที่เคยเสนอการ์ดไปแล้ว)
+  // เพราะ offeredZoneId ถูกล้างตอนผู้ใช้กดปิดการ์ด เลยใช้ตรวจจังหวะ "ออกจากลาน" ไม่ได้
+  // lastReportAt = เวลาที่รายงานล่าสุด "แยกตามลาน" ใช้กันไม่ให้ไปเสนอรายงานตอนที่รู้อยู่แล้วว่า
+  // backend จะปฏิเสธเพราะ rate limit (ฝั่ง server ยังเป็นตัวตัดสินจริง อันนี้แค่กันเสนอให้เก้อ)
+  // ต้องแยกตามลานให้ตรงกับฝั่ง server — ถ้าเก็บก้อนเดียว คนที่เพิ่งรายงานลาน A จะไม่ถูกถามตอน
+  // ออกจากลาน B ทั้งที่รายงานลาน B ได้อยู่ ซึ่งเป็นเคสของคนขับผ่านหลายลานในทริปเดียว
+  parking: { offeredZoneId: null, dismissedZoneId: null, insideZoneId: null, lastReportAt: {} },
   navigation: { path: [] }, // โหลดจาก /api/parking/zones — ใช้ทั้งทาสีเลเยอร์และหาลานจอดใกล้จุดหมาย
   map: {
     instance: null,
@@ -889,6 +895,11 @@ function centerOnFeatures(features) {
 // ห้ามคำนวณยอดเองในนี้เด็ดขาด เดิมเป็น `120 + (localStorage มี flag ไหม ? 30 : 0)` ซึ่งแก้ได้
 // จาก DevTools และหายเกลี้ยงเมื่อผู้ใช้ล้างข้อมูลเบราว์เซอร์
 
+// ป้าย "+N เหรียญ" บนหน้าโปรไฟล์/แบบประเมิน เป็นการบอกล่วงหน้าว่าจะได้เท่าไร ตัวจ่ายจริงคือ
+// COIN_REWARDS.FEEDBACK ใน worker/src/user.js — สองค่านี้ต้องตรงกันเสมอ ไม่งั้นผู้ใช้เห็น
+// ตัวเลขหนึ่งแต่ได้รับอีกตัวเลข (เดิม hardcode 30 ไว้สามที่ พอฝั่ง server เปลี่ยนก็หลุดทั้งสามที่)
+const FEEDBACK_REWARD_COINS = 15;
+
 async function fetchUserRecord() {
   const userId = await getUserId();
   const data = await fetchJSON(`/api/user?user_id=${encodeURIComponent(userId)}`);
@@ -950,7 +961,7 @@ function renderFeedbackTeaserHTML(isDone) {
       <div class="feedback-flat-banner is-done">
         <div class="feedback-flat-left">
           <span class="feedback-flat-text" style="color:#15803d; font-weight:700;">ส่งแบบประเมินแล้ว</span>
-          <span class="badge-reward-coin">+30 เหรียญ</span>
+          <span class="badge-reward-coin">+${FEEDBACK_REWARD_COINS} เหรียญ</span>
         </div>
       </div>
     `;
@@ -960,7 +971,7 @@ function renderFeedbackTeaserHTML(isDone) {
     <div class="feedback-flat-banner" id="btn-open-feedback">
       <div class="feedback-flat-left">
         <span class="feedback-flat-text">แบบประเมินพัฒนาระบบ</span>
-        <span class="badge-reward-coin">+30 เหรียญ</span>
+        <span class="badge-reward-coin">+${FEEDBACK_REWARD_COINS} เหรียญ</span>
       </div>
       <span class="feedback-flat-action-text">ทำแบบประเมิน &rsaquo;</span>
     </div>
@@ -1204,7 +1215,7 @@ async function renderFeedbackView() {
           </svg>
           <span>ย้อนกลับ</span>
         </button>
-        <span class="badge-reward-coin">+30 เหรียญ</span>
+        <span class="badge-reward-coin">+${FEEDBACK_REWARD_COINS} เหรียญ</span>
       </div>
       ${survey
         ? buildFeedbackSurveyHTML(survey)
@@ -2884,19 +2895,69 @@ function offerParkingActions(location) {
   if (!here) {
     // ออกจากลานแล้วต้องรีเซ็ตทั้งคู่เสมอ — เดิมผูกเงื่อนไขไว้กับ offeredZoneId ซึ่งถูกล้างไปตอน
     // ผู้ใช้กดปิดการ์ด ทำให้ dismissedZoneId ค้าง แล้วเดินกลับเข้าลานเดิมอีกครั้งก็ไม่เสนอให้อีกเลย
+    const leftZoneKey = appState.parking.insideZoneId;
     if (appState.parking.offeredZoneId) SheetManager.hide();
     appState.parking.offeredZoneId = null;
     appState.parking.dismissedZoneId = null;
+    appState.parking.insideZoneId = null;
+    if (leftZoneKey) offerExitReport(leftZoneKey, location);
     return;
   }
 
   const zoneKey = (here.zone && here.zone.zone_id) || here.feature.name;
+  // ตั้งก่อนเช็ค dismissed/offered เพราะนี่คือ "อยู่ในลานจริงไหม" ไม่ใช่ "เคยเสนอการ์ดไปหรือยัง"
+  // ถ้าไปตั้งทีหลัง คนที่กดปิดการ์ดขาเข้าจะไม่ถูกนับว่าเคยอยู่ในลาน แล้วขาออกก็จะไม่ได้ถูกถาม
+  appState.parking.insideZoneId = zoneKey;
   // ผู้ใช้กดปิดการ์ดไปแล้วสำหรับลานนี้ อย่าเด้งขึ้นมาใหม่ทุกครั้งที่ GPS ขยับ น่ารำคาญมาก
   if (appState.parking.dismissedZoneId === zoneKey) return;
   if (appState.parking.offeredZoneId === zoneKey) return;
 
   appState.parking.offeredZoneId = zoneKey;
   showParkingActionSheet(here, location);
+}
+
+// ต้องไม่เกิน GEOFENCE_RADIUS_METERS ของ backend (worker/src/parking.js) — ถ้าเสนอตอนออกมาไกลกว่านี้
+// ผู้ใช้จะกดแล้วโดนตีกลับ 422 ทุกครั้ง เสียเที่ยวทั้งคนกดและความน่าเชื่อถือของปุ่ม
+const EXIT_REPORT_MAX_DISTANCE_METERS = 150;
+// เท่ากับ RATE_LIMIT_MINUTES ของ backend — เพิ่งรายงานไปก็ไม่ต้องถามซ้ำ เพราะยังไงก็โดน 429
+const REPORT_COOLDOWN_MINUTES = 30;
+
+// ขาออกคือจังหวะที่ได้ข้อมูลดีที่สุดแต่เดิมปล่อยผ่านไปเฉยๆ — คนเพิ่งเห็นทั้งลานมากับตา และ
+// ไม่ได้กำลังวนหาที่จอดอยู่แล้ว ต่างจากขาเข้าที่ยังรีบ จึงเพิ่มจุดถามตรงนี้เพื่อให้มีรายงานต่อวัน
+// มากขึ้นโดยไม่ต้องรอผู้ใช้ใหม่เข้าระบบเพิ่ม
+function offerExitReport(zoneKey, location) {
+  const reportedAt = appState.parking.lastReportAt[zoneKey];
+  if (reportedAt && Date.now() - reportedAt < REPORT_COOLDOWN_MINUTES * 60000) return;
+
+  // หาจาก parkingShapes ใหม่ทุกครั้ง ไม่เก็บ object ไว้ตั้งแต่ตอนเข้าลาน เพราะ array นี้ถูกล้างและ
+  // สร้างใหม่ทุกครั้งที่ renderLayers() ทำงาน object ที่ถืออยู่จะกลายเป็นของที่หลุดจากแผนที่ไปแล้ว
+  const entry = parkingShapes.find((e) => ((e.zone && e.zone.zone_id) || e.feature.name) === zoneKey);
+  if (!entry || !entry.zone || !entry.zone.zone_id) return;
+
+  // วัดจากจุดกึ่งกลางโซนด้วยค่าเดียวกับที่ backend ใช้ตรวจ geofence จะได้ทายผลได้ตรงกัน
+  const center = new google.maps.LatLng(entry.zone.lat, entry.zone.lng);
+  const away = google.maps.geometry.spherical.computeDistanceBetween(
+    new google.maps.LatLng(location.lat, location.lng),
+    center
+  );
+  if (away > EXIT_REPORT_MAX_DISTANCE_METERS) return;
+
+  SheetManager.setOnClose(() => {
+    SheetManager.hide();
+    SheetManager.setOnClose(clearTarget);
+  });
+  SheetManager.showParkingExitSheet({
+    title: entry.feature.name.replace(/^ที่จอดรถ\s*/, ''),
+    onReport: async (status) => {
+      const ok = await submitParkingReport(entry, location, status);
+      // ส่งแล้วก็หมดธุระกับการ์ดใบนี้ ปิดไปเลย ไม่ต้องให้ผู้ใช้กดปิดเองอีกที (ถ้าส่งไม่ผ่าน
+      // เปิดค้างไว้ให้กดใหม่ได้ เพราะข้อความ error บอกไปแล้วว่าเกิดอะไรขึ้น)
+      if (ok) {
+        SheetManager.hide();
+        SheetManager.setOnClose(clearTarget);
+      }
+    },
+  });
 }
 
 // ถึงลานจอดด้วยการนำทาง — ห้ามใช้ parkingZoneAt ตัดสินตรงนี้ เพราะการนำทางถือว่า "ถึง" เมื่อเข้าใกล้
@@ -2969,11 +3030,13 @@ function formatSavedAt(iso) {
 
 // ยิงเข้า endpoint เดิมที่มีอยู่แล้ว — backend ตรวจ geofence กับ rate limit ให้เอง เราไม่ต้อง
 // เช็คซ้ำฝั่ง client (และไม่ควรเชื่อ client อยู่แล้ว)
+// คืน true เมื่อบันทึกสำเร็จ ให้ผู้เรียกตัดสินใจได้ว่าจะปิดการ์ดต่อไหม (การ์ดขาออกปิด เพราะหมดธุระ
+// แล้ว ส่วนการ์ดขาเข้าเปิดค้างไว้ เพราะยังมีปุ่มจดจำตำแหน่งรถให้ใช้ต่อ)
 async function submitParkingReport(here, location, status) {
   const zoneId = here.zone && here.zone.zone_id;
   if (!zoneId) {
     SheetManager.showNotice('ลานจอดนี้ยังไม่มีข้อมูลในระบบ รายงานไม่ได้ครับ');
-    return;
+    return false;
   }
   try {
     const userId = await getUserId();
@@ -2982,13 +3045,17 @@ async function submitParkingReport(here, location, status) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: userId, zone_id: zoneId, status, user_lat: location.lat, user_lng: location.lng }),
     });
+    // จำไว้ว่าเพิ่งรายงานลานนี้ไป จะได้ไม่ไปเสนอการ์ดขาออกของลานนี้ให้กดแล้วโดน rate limit ตีกลับ
+    appState.parking.lastReportAt[zoneId] = Date.now();
     SheetManager.showNotice(res.awarded > 0
       ? `ขอบคุณครับ ได้รับ ${res.awarded} เหรียญ (รวม ${res.coins} เหรียญ)`
       : 'ขอบคุณครับ รายงานสภาพที่จอดเรียบร้อย');
     await loadParkingZones();
     renderLayers();
+    return true;
   } catch (err) {
     SheetManager.showNotice(err.data && err.data.error ? err.data.error : 'ส่งรายงานไม่สำเร็จ ลองใหม่อีกครั้งครับ');
+    return false;
   }
 }
 
