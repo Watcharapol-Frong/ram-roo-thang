@@ -214,7 +214,7 @@ Every `/api/*` endpoint has CORS enabled, because the LIFF is always on a differ
 | GET | `/api/shops` | Shops and stalls |
 | GET | `/api/parking/zones` · `/api/parking/zone?zone_id=` | Parking zones + latest status |
 | GET | `/api/parking/status?zone_id=` | Aggregated status for one zone |
-| POST | `/api/parking/report` | Submit a report (geofence + rate limit) → grants +10 coins |
+| POST | `/api/parking/report` | Submit a report (geofence + rate limit) → grants coins to the reporter, and the accuracy bonus to whoever reported before them if the two agree |
 | GET | `/api/user?user_id=` | Profile, coin balance, claimed rewards, last 20 ledger entries |
 | GET | `/api/user/ledger?user_id=&limit=` | Full coin transaction history |
 | POST | `/api/user/feedback` · `/api/user/save-car` | Claim coins (idempotent) |

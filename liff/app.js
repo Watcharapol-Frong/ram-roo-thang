@@ -893,6 +893,11 @@ function centerOnFeatures(features) {
 // ห้ามคำนวณยอดเองในนี้เด็ดขาด เดิมเป็น `120 + (localStorage มี flag ไหม ? 30 : 0)` ซึ่งแก้ได้
 // จาก DevTools และหายเกลี้ยงเมื่อผู้ใช้ล้างข้อมูลเบราว์เซอร์
 
+// ป้าย "+N เหรียญ" บนหน้าโปรไฟล์/แบบประเมิน เป็นการบอกล่วงหน้าว่าจะได้เท่าไร ตัวจ่ายจริงคือ
+// COIN_REWARDS.FEEDBACK ใน worker/src/user.js — สองค่านี้ต้องตรงกันเสมอ ไม่งั้นผู้ใช้เห็น
+// ตัวเลขหนึ่งแต่ได้รับอีกตัวเลข (เดิม hardcode 30 ไว้สามที่ พอฝั่ง server เปลี่ยนก็หลุดทั้งสามที่)
+const FEEDBACK_REWARD_COINS = 15;
+
 async function fetchUserRecord() {
   const userId = await getUserId();
   const data = await fetchJSON(`/api/user?user_id=${encodeURIComponent(userId)}`);
@@ -954,7 +959,7 @@ function renderFeedbackTeaserHTML(isDone) {
       <div class="feedback-flat-banner is-done">
         <div class="feedback-flat-left">
           <span class="feedback-flat-text" style="color:#15803d; font-weight:700;">ส่งแบบประเมินแล้ว</span>
-          <span class="badge-reward-coin">+30 เหรียญ</span>
+          <span class="badge-reward-coin">+${FEEDBACK_REWARD_COINS} เหรียญ</span>
         </div>
       </div>
     `;
@@ -964,7 +969,7 @@ function renderFeedbackTeaserHTML(isDone) {
     <div class="feedback-flat-banner" id="btn-open-feedback">
       <div class="feedback-flat-left">
         <span class="feedback-flat-text">แบบประเมินพัฒนาระบบ</span>
-        <span class="badge-reward-coin">+30 เหรียญ</span>
+        <span class="badge-reward-coin">+${FEEDBACK_REWARD_COINS} เหรียญ</span>
       </div>
       <span class="feedback-flat-action-text">ทำแบบประเมิน &rsaquo;</span>
     </div>
@@ -1208,7 +1213,7 @@ async function renderFeedbackView() {
           </svg>
           <span>ย้อนกลับ</span>
         </button>
-        <span class="badge-reward-coin">+30 เหรียญ</span>
+        <span class="badge-reward-coin">+${FEEDBACK_REWARD_COINS} เหรียญ</span>
       </div>
       ${survey
         ? buildFeedbackSurveyHTML(survey)
