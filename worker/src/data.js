@@ -86,12 +86,25 @@ export async function deleteOldParkingReports(env, cutoffIso) {
 
 // --- RATE_LIMIT (MVP-SPEC-for-Dev.md §3.3) ---
 
-export async function getLastReportedAt(env, userId) {
-  return env.RATE_LIMIT.get(`ratelimit:${userId}`);
+// คีย์แยกตามลาน — เดิมเป็น `ratelimit:{userId}` ก้อนเดียว ซึ่งแปลว่ารายงานลานหนึ่งแล้วจะรายงาน
+// "ลานอื่น" ไม่ได้เลยอีก 30 นาที ทั้งที่เจตนาของ rate limit คือกันการถล่มลานเดิมซ้ำๆ ไม่ใช่ห้าม
+// คนที่ขับผ่านหลายลานในทริปเดียวรายงานตามจริง (ซึ่งเป็นพฤติกรรมที่เราอยากได้ที่สุด)
+export async function getLastReportedAt(env, userId, zoneId) {
+  return env.RATE_LIMIT.get(`ratelimit:${userId}:${zoneId}`);
 }
 
-export async function setLastReportedAt(env, userId, isoTimestamp) {
-  return env.RATE_LIMIT.put(`ratelimit:${userId}`, isoTimestamp, { expirationTtl: 30 * 60 });
+export async function setLastReportedAt(env, userId, zoneId, isoTimestamp, ttlSeconds) {
+  return env.RATE_LIMIT.put(`ratelimit:${userId}:${zoneId}`, isoTimestamp, { expirationTtl: ttlSeconds });
+}
+
+// เพดานรวมทุกลาน — ต่ำกว่าเยอะ ไม่ได้กันคนขับวนสำรวจ (กว่าจะขับถึงลานถัดไปก็เกินอยู่แล้ว)
+// แต่กันสคริปต์ที่ยิงรายงานทุกลานรวดเดียวด้วยพิกัดปลอม ซึ่งเป็นช่องที่เปิดขึ้นมาจากการแยกคีย์ตามลาน
+export async function getLastReportedAtAnyZone(env, userId) {
+  return env.RATE_LIMIT.get(`ratelimit-any:${userId}`);
+}
+
+export async function setLastReportedAtAnyZone(env, userId, isoTimestamp, ttlSeconds) {
+  return env.RATE_LIMIT.put(`ratelimit-any:${userId}`, isoTimestamp, { expirationTtl: ttlSeconds });
 }
 
 // วิชาที่ผู้ใช้บันทึกไว้ย้ายไป D1 แล้ว (ตาราง user_courses) — ดู worker/src/schedule.js

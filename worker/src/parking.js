@@ -11,16 +11,31 @@ import {
   getLatestOtherReport,
   getLastReportedAt,
   setLastReportedAt,
+  getLastReportedAtAnyZone,
+  setLastReportedAtAnyZone,
 } from './data.js';
 import { awardParkingReport, awardParkingReportConfirmed } from './user.js';
 import { jsonResponse } from './shared.js';
 
-// สองค่านี้เคยเท่ากันโดยบังเอิญและเคยผูกกันด้วย (TTL ของ KV คำนวณจาก AGGREGATION_WINDOW) แต่เป็น
-// คนละเรื่องกัน: RATE_LIMIT คือ "คนหนึ่งรายงานถี่แค่ไหน" (กันสแปม) ส่วน AGGREGATION_WINDOW คือ
-// "รายงานเก่าได้แค่ไหนถึงยังนับ" (ความสดของข้อมูล) ปรับตัวหนึ่งไม่ควรลากอีกตัวไปด้วยโดยไม่ตั้งใจ
+// สามค่านี้เคยเท่ากันหรือผูกกันโดยไม่ตั้งใจ แต่เป็นคนละเรื่องกันทั้งหมด:
+//
+// RATE_LIMIT_MINUTES        คนหนึ่งรายงาน "ลานเดิม" ซ้ำได้ถี่แค่ไหน (กันถล่มลานเดียว)
+//                           แยกตามลาน ไม่ใช่ก้อนเดียวทั้งคน — คนที่ขับผ่าน 5 ลานในทริปเดียว
+//                           ต้องรายงานได้ครบทั้ง 5 ลาน
+// GLOBAL_COOLDOWN_SECONDS   เพดานรวมทุกลาน กันสคริปต์ยิงรวดเดียว ไม่ได้กันคนจริง
+// AGGREGATION_WINDOW        รายงานเก่าได้แค่ไหนถึงยัง "มองเห็น" อยู่ (ตัดขาด)
+// REPORT_HALF_LIFE          รายงานเสียน้ำหนักเร็วแค่ไหน (ความสำคัญ ไม่ใช่การมองเห็น)
+//
+// สองตัวหลังต้องแยกกัน ไม่งั้นการยืดกรอบเวลาให้ข้อมูลอยู่นานขึ้นจะพาให้ข้อมูลเก่ามีน้ำหนักมากตามไปด้วย
+// ที่ต้องการคือ "เห็นได้นาน แต่จางเร็ว" — รายงานอายุ 3 ชั่วโมงยังดีกว่าไม่มีอะไรเลย แต่ต้องแพ้
+// รายงานสดขาดลอยเสมอ
 const RATE_LIMIT_MINUTES = 30;
+const GLOBAL_COOLDOWN_SECONDS = 60;
 const GEOFENCE_RADIUS_METERS = 150;
-const AGGREGATION_WINDOW_MINUTES = 30;
+const AGGREGATION_WINDOW_MINUTES = 240;
+// 15 นาที = ครึ่งหนึ่ง, 30 นาที = หนึ่งในสี่ — เลือกให้ "คนที่เพิ่งเห็นกับตาเดี๋ยวนี้" ชนะ
+// "สองคนที่เห็นเมื่อครึ่งชั่วโมงก่อน" เพราะรถเข้าออกลานตลอดเวลา ของที่เห็นล่าสุดใกล้ความจริงกว่า
+const REPORT_HALF_LIFE_MINUTES = 15;
 
 const windowStartIso = (nowMs) => new Date(nowMs - AGGREGATION_WINDOW_MINUTES * 60000).toISOString();
 
@@ -37,13 +52,16 @@ export async function handleParkingReport(request, env) {
     return jsonResponse({ error: 'Missing required fields' }, 400);
   }
 
-  // 1. Rate limit (MVP-SPEC §6.1)
-  const lastReportedAt = await getLastReportedAt(env, user_id);
-  if (lastReportedAt) {
-    const minutesSince = (Date.now() - new Date(lastReportedAt).getTime()) / 60000;
-    if (minutesSince < RATE_LIMIT_MINUTES) {
-      return jsonResponse({ error: 'รายงานถี่เกินไป กรุณารออีกสักครู่' }, 429);
-    }
+  // 1. Rate limit (MVP-SPEC §6.1) — สองชั้น: ลานเดิมซ้ำ กับเพดานรวมทุกลาน
+  const [lastForZone, lastAnyZone] = await Promise.all([
+    getLastReportedAt(env, user_id, zone_id),
+    getLastReportedAtAnyZone(env, user_id),
+  ]);
+  if (lastForZone && (Date.now() - new Date(lastForZone).getTime()) / 60000 < RATE_LIMIT_MINUTES) {
+    return jsonResponse({ error: 'เพิ่งรายงานลานนี้ไปเมื่อกี้ รออีกสักครู่ครับ' }, 429);
+  }
+  if (lastAnyZone && (Date.now() - new Date(lastAnyZone).getTime()) / 1000 < GLOBAL_COOLDOWN_SECONDS) {
+    return jsonResponse({ error: 'รายงานถี่เกินไป กรุณารออีกสักครู่' }, 429);
   }
 
   const zone = await getParkingZoneByKey(env, zone_id);
@@ -69,7 +87,10 @@ export async function handleParkingReport(request, env) {
     reporter_user_id: user_id,
     reported_at: reportedAt,
   });
-  await setLastReportedAt(env, user_id, reportedAt);
+  await Promise.all([
+    setLastReportedAt(env, user_id, zone_id, reportedAt, RATE_LIMIT_MINUTES * 60),
+    setLastReportedAtAnyZone(env, user_id, reportedAt, GLOBAL_COOLDOWN_SECONDS),
+  ]);
 
   // 4. ให้เหรียญ — อยู่หลัง geofence + rate limit จึงกดรัวๆ เพื่อฟาร์มเหรียญไม่ได้
   //    ถ้าตรงนี้พังไม่ควรทำให้รายงานที่บันทึกไปแล้วกลายเป็นล้มเหลว แค่ไม่ได้เหรียญรอบนี้
@@ -186,9 +207,13 @@ export async function resolveStatusForZone(env, zone) {
 
 // รวมผลรายงานหลายใบเป็นสถานะเดียว — หัวใจของการแก้ปัญหา "คนใหม่มารายงานก็ทับอันเก่า"
 //
-// ถ่วงน้ำหนักตามอายุแบบเชิงเส้น: รายงานเมื่อกี้นี้มีน้ำหนักเกือบ 1 ส่วนรายงานที่ใกล้หมดกรอบเวลา
-// เหลือเกือบ 0 ทำให้ข้อมูลค่อยๆ จางแทนที่จะหายวับตอนครบ 30 นาทีพอดี และทำให้รายงานใหม่ชนะ
-// รายงานเก่าได้เองโดยไม่ต้องเขียนทับใคร — สภาพลานที่เปลี่ยนจริงจึงยังสะท้อนได้ทันที
+// ถ่วงน้ำหนักตามอายุแบบครึ่งชีวิต: ทุกๆ REPORT_HALF_LIFE_MINUTES น้ำหนักลดลงครึ่งหนึ่ง
+// (30 นาที = 0.5, 1 ชม. = 0.25, 3 ชม. = 0.016) ทำให้ข้อมูลค่อยๆ จางแทนที่จะหายวับ และทำให้
+// รายงานใหม่ชนะรายงานเก่าได้เองโดยไม่ต้องเขียนทับใคร — สภาพลานที่เปลี่ยนจริงจึงสะท้อนได้ทันที
+//
+// ใช้ครึ่งชีวิตแทนเส้นตรงเพราะเส้นตรงผูกความเร็วการจางไว้กับความยาวของกรอบเวลา พอยืดกรอบเวลา
+// เป็น 4 ชั่วโมง รายงานอายุ 1 ชั่วโมงจะยังมีน้ำหนักถึง 0.75 ซึ่งมากเกินไปสำหรับข้อมูลที่จอดรถ
+// แบบครึ่งชีวิตแยกสองเรื่องออกจากกัน: จะเก็บให้เห็นนานแค่ไหนก็ได้ โดยไม่ทำให้ของเก่ามีสิทธิ์มากขึ้น
 //
 // ใช้เสียงข้างมากแบบถ่วงน้ำหนัก ไม่ใช่ค่าเฉลี่ย เพราะสถานะเป็นหมวดหมู่ (GREEN/YELLOW/RED)
 // ค่าเฉลี่ยของ "เบาบาง" กับ "หนาแน่น" ไม่ใช่ "ปานกลาง" ในความหมายของข้อมูลชุดนี้ — มันแปลว่า
@@ -215,10 +240,9 @@ export function aggregateStatus(zone, reports, nowMs) {
   let newestAt = null;
 
   for (const r of reports) {
-    const ageMinutes = (nowMs - Date.parse(r.reported_at)) / 60000;
-    // กันค่าติดลบจากนาฬิกาเครื่องที่เดินไม่ตรงกัน และกันน้ำหนัก 0 สนิทของรายงานที่ขอบพอดี
-    // (รายงานที่ยัง query ติดมาแปลว่ายังอยู่ในกรอบ ควรมีสิทธิ์ออกเสียงอยู่บ้าง)
-    const weight = Math.max(0.01, Math.min(1, 1 - ageMinutes / AGGREGATION_WINDOW_MINUTES));
+    // กันค่าติดลบจากนาฬิกาเครื่องที่เดินไม่ตรงกัน (รายงาน "จากอนาคต" ต้องไม่ได้น้ำหนักเกิน 1)
+    const ageMinutes = Math.max(0, (nowMs - Date.parse(r.reported_at)) / 60000);
+    const weight = 0.5 ** (ageMinutes / REPORT_HALF_LIFE_MINUTES);
     weights.set(r.status, (weights.get(r.status) || 0) + weight);
     totalWeight += weight;
     if (!newestAt || r.reported_at > newestAt) newestAt = r.reported_at;

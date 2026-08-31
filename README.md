@@ -77,7 +77,7 @@ every write from Thailand noticeably slower.
 
 | Action | Coins | Abuse protection |
 |---|---|---|
-| Report parking conditions | +2 | 150 m geofence + 30 min rate limit |
+| Report parking conditions | +2 | 150 m geofence + 30 min per lot + 60 s across all lots |
 | …and someone else later reports the same thing | +2 | Paid to the earlier reporter, once per report |
 | Complete the feedback survey | +15 | Once per account, ever |
 | Save your car location | +3 | Once per day (Bangkok date, not UTC) |

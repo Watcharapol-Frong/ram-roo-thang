@@ -69,9 +69,11 @@ const appState = {
   car: null,
   // insideZoneId = ลานที่ยืนอยู่จริงตอนนี้ แยกจาก offeredZoneId (ลานที่เคยเสนอการ์ดไปแล้ว)
   // เพราะ offeredZoneId ถูกล้างตอนผู้ใช้กดปิดการ์ด เลยใช้ตรวจจังหวะ "ออกจากลาน" ไม่ได้
-  // lastReportAt = เวลาที่รายงานล่าสุดของเครื่องนี้ ใช้กันไม่ให้ไปเสนอรายงานตอนที่รู้อยู่แล้วว่า
+  // lastReportAt = เวลาที่รายงานล่าสุด "แยกตามลาน" ใช้กันไม่ให้ไปเสนอรายงานตอนที่รู้อยู่แล้วว่า
   // backend จะปฏิเสธเพราะ rate limit (ฝั่ง server ยังเป็นตัวตัดสินจริง อันนี้แค่กันเสนอให้เก้อ)
-  parking: { offeredZoneId: null, dismissedZoneId: null, insideZoneId: null, lastReportAt: null },
+  // ต้องแยกตามลานให้ตรงกับฝั่ง server — ถ้าเก็บก้อนเดียว คนที่เพิ่งรายงานลาน A จะไม่ถูกถามตอน
+  // ออกจากลาน B ทั้งที่รายงานลาน B ได้อยู่ ซึ่งเป็นเคสของคนขับผ่านหลายลานในทริปเดียว
+  parking: { offeredZoneId: null, dismissedZoneId: null, insideZoneId: null, lastReportAt: {} },
   navigation: { path: [] }, // โหลดจาก /api/parking/zones — ใช้ทั้งทาสีเลเยอร์และหาลานจอดใกล้จุดหมาย
   map: {
     instance: null,
@@ -2924,8 +2926,8 @@ const REPORT_COOLDOWN_MINUTES = 30;
 // ไม่ได้กำลังวนหาที่จอดอยู่แล้ว ต่างจากขาเข้าที่ยังรีบ จึงเพิ่มจุดถามตรงนี้เพื่อให้มีรายงานต่อวัน
 // มากขึ้นโดยไม่ต้องรอผู้ใช้ใหม่เข้าระบบเพิ่ม
 function offerExitReport(zoneKey, location) {
-  const { lastReportAt } = appState.parking;
-  if (lastReportAt && Date.now() - lastReportAt < REPORT_COOLDOWN_MINUTES * 60000) return;
+  const reportedAt = appState.parking.lastReportAt[zoneKey];
+  if (reportedAt && Date.now() - reportedAt < REPORT_COOLDOWN_MINUTES * 60000) return;
 
   // หาจาก parkingShapes ใหม่ทุกครั้ง ไม่เก็บ object ไว้ตั้งแต่ตอนเข้าลาน เพราะ array นี้ถูกล้างและ
   // สร้างใหม่ทุกครั้งที่ renderLayers() ทำงาน object ที่ถืออยู่จะกลายเป็นของที่หลุดจากแผนที่ไปแล้ว
@@ -3043,8 +3045,8 @@ async function submitParkingReport(here, location, status) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: userId, zone_id: zoneId, status, user_lat: location.lat, user_lng: location.lng }),
     });
-    // จำไว้ว่าเพิ่งรายงานไป จะได้ไม่ไปเสนอการ์ดขาออกให้กดแล้วโดน rate limit ตีกลับ
-    appState.parking.lastReportAt = Date.now();
+    // จำไว้ว่าเพิ่งรายงานลานนี้ไป จะได้ไม่ไปเสนอการ์ดขาออกของลานนี้ให้กดแล้วโดน rate limit ตีกลับ
+    appState.parking.lastReportAt[zoneId] = Date.now();
     SheetManager.showNotice(res.awarded > 0
       ? `ขอบคุณครับ ได้รับ ${res.awarded} เหรียญ (รวม ${res.coins} เหรียญ)`
       : 'ขอบคุณครับ รายงานสภาพที่จอดเรียบร้อย');
