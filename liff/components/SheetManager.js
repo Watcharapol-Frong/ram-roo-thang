@@ -113,7 +113,17 @@
     { status: 'RED', label: 'หนาแน่น' },
   ];
 
-  function showParkingActionSheet({ title, savedNote, onSaveCar, onReport }) {
+  const reportChoicesHtml = PARKING_REPORT_CHOICES
+    .map((c) => `<button class="report-btn report-${c.status.toLowerCase()}" data-status="${c.status}">${c.label}</button>`)
+    .join('');
+
+  // คนที่กำลังรีบมักกดปุ่มไหนก็ได้ให้จบๆ ไป ซึ่งทำให้ข้อมูลเพี้ยน — ถ้ามีรายงานสดอยู่แล้วจึงเสนอ
+  // "ยังเหมือนเดิม" เป็นทางลัดแตะเดียว การยืนยันของเดิมง่ายกว่าเลือกใหม่ คนรีบก็ยังตอบตรงได้
+  // และการยืนยันนับเป็นรายงานใหม่ ทำให้สถานะที่ถูกต้องอยู่แล้วสดต่อ ไม่ร่วงกลับไปเป็นค่าประเมิน
+  //
+  // เสนอเฉพาะตอนมีรายงานจากคนจริงเท่านั้น (currentReport = null เมื่อสถานะมาจาก baseline)
+  // เพราะการให้ "ยืนยัน" ค่าที่ระบบเดาเอง จะได้ข้อมูลปลอมที่ดูเหมือนมีคนยืนยันแล้วกลับมาแทน
+  function showParkingActionSheet({ title, savedNote, currentReport, onSaveCar, onReport, onConfirm }) {
     const slot = sheetSlot();
     if (!slot) return;
     slot.innerHTML = `
@@ -123,13 +133,39 @@
         <h2>คุณอยู่ที่ ${title}</h2>
         ${savedNote ? `<p class="muted sheet-hint">${savedNote}</p>` : ''}
         <button class="btn btn-primary" id="save-car-btn">${savedNote ? 'อัปเดตตำแหน่งรถ' : 'จดจำตำแหน่งรถ'}</button>
-        <p class="muted report-label">สภาพที่จอดตอนนี้เป็นยังไง</p>
-        <div class="report-choices">
-          ${PARKING_REPORT_CHOICES.map((c) => `<button class="report-btn report-${c.status.toLowerCase()}" data-status="${c.status}">${c.label}</button>`).join('')}
-        </div>
+        ${currentReport ? `
+          <p class="muted report-label">ล่าสุดมีคนบอกว่า <strong>${currentReport.label}</strong> ${currentReport.agoText}</p>
+          <button class="btn btn-ghost report-confirm" id="confirm-status-btn">ยังเหมือนเดิม</button>
+          <p class="muted report-label">หรือถ้าเปลี่ยนไปแล้ว บอกหน่อย</p>
+        ` : '<p class="muted report-label">สภาพที่จอดตอนนี้เป็นยังไง</p>'}
+        <div class="report-choices">${reportChoicesHtml}</div>
       </div>
     `;
     document.getElementById('save-car-btn').addEventListener('click', onSaveCar);
+    const confirmBtn = document.getElementById('confirm-status-btn');
+    if (confirmBtn && onConfirm) confirmBtn.addEventListener('click', onConfirm);
+    slot.querySelectorAll('.report-btn').forEach((btn) => {
+      btn.addEventListener('click', () => onReport(btn.dataset.status));
+    });
+    bindClose();
+    syncSheetHeight();
+  }
+
+  // ถามตอนเพิ่งออกจากลาน — คนที่เพิ่งเดินผ่านลานทั้งลานรู้สภาพจริงดีที่สุด และเป็นจังหวะที่
+  // ไม่ได้รีบหาที่จอดแล้ว ต่างจากตอนขาเข้าที่กำลังมองหาช่องว่างอยู่ จึงตอบได้ตรงกว่า
+  // ไม่มีปุ่มจำตำแหน่งรถเพราะขาออกไม่ใช่จังหวะที่จะบันทึกที่จอด
+  function showParkingExitSheet({ title, onReport }) {
+    const slot = sheetSlot();
+    if (!slot) return;
+    slot.innerHTML = `
+      <div class="nav-info-card">
+        <div class="sheet-handle"></div>
+        <button class="sheet-close" id="sheet-close-btn" aria-label="ปิด">&times;</button>
+        <h2>ออกจากลานจอด ${title} แล้ว</h2>
+        <p class="muted sheet-hint">ตอนนี้ในลานเป็นยังไงบ้าง บอกไว้หน่อยจะได้ช่วยคนที่กำลังจะเข้ามา</p>
+        <div class="report-choices">${reportChoicesHtml}</div>
+      </div>
+    `;
     slot.querySelectorAll('.report-btn').forEach((btn) => {
       btn.addEventListener('click', () => onReport(btn.dataset.status));
     });
@@ -307,6 +343,7 @@
     showLocationPrimer,
     showParkingActionSheet,
     showParkingArrivalSheet,
+    showParkingExitSheet,
     showRouteSheet,
     showGpsDeniedSheet,
     showNavigationSheet,

@@ -1982,6 +1982,13 @@ body.is-searching #action-sheet-slot {
 
 .report-btn:active { filter: brightness(0.92); }
 
+/* ทางลัด "ยังเหมือนเดิม" — เข้มกว่า ghost ปกติเพราะเป็นคำตอบที่คนส่วนใหญ่ควรกด (สถานะมักไม่เปลี่ยน
+   ในไม่กี่นาที) แต่ยังไม่ใช้สีพื้นแบบปุ่มหลัก จะได้ไม่ไปแย่งสายตาปุ่มจดจำตำแหน่งรถที่อยู่เหนือมัน */
+.nav-info-card .report-confirm {
+  margin-bottom: 4px;
+  color: var(--text);
+}
+
 /* ปุ่มไอคอนมุมขวาบนของการ์ด (แชร์ / ปิด) เรียงแถวเดียวกัน */
 .sheet-actions {
   position: absolute;
