@@ -11,7 +11,7 @@ import {
   getLastReportedAt,
   setLastReportedAt,
 } from './data.js';
-import { awardParkingReport } from './user.js';
+import { awardParkingReport, awardParkingReportConfirmed } from './user.js';
 import { jsonResponse } from './shared.js';
 
 const RATE_LIMIT_MINUTES = 30;
@@ -57,7 +57,9 @@ export async function handleParkingReport(request, env) {
     return jsonResponse({ error: 'คุณอยู่ไกลจากลานจอดนี้เกินไป' }, 422);
   }
 
-  // 3. บันทึก
+  // 3. บันทึก — อ่านของเดิมไว้ก่อน เพราะ putParkingReport เขียนทับคีย์เดียวกัน พออ่านทีหลังจะเจอ
+  //    แต่รายงานที่เพิ่งเขียนไป และไม่มีทางรู้แล้วว่าก่อนหน้านี้ใครรายงานอะไรไว้
+  const previous = await getLatestParkingReport(env, zone_id);
   const reportedAt = new Date().toISOString();
   await putParkingReport(
     env,
@@ -79,6 +81,29 @@ export async function handleParkingReport(request, env) {
     reward = await awardParkingReport(env, user_id, reportedAt);
   } catch (e) {
     console.error('awardParkingReport error', e);
+  }
+
+  // 5. โบนัสความแม่นให้คนที่รายงานไว้ก่อนหน้า เมื่อคนนี้มาเห็นตรงกัน
+  //
+  //    เป็นตัววัด "ความแม่น" เท่าที่ storage ตอนนี้ให้ได้ — เก็บรายงานล่าสุดของแต่ละลานไว้ใบเดียว
+  //    จึงเทียบได้แค่กับคนถัดไป ไม่ใช่เสียงส่วนใหญ่จริงๆ แต่ก็พอแยกคนที่ดูจริงออกจากคนที่กดมั่วได้
+  //    เพราะการกดมั่วจะบังเอิญตรงกับคนถัดไปแค่ราว 1 ใน 3
+  //
+  //    ต้องคนละคนกันเท่านั้น ไม่งั้นก็ยืนยันตัวเองรับโบนัสได้ทุกครั้งที่ rate limit หมดอายุพอดี
+  //    และฝั่ง LIFF ไม่ได้โชว์สถานะปัจจุบันก่อนกดรายงาน คนกดจึงไม่รู้ว่าต้องตอบอะไรถึงจะตรง
+  //    โบนัสนี้เลยวัดการเห็นตรงกันจริง ไม่ใช่การเดาใจระบบ
+  //
+  //    พังตรงนี้ไม่ควรทำให้รายงานที่บันทึกไปแล้วกลายเป็นล้มเหลว เหมือนกับเหรียญก้อนแรก
+  try {
+    if (previous
+      && previous.reporter_user_id
+      && previous.reported_at
+      && previous.reporter_user_id !== user_id
+      && previous.reported_status === status) {
+      await awardParkingReportConfirmed(env, previous.reporter_user_id, previous.reported_at);
+    }
+  } catch (e) {
+    console.error('awardParkingReportConfirmed error', e);
   }
 
   return jsonResponse({ status: 'SUCCESS', coins: reward.coins, awarded: reward.awarded });

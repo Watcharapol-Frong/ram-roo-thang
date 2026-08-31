@@ -94,7 +94,14 @@ it, not an `if` statement in application code:
 | `FEEDBACK` | `once` | Claimable once, ever |
 | `SAVE_CAR` | `2026-08-23` | Once per day |
 | `PARKING_REPORT` | Report timestamp | One report = one grant |
+| `PARKING_REPORT_CONFIRMED` | Timestamp of the *confirmed* report | Accuracy bonus, paid to the earlier reporter when the next person independently sees the same thing. Keyed by the confirmed report, so one report earns it at most once |
 | `SHOP_REDEEM` | Redemption id | (reserved — shop not built yet) |
+
+A parking report pays in two parts on purpose: a flat amount on submit, plus the same amount again
+only if corroborated. Paying it all on submit rewarded tapping, not looking — someone in a hurry
+tapping any button earned as much as someone who actually checked. A wrong report is never
+penalised: lots genuinely change within the half-hour window, and docking coins would punish
+exactly the people reporting a change, which is the most valuable signal there is.
 
 ## Shared helpers
 

@@ -14,8 +14,18 @@ import { jsonResponse, bangkokDate } from './shared.js';
 // ไม่เก็บ PII — มีแค่ LINE userId เหมือนส่วนอื่นของระบบ (CONTEXT.md "PII")
 
 // จำนวนเหรียญของแต่ละการกระทำ — แก้ที่นี่ที่เดียว
+//
+// รายงานที่จอดแบ่งเป็นสองก้อน เพราะเดิมจ่ายเต็มทุกครั้งที่กด ซึ่งให้รางวัลกับ "จำนวนครั้งที่กด"
+// ไม่ใช่ "ความตรงกับของจริง" คนที่รีบจึงกดปุ่มไหนก็ได้แล้วได้เท่ากับคนที่ดูจริง
+//   PARKING_REPORT            จ่ายทันทีที่รายงาน
+//   PARKING_REPORT_CONFIRMED  จ่ายย้อนหลังให้เจ้าของรายงาน เมื่อมีคนอื่นมาเห็นตรงกันโดยอิสระ
+// ตั้งให้เท่ากันเพื่อให้รายงานที่มีคนยืนยันได้รวม 12 (มากกว่าเดิม) ส่วนการกดมั่วได้ 6
+//
+// ตั้งใจไม่หักเหรียญเมื่อรายงานไม่ตรงกับคนถัดไป เพราะสภาพลานเปลี่ยนได้จริงในครึ่งชั่วโมง
+// การหักจะกลายเป็นลงโทษคนที่รายงาน "การเปลี่ยนแปลง" ซึ่งเป็นข้อมูลที่มีค่าที่สุด
 export const COIN_REWARDS = {
-  PARKING_REPORT: 10,
+  PARKING_REPORT: 6,
+  PARKING_REPORT_CONFIRMED: 6,
   FEEDBACK: 30,
   SAVE_CAR: 5,
 };
@@ -211,5 +221,18 @@ export async function awardParkingReport(env, userId, reportRefId) {
     delta: COIN_REWARDS.PARKING_REPORT,
     reason: 'PARKING_REPORT',
     refId: reportRefId,
+  });
+}
+
+// โบนัสความแม่น — จ่ายให้เจ้าของรายงาน "ก่อนหน้า" เมื่อมีคนถัดไปมาเห็นตรงกัน ไม่ใช่จ่ายให้คนที่
+// เพิ่งกดตอนนี้ ผู้รับจึงเป็นคนละคนกับผู้เรียก API รอบนี้เสมอ (handleParkingReport กันไว้แล้ว)
+//
+// refId ใช้ reported_at ของรายงานที่ถูกยืนยัน ไม่ใช่ของรายงานที่มายืนยัน — 1 รายงานจึงรับโบนัสได้
+// ครั้งเดียวตลอดกาล ต่อให้มีคนมายืนยันซ้ำหรือ handler ถูกเรียกซ้ำ (UNIQUE ใน coin_ledger ปฏิเสธให้)
+export async function awardParkingReportConfirmed(env, userId, confirmedReportRefId) {
+  return applyCoins(env, userId, {
+    delta: COIN_REWARDS.PARKING_REPORT_CONFIRMED,
+    reason: 'PARKING_REPORT_CONFIRMED',
+    refId: confirmedReportRefId,
   });
 }
