@@ -103,6 +103,11 @@ tapping any button earned as much as someone who actually checked. A wrong repor
 penalised: lots genuinely change within the half-hour window, and docking coins would punish
 exactly the people reporting a change, which is the most valuable signal there is.
 
+The amounts are small (2 + 2) because the shop holds one item — a 30-coin sticker with
+`max_per_user = 1`. Total project cost is therefore 35 baht × however many people ever redeem,
+whatever the per-report rate is. The rate does not set the budget; it sets how many reports someone
+files before the reward runs out and the incentive with it. Lower rate, more data per sticker.
+
 ## Shared helpers
 
 `worker/src/shared.js` holds the small pieces that used to be copy-pasted: `jsonResponse`,
