@@ -900,6 +900,20 @@ function centerOnFeatures(features) {
 // ตัวเลขหนึ่งแต่ได้รับอีกตัวเลข (เดิม hardcode 30 ไว้สามที่ พอฝั่ง server เปลี่ยนก็หลุดทั้งสามที่)
 const FEEDBACK_REWARD_COINS = 15;
 
+// ข้อความในแบบประเมิน (liff/data/feedback-survey.js) เขียน {coins} ไว้แทนตัวเลข แล้วแทนค่าตรงนี้
+// ทีเดียวทั้ง object — ไม่ใช่ไล่แทนทีละจุดที่เอาไปแสดง เพราะจำนวนเหรียญโผล่หลายที่ (chip หัวเรื่อง,
+// ปุ่มส่ง, ข้อความปุ่มตอนกรอกไม่ผ่าน) และรอบก่อนแก้แบบไล่ทีละจุดแล้วตกหล่นไปสองที่
+function fillRewardCoins(value) {
+  if (typeof value === 'string') return value.replace(/\{coins\}/g, FEEDBACK_REWARD_COINS);
+  if (Array.isArray(value)) return value.map(fillRewardCoins);
+  if (value && typeof value === 'object') {
+    const filled = {};
+    for (const key of Object.keys(value)) filled[key] = fillRewardCoins(value[key]);
+    return filled;
+  }
+  return value;
+}
+
 async function fetchUserRecord() {
   const userId = await getUserId();
   const data = await fetchJSON(`/api/user?user_id=${encodeURIComponent(userId)}`);
@@ -1204,7 +1218,7 @@ async function renderFeedbackView() {
       ? 'Android'
       : 'Desktop/Other';
 
-  const survey = typeof FEEDBACK_SURVEY !== 'undefined' ? FEEDBACK_SURVEY : null;
+  const survey = typeof FEEDBACK_SURVEY !== 'undefined' ? fillRewardCoins(FEEDBACK_SURVEY) : null;
 
   container.innerHTML = `
     <div class="profile-flat-container">
