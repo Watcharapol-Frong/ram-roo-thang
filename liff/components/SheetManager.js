@@ -62,6 +62,11 @@
       </div>
     `;
     document.getElementById('sheet-action-btn').addEventListener('click', onAction);
+    // ปุ่มแชร์เป็น optional (render เฉพาะตอนมี onShare) จึงต้องเช็คก่อนผูก —
+    // ของเดิมใช้ onShare เป็นแค่เงื่อนไขว่าจะวาดปุ่มไหม แล้วลืมผูก listener ปุ่มเลยขึ้นมาให้กดได้
+    // แต่กดแล้วไม่เกิดอะไรขึ้นเลย (shareTarget ใน app.js เขียนครบแต่ไม่เคยถูกเรียก)
+    const shareBtn = document.getElementById('sheet-share-btn');
+    if (shareBtn) shareBtn.addEventListener('click', onShare);
     bindClose();
     syncSheetHeight();
   }
